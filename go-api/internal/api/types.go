@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type Scope struct {
@@ -28,16 +30,34 @@ func (s Scope) Validate() error {
 		return fmt.Errorf("unsupported scope.mode: %q", s.Mode)
 	}
 
+	corpusSeen := make(map[string]struct{}, len(s.CorpusIDs))
 	for _, id := range s.CorpusIDs {
-		if strings.TrimSpace(id) == "" {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
 			return errors.New("scope.corpus_ids contains empty value")
 		}
+		if _, err := uuid.Parse(trimmed); err != nil {
+			return fmt.Errorf("scope.corpus_ids contains invalid uuid: %q", trimmed)
+		}
+		if _, exists := corpusSeen[trimmed]; exists {
+			return fmt.Errorf("scope.corpus_ids contains duplicate value: %q", trimmed)
+		}
+		corpusSeen[trimmed] = struct{}{}
 	}
 
+	docSeen := make(map[string]struct{}, len(s.DocumentIDs))
 	for _, id := range s.DocumentIDs {
-		if strings.TrimSpace(id) == "" {
+		trimmed := strings.TrimSpace(id)
+		if trimmed == "" {
 			return errors.New("scope.document_ids contains empty value")
 		}
+		if _, err := uuid.Parse(trimmed); err != nil {
+			return fmt.Errorf("scope.document_ids contains invalid uuid: %q", trimmed)
+		}
+		if _, exists := docSeen[trimmed]; exists {
+			return fmt.Errorf("scope.document_ids contains duplicate value: %q", trimmed)
+		}
+		docSeen[trimmed] = struct{}{}
 	}
 	return nil
 }

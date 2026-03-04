@@ -1,39 +1,46 @@
 from __future__ import annotations
 
-import os
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
 
+from redis import Redis
+from redis.exceptions import RedisError
 
-@dataclass(frozen=True)
-class WorkerConfig:
-    redis_url: str
-    poll_interval_seconds: int
-
-
-def build_worker_config() -> WorkerConfig:
-    redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-    poll_interval_seconds = int(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "5"))
-    if poll_interval_seconds <= 0:
-        poll_interval_seconds = 5
-    return WorkerConfig(redis_url=redis_url, poll_interval_seconds=poll_interval_seconds)
+from worker.config import build_worker_config
+from worker.processor import IngestProcessor
 
 
 def run() -> None:
     cfg = build_worker_config()
+    redis_cli = Redis.from_url(cfg.redis_url, decode_responses=True)
+    processor = IngestProcessor(cfg)
+
     print(
-        f"[py-worker] started; redis_url={cfg.redis_url}; poll_interval={cfg.poll_interval_seconds}s",
+        "[py-worker] started "
+        f"queue={cfg.ingest_queue_key} "
+        f"poll_interval={cfg.poll_interval_seconds}s "
+        f"max_retries={cfg.worker_max_retries}",
         flush=True,
     )
 
     while True:
-        now = datetime.now(tz=timezone.utc).isoformat()
-        # Phase 1 占位循环：后续将接入 ingest job 队列消费。
-        print(f"[py-worker] heartbeat at {now}", flush=True)
-        time.sleep(cfg.poll_interval_seconds)
+        try:
+            item = redis_cli.blpop(cfg.ingest_queue_key, timeout=cfg.poll_interval_seconds)
+            if item is None:
+                continue
+
+            _, job_id = item
+            ok, status = processor.process_job(job_id)
+            print(f"[py-worker] job={job_id} processed ok={ok} status={status}", flush=True)
+            if status == "retry":
+                redis_cli.rpush(cfg.ingest_queue_key, job_id)
+
+        except RedisError as exc:
+            print(f"[py-worker] redis error: {exc}", flush=True)
+            time.sleep(cfg.poll_interval_seconds)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[py-worker] unexpected error: {exc}", flush=True)
+            time.sleep(cfg.poll_interval_seconds)
 
 
 if __name__ == "__main__":
     run()
-

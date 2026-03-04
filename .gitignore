@@ -1,17 +1,97 @@
-# Go
+# === Go (go-api/) ===
 go-api/bin/
 go-api/coverage.out
+go-api/*.test
+go-api/*.exe
+go-api/*.exe~
+go-api/*.dll
+go-api/*.so
+go-api/*.dylib
+go-api/vendor/
 
-# Python
+# === Python (py-rag-service/, py-worker/) ===
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
 .pytest_cache/
 .venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
 
-# Environment and local overrides
+# === Node.js / Frontend (frontend/) ===
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.env.local
+frontend/.env.*.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/lerna-debug.log*
+frontend/.pnp/
+frontend/.pnp.js
+
+# === Environment and Secrets ===
 .env
 .env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+*.pem
+*.key
+secrets/
 
-# Docker
+# === IDE and Editors ===
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*~
+
+# === Logs ===
 *.log
+logs/
 
+# === Docker ===
+docker-compose.override.yml
+
+# === Testing ===
+coverage/
+coverage.xml
+.tox/
+.nox/
+.pytest_cache/
+
+# === OS ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# === Build Outputs ===
+*.orig
+*.bak
+
+
+# === AGENTS ===
+agents_runs/
+.trae/

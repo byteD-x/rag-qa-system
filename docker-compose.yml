@@ -5,8 +5,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-rag}
       POSTGRES_USER: ${POSTGRES_USER:-rag}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -18,8 +16,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -28,9 +24,6 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.13.6
-    ports:
-      - "6333:6333"
-      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -41,8 +34,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - minio_data:/data
 
@@ -65,6 +58,22 @@ services:
       context: ./py-rag-service
     environment:
       PYTHONUNBUFFERED: "1"
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_chunks}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-256}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-text-embedding-3-small}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gpt-4o-mini}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_RETRY_DELAY_MILLISECONDS: ${LLM_RETRY_DELAY_MILLISECONDS:-600}
+      RAG_RETRIEVAL_TOP_N: ${RAG_RETRIEVAL_TOP_N:-24}
+      RAG_RERANK_TOP_K: ${RAG_RERANK_TOP_K:-8}
+      RAG_SOURCE_SENTENCE_LIMIT: ${RAG_SOURCE_SENTENCE_LIMIT:-6}
+      RAG_EVIDENCE_MIN_SCORE: ${RAG_EVIDENCE_MIN_SCORE:-0.05}
+      RAG_COMMON_KNOWLEDGE_MAX_RATIO: ${RAG_COMMON_KNOWLEDGE_MAX_RATIO:-0.15}
     ports:
       - "8000:8000"
     depends_on:
@@ -78,12 +87,35 @@ services:
       context: ./py-worker
     environment:
       PYTHONUNBUFFERED: "1"
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://rag:rag@postgres:5432/rag?sslmode=disable}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      INGEST_QUEUE_KEY: ${INGEST_QUEUE_KEY:-ingest_jobs}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+      WORKER_MAX_RETRIES: ${WORKER_MAX_RETRIES:-3}
+      S3_ENDPOINT: ${S3_ENDPOINT:-minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-rag-raw}
+      S3_USE_SSL: ${S3_USE_SSL:-false}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_chunks}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-256}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-text-embedding-3-small}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      LLM_RETRY_DELAY_MILLISECONDS: ${LLM_RETRY_DELAY_MILLISECONDS:-600}
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_started
+      qdrant:
+        condition: service_started
 
   go-api:
     build:
@@ -100,11 +132,26 @@ services:
       MEMBER_USER_ID: ${MEMBER_USER_ID:-22222222-2222-2222-2222-222222222222}
       MEMBER_EMAIL: ${MEMBER_EMAIL:-member@local}
       MEMBER_PASSWORD: ${MEMBER_PASSWORD:-ChangeMe123!}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      INGEST_QUEUE_KEY: ${INGEST_QUEUE_KEY:-ingest_jobs}
+      S3_ENDPOINT: ${S3_ENDPOINT:-minio:9000}
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-localhost:19000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-rag-raw}
+      S3_USE_SSL: ${S3_USE_SSL:-false}
+      S3_PRESIGN_EXPIRY_MINUTES: ${S3_PRESIGN_EXPIRY_MINUTES:-30}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-rag_chunks}
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
       py-rag-service:
         condition: service_started
 

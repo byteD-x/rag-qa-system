@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,6 +56,28 @@ type ChatSession struct {
 	Title     string    `json:"title"`
 	CreatedBy string    `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type DocumentListItem struct {
+	ID        string    `json:"id"`
+	CorpusID  string    `json:"corpus_id"`
+	FileName  string    `json:"file_name"`
+	FileType  string    `json:"file_type"`
+	SizeBytes int64     `json:"size_bytes"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type DocumentDetail struct {
+	ID         string    `json:"id"`
+	CorpusID   string    `json:"corpus_id"`
+	FileName   string    `json:"file_name"`
+	FileType   string    `json:"file_type"`
+	SizeBytes  int64     `json:"size_bytes"`
+	Status     string    `json:"status"`
+	CreatedBy  string    `json:"created_by"`
+	CreatedAt  time.Time `json:"created_at"`
+	StorageKey string    `json:"-"`
 }
 
 func NewStore(dsn string) (*Store, error) {
@@ -124,6 +148,40 @@ func (s *Store) ListCorpora(ctx context.Context) ([]Corpus, error) {
 	return corpora, rows.Err()
 }
 
+func (s *Store) DeleteCorpus(ctx context.Context, corpusID string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM corpora WHERE id = $1`, corpusID)
+	if err != nil {
+		return false, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected > 0, nil
+}
+
+func (s *Store) DeleteCorpora(ctx context.Context, corpusIDs []string) (int, error) {
+	if len(corpusIDs) == 0 {
+		return 0, nil
+	}
+
+	inClause, args := buildInClause(1, corpusIDs)
+	query := fmt.Sprintf(`DELETE FROM corpora WHERE id IN (%s)`, inClause)
+
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(affected), nil
+}
+
 func (s *Store) CorpusExists(ctx context.Context, corpusID string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRowContext(
@@ -132,6 +190,65 @@ func (s *Store) CorpusExists(ctx context.Context, corpusID string) (bool, error)
 		corpusID,
 	).Scan(&exists)
 	return exists, err
+}
+
+func (s *Store) CountCorporaByIDs(ctx context.Context, corpusIDs []string) (int, error) {
+	if len(corpusIDs) == 0 {
+		return 0, nil
+	}
+
+	inClause, args := buildInClause(1, corpusIDs)
+	query := fmt.Sprintf(`SELECT COUNT(*) FROM corpora WHERE id IN (%s)`, inClause)
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Store) CountReadyDocumentsInCorpora(ctx context.Context, corpusIDs []string) (int, error) {
+	if len(corpusIDs) == 0 {
+		return 0, nil
+	}
+
+	inClause, args := buildInClause(1, corpusIDs)
+	query := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM documents
+		WHERE status = 'ready'
+		  AND corpus_id IN (%s)
+	`, inClause)
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (s *Store) CountReadyDocumentsByIDsAndCorpora(ctx context.Context, corpusIDs, documentIDs []string) (int, error) {
+	if len(corpusIDs) == 0 || len(documentIDs) == 0 {
+		return 0, nil
+	}
+
+	corpusClause, corpusArgs := buildInClause(1, corpusIDs)
+	docClause, docArgs := buildInClause(1+len(corpusArgs), documentIDs)
+	args := append(corpusArgs, docArgs...)
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM documents
+		WHERE status = 'ready'
+		  AND corpus_id IN (%s)
+		  AND id IN (%s)
+	`, corpusClause, docClause)
+
+	var count int
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (s *Store) CreateDocumentAndJob(ctx context.Context, input CreateDocumentInput) (string, IngestJob, error) {
@@ -235,6 +352,230 @@ func (s *Store) CreateChatSession(ctx context.Context, title, createdBy string) 
 	}, nil
 }
 
+func (s *Store) ListChatSessions(ctx context.Context, createdBy string) ([]ChatSession, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id, title, created_by, created_at
+		 FROM chat_sessions
+		 WHERE created_by = $1
+		 ORDER BY created_at DESC`,
+		createdBy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sessions := make([]ChatSession, 0)
+	for rows.Next() {
+		var item ChatSession
+		if err := rows.Scan(&item.ID, &item.Title, &item.CreatedBy, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, item)
+	}
+
+	return sessions, rows.Err()
+}
+
+func (s *Store) ListDocumentsByCorpus(ctx context.Context, corpusID string) ([]DocumentListItem, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT id, corpus_id, file_name, file_type, size_bytes, status, created_at
+		 FROM documents
+		 WHERE corpus_id = $1
+		 ORDER BY created_at DESC`,
+		corpusID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]DocumentListItem, 0)
+	for rows.Next() {
+		var item DocumentListItem
+		if err := rows.Scan(
+			&item.ID,
+			&item.CorpusID,
+			&item.FileName,
+			&item.FileType,
+			&item.SizeBytes,
+			&item.Status,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
+}
+
+func (s *Store) GetDocumentByID(ctx context.Context, documentID string) (DocumentDetail, error) {
+	row := s.db.QueryRowContext(
+		ctx,
+		`SELECT id, corpus_id, file_name, file_type, size_bytes, status, created_by, created_at, storage_key
+		 FROM documents
+		 WHERE id = $1`,
+		documentID,
+	)
+
+	var item DocumentDetail
+	if err := row.Scan(
+		&item.ID,
+		&item.CorpusID,
+		&item.FileName,
+		&item.FileType,
+		&item.SizeBytes,
+		&item.Status,
+		&item.CreatedBy,
+		&item.CreatedAt,
+		&item.StorageKey,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DocumentDetail{}, ErrNotFound
+		}
+		return DocumentDetail{}, err
+	}
+
+	return item, nil
+}
+
+func (s *Store) HasActiveIngestJob(ctx context.Context, documentID string) (bool, error) {
+	var exists bool
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM ingest_jobs
+			WHERE document_id = $1
+			  AND status IN ('queued', 'running')
+		)`,
+		documentID,
+	).Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) CreateReingestJobForDocument(ctx context.Context, documentID string, sizeBytes int64) (IngestJob, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return IngestJob{}, err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	jobID := uuid.NewString()
+	now := time.Now().UTC()
+
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE documents
+		 SET status = 'uploaded', size_bytes = $2
+		 WHERE id = $1`,
+		documentID,
+		sizeBytes,
+	)
+	if err != nil {
+		return IngestJob{}, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return IngestJob{}, err
+	}
+	if affected == 0 {
+		return IngestJob{}, ErrNotFound
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`INSERT INTO ingest_jobs (id, document_id, status, progress, created_at, updated_at)
+		 VALUES ($1, $2, 'queued', 0, $3, $3)`,
+		jobID,
+		documentID,
+		now,
+	)
+	if err != nil {
+		return IngestJob{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return IngestJob{}, err
+	}
+
+	return IngestJob{
+		ID:         jobID,
+		DocumentID: documentID,
+		Status:     "queued",
+		Progress:   0,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}, nil
+}
+
+func (s *Store) ListStorageKeysByCorpus(ctx context.Context, corpusID string) ([]string, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT DISTINCT storage_key
+		 FROM documents
+		 WHERE corpus_id = $1
+		   AND storage_key <> ''`,
+		corpusID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, rows.Err()
+}
+
+func (s *Store) ListStorageKeysByCorpora(ctx context.Context, corpusIDs []string) ([]string, error) {
+	if len(corpusIDs) == 0 {
+		return []string{}, nil
+	}
+
+	inClause, args := buildInClause(1, corpusIDs)
+	query := fmt.Sprintf(`
+		SELECT DISTINCT storage_key
+		FROM documents
+		WHERE corpus_id IN (%s)
+		  AND storage_key <> ''
+	`, inClause)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys, rows.Err()
+}
+
 func (s *Store) ChatSessionExists(ctx context.Context, sessionID string) (bool, error) {
 	var exists bool
 	err := s.db.QueryRowContext(
@@ -243,4 +584,49 @@ func (s *Store) ChatSessionExists(ctx context.Context, sessionID string) (bool, 
 		sessionID,
 	).Scan(&exists)
 	return exists, err
+}
+
+func (s *Store) MarkIngestJobFailed(ctx context.Context, jobID, docID, errorMessage string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE ingest_jobs
+		 SET status = 'failed', progress = 0, error_message = $2, updated_at = NOW()
+		 WHERE id = $1`,
+		jobID,
+		errorMessage,
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`UPDATE documents
+		 SET status = 'failed'
+		 WHERE id = $1`,
+		docID,
+	)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func buildInClause(start int, values []string) (string, []any) {
+	placeholders := make([]string, 0, len(values))
+	args := make([]any, 0, len(values))
+	for idx, value := range values {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", start+idx))
+		args = append(args, value)
+	}
+	return strings.Join(placeholders, ", "), args
 }

@@ -27,7 +27,11 @@ func main() {
 	defer store.Close()
 
 	authManager := auth.NewManager(cfg)
-	app := api.New(cfg, store, authManager, logger)
+	app, err := api.New(cfg, store, authManager, logger)
+	if err != nil {
+		logger.Fatalf("init api components failed: %v", err)
+	}
+	defer app.Close()
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

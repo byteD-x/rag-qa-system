@@ -10,6 +10,8 @@ type Config struct {
 	HTTPAddr         string
 	PostgresDSN      string
 	RAGServiceURL    string
+	QdrantURL        string
+	QdrantCollection string
 	MaxUploadBytes   int64
 	AuthTokenTTL     time.Duration
 	AdminUserID      string
@@ -19,15 +21,32 @@ type Config struct {
 	MemberEmail      string
 	MemberPassword   string
 	AllowedFileTypes map[string]struct{}
+
+	RedisURL       string
+	IngestQueueKey string
+
+	S3Endpoint            string
+	S3PublicEndpoint      string
+	S3AccessKey           string
+	S3SecretKey           string
+	S3Bucket              string
+	S3UseSSL              bool
+	S3PresignExpiryMinute int
 }
 
 func Load() Config {
 	ttlMinutes := getEnvAsInt("AUTH_TOKEN_TTL_MINUTES", 120)
+	endpoint := getEnv("S3_ENDPOINT", "minio:9000")
 
 	return Config{
-		HTTPAddr:       getEnv("HTTP_ADDR", ":8080"),
-		PostgresDSN:    getEnv("POSTGRES_DSN", "postgres://rag:rag@postgres:5432/rag?sslmode=disable"),
-		RAGServiceURL:  getEnv("RAG_SERVICE_URL", "http://py-rag-service:8000"),
+		HTTPAddr:      getEnv("HTTP_ADDR", ":8080"),
+		PostgresDSN:   getEnv("POSTGRES_DSN", "postgres://rag:rag@postgres:5432/rag?sslmode=disable"),
+		RAGServiceURL: getEnv("RAG_SERVICE_URL", "http://py-rag-service:8000"),
+		QdrantURL:     getEnv("QDRANT_URL", "http://qdrant:6333"),
+		QdrantCollection: getEnv(
+			"QDRANT_COLLECTION",
+			"rag_chunks",
+		),
 		MaxUploadBytes: getEnvAsInt64("MAX_UPLOAD_BYTES", 524288000),
 		AuthTokenTTL:   time.Duration(ttlMinutes) * time.Minute,
 		AdminUserID:    getEnv("ADMIN_USER_ID", "11111111-1111-1111-1111-111111111111"),
@@ -41,6 +60,15 @@ func Load() Config {
 			"pdf":  {},
 			"docx": {},
 		},
+		RedisURL:              getEnv("REDIS_URL", "redis://redis:6379/0"),
+		IngestQueueKey:        getEnv("INGEST_QUEUE_KEY", "ingest_jobs"),
+		S3Endpoint:            endpoint,
+		S3PublicEndpoint:      getEnv("S3_PUBLIC_ENDPOINT", endpoint),
+		S3AccessKey:           getEnv("S3_ACCESS_KEY", "minioadmin"),
+		S3SecretKey:           getEnv("S3_SECRET_KEY", "minioadmin"),
+		S3Bucket:              getEnv("S3_BUCKET", "rag-raw"),
+		S3UseSSL:              getEnvAsBool("S3_USE_SSL", false),
+		S3PresignExpiryMinute: getEnvAsInt("S3_PRESIGN_EXPIRY_MINUTES", 30),
 	}
 }
 
@@ -77,5 +105,18 @@ func getEnvAsInt64(key string, fallback int64) int64 {
 		return fallback
 	}
 
+	return parsed
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
 	return parsed
 }
