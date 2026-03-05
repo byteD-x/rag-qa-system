@@ -1,70 +1,77 @@
+[CmdletBinding()]
 param(
     [switch]$RemoveVolumes,
     [switch]$RemoveImages,
-    [switch]$RemoveAll,
-    [switch]$SkipConfirm
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Split-Path -Parent $scriptDir
+. (Join-Path $PSScriptRoot "dev-common.ps1")
+
+$repoRoot = Get-RepoRoot
 Set-Location $repoRoot
 
 Write-Host "[INFO] Repo root: $repoRoot"
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "Docker CLI not found. Please install Docker Desktop first."
+$managedFrontendPid = Get-ManagedFrontendPid
+$dockerReady = Test-DockerReady
+$composeArgs = @("down", "--remove-orphans")
+
+if ($RemoveVolumes) {
+    $composeArgs += "--volumes"
 }
 
-try {
-    docker info *> $null
-}
-catch {
-    throw "Docker daemon is not running. Please start Docker Desktop first."
+if ($RemoveImages) {
+    $composeArgs += @("--rmi", "all")
 }
 
-$composeArgs = @("compose", "down")
-
-if ($RemoveAll) {
-    $composeArgs += @("--volumes", "--rmi", "all", "--remove-orphans")
-    Write-Host "[WARN] --RemoveAll specified: will remove volumes, all images, and orphan containers."
-}
-else {
+if (-not $Force) {
+    $actions = New-Object System.Collections.Generic.List[string]
+    $actions.Add("stop compose services")
+    if ($null -ne $managedFrontendPid) {
+        $actions.Add("stop managed frontend PID $managedFrontendPid")
+    }
     if ($RemoveVolumes) {
-        $composeArgs += "--volumes"
-        Write-Host "[WARN] --RemoveVolumes specified: will remove named volumes."
+        $actions.Add("remove named volumes")
     }
     if ($RemoveImages) {
-        $composeArgs += @("--rmi", "all")
-        Write-Host "[WARN] --RemoveImages specified: will remove all images."
+        $actions.Add("remove built images")
     }
-}
+    if (-not $dockerReady) {
+        $actions.Add("skip docker compose down because Docker is unavailable")
+    }
 
-if (-not $SkipConfirm) {
-    $confirmMsg = "This will stop and remove running containers."
-    if ($RemoveVolumes) { $confirmMsg += " Data volumes will be REMOVED." }
-    if ($RemoveImages) { $confirmMsg += " Images will be REMOVED." }
-    $confirmMsg += " Continue?"
-    
-    $confirmation = Read-Host -Prompt "$confirmMsg (y/N)"
-    if ($confirmation -ne 'y' -and $confirmation -ne 'Y') {
-        Write-Host "[CANCEL] Operation cancelled by user."
+    $confirmation = Read-Host -Prompt ("This will " + ($actions -join ", ") + ". Continue? (y/N)")
+    if ($confirmation -notin @("y", "Y")) {
+        Write-Host "[CANCEL] No changes made."
         exit 0
     }
 }
 
-Write-Host "[INFO] Stopping services..."
-docker @composeArgs
+if ($null -ne $managedFrontendPid) {
+    Stop-ManagedFrontend | Out-Null
+}
+else {
+    Write-Host "[INFO] No managed frontend process found."
+}
+
+if ($dockerReady) {
+    Write-Host "[INFO] Stopping Docker services..."
+    Invoke-DockerCompose -Arguments $composeArgs
+}
+else {
+    Write-Host "[WARN] Docker daemon is not available. Skipped docker compose down."
+}
 
 Write-Host ""
-Write-Host "[DONE] Development environment stopped."
+Write-Host "[DONE] Project stopped."
 if ($RemoveVolumes) {
-    Write-Host "[WARN] Named volumes have been removed. All persistent data is lost."
+    Write-Host "[WARN] Named volumes were removed."
 }
 if ($RemoveImages) {
-    Write-Host "[WARN] Images have been removed. Next startup will require rebuilding."
+    Write-Host "[WARN] Images were removed."
 }
 Write-Host ""
-Write-Host "To start again, run: .\scripts\dev-up.ps1"
+Write-Host "Start again with: .\scripts\dev-up.ps1"

@@ -1,19 +1,18 @@
-# === Go (go-api/) ===
-go-api/bin/
-go-api/coverage.out
-go-api/*.test
-go-api/*.exe
-go-api/*.exe~
-go-api/*.dll
-go-api/*.so
-go-api/*.dylib
-go-api/vendor/
+# === Go (services/go-api/) ===
+bin/
+coverage.out
+*.test
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vendor/
 
-# === Python (py-rag-service/, py-worker/) ===
+# === Python (services/py-rag-service/, services/py-worker/) ===
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 .Python
 .pytest_cache/
 .venv/
@@ -26,34 +25,32 @@ build/
 .coverage
 htmlcov/
 
-# === Node.js / Frontend (frontend/) ===
-frontend/node_modules/
-frontend/dist/
-frontend/dist-ssr/
-frontend/.env.local
-frontend/.env.*.local
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-frontend/pnpm-debug.log*
-frontend/lerna-debug.log*
-frontend/.pnp/
-frontend/.pnp.js
+# === Node.js / Frontend (apps/web/) ===
+node_modules/
+.vite/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnp/
+.pnp.js
 
 # === Environment and Secrets ===
 .env
-.env.local
-.env.*.local
-.env.development
-.env.test
-.env.production
+.env.*
+!.env.example
 *.pem
 *.key
+*.cert
 secrets/
 
 # === IDE and Editors ===
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo
@@ -70,12 +67,9 @@ logs/
 # === Docker ===
 docker-compose.override.yml
 
-# === Testing ===
-coverage/
-coverage.xml
-.tox/
-.nox/
-.pytest_cache/
+# === Build Outputs ===
+*.orig
+*.bak
 
 # === OS ===
 .DS_Store
@@ -87,11 +81,11 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# === Build Outputs ===
-*.orig
-*.bak
+# === Storage / State ===
+data/
+*.sqlite
+*.db
 
-
-# === AGENTS ===
-agents_runs/
+# === Agents / Subsystems ===
+agent_runs/
 .trae/

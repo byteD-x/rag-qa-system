@@ -1,0 +1,9 @@
+fastapi==0.115.11
+uvicorn==0.34.0
+pydantic==2.10.6
+httpx==0.28.1
+qdrant-client==1.13.3
+rank-bm25==0.2.2
+prometheus-client==0.21.1
+python-json-logger==2.0.7
+jieba==0.42.1

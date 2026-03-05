@@ -43,9 +43,5 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO app_users (id, email, password_hash, role)
-VALUES
-    ('11111111-1111-1111-1111-111111111111', 'admin@local', 'dev-only', 'admin'),
-    ('22222222-2222-2222-2222-222222222222', 'member@local', 'dev-only', 'member')
-ON CONFLICT (email) DO NOTHING;
-
+-- Bootstrap seeding is removed for security purposes.
+-- Use an API initialization endpoint or script to create the first admin.

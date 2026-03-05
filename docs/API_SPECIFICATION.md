@@ -1,7 +1,7 @@
 # RAG-QA System API 规范
 
-> **版本**: 2.1.0  
-> **最后更新**: 2026-03-04  
+> **版本**: 2.2.0  
+> **最后更新**: 2026-03-05  
 > **Base URL**: `http://localhost:8080/v1`
 
 ---
@@ -56,6 +56,29 @@
 - **字符编码**: UTF-8
 - **认证方式**: Bearer Token (JWT)
 - **版本前缀**: `/v1`
+- **流式输出**: SSE (Server-Sent Events)
+
+### 流式问答
+
+RAG 服务支持 SSE 流式输出，可通过以下端点使用:
+
+- `GET /v1/rag/query/stream?question=...&scope_json=...` - URL 参数方式
+- `POST /v1/rag/query/stream` - JSON body 方式
+
+**SSE 事件格式**:
+```json
+// 答案句子
+data: {"type":"sentence","data":{"text":"...","evidence_type":"source","citation_ids":[],"confidence":0.95}}
+
+// 引用文献
+data: {"type":"citation","data":{"citation_id":"c1","file_name":"manual.pdf","page_or_loc":"Page 5","chunk_id":"uuid","snippet":"..."}}
+
+// 流式结束
+data: {"type":"done"}
+
+// 错误信息
+data: {"type":"error","message":"错误消息"}
+```
 
 ### 健康检查
 
@@ -780,6 +803,182 @@ Content-Type: application/json
 
 ---
 
+### RAG 查询接口（py-rag-service）
+
+#### POST /v1/rag/query
+
+RAG 查询端点（同步模式）。
+
+**请求**:
+```http
+POST http://localhost:8000/v1/rag/query
+Content-Type: application/json
+
+{
+  "question": "产品的保修政策是什么？",
+  "scope": {
+    "mode": "single",
+    "corpus_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+    "allow_common_knowledge": false
+  }
+}
+```
+
+**响应 (200 OK)**:
+```json
+{
+  "answer_sentences": [
+    {
+      "text": "产品提供一年有限保修服务，自购买之日起生效。",
+      "evidence_type": "source",
+      "citation_ids": ["c1", "c2"],
+      "confidence": 0.95
+    }
+  ],
+  "citations": [
+    {
+      "citation_id": "c1",
+      "file_name": "product_manual.pdf",
+      "page_or_loc": "Page 5",
+      "chunk_id": "chunk_uuid_1",
+      "snippet": "一年有限保修服务，自购买之日起生效..."
+    },
+    {
+      "citation_id": "c2",
+      "file_name": "product_manual.pdf",
+      "page_or_loc": "Page 6",
+      "chunk_id": "chunk_uuid_2",
+      "snippet": "保修范围涵盖制造缺陷和材料问题..."
+    }
+  ]
+}
+```
+
+**工作流程**:
+1. 向量检索（Top-N=24）
+2. 混合重排序（Top-K=8）
+3. LLM 生成摘要
+4. 构建结构化回答（句子 + 引用）
+
+**降级策略**:
+- RAG 服务异常时返回常识补充降级结果
+- 无证据时返回提示消息
+
+---
+
+#### GET /v1/rag/query/stream
+
+RAG 流式查询（GET 方式）。
+
+**请求**:
+```http
+GET http://localhost:8000/v1/rag/query/stream?question=产品的保修政策是什么？&scope_json={"mode":"single","corpus_ids":["550e8400-e29b-41d4-a716-446655440000"],"allow_common_knowledge":false}
+Accept: text/event-stream
+```
+
+**响应 (SSE Stream)**:
+```
+data: {"type":"sentence","data":{"text":"正在检索相关知识...","evidence_type":"source","citation_ids":[],"confidence":0.5}}
+
+data: {"type":"citation","data":{"citation_id":"c1","file_name":"manual.pdf","page_or_loc":"Page 5","chunk_id":"uuid","snippet":"保修政策..."}}
+
+data: {"type":"sentence","data":{"text":"产品提供一年有限保修...","evidence_type":"source","citation_ids":["c1"],"confidence":0.95}}
+
+data: {"type":"done"}
+```
+
+**SSE 事件格式**:
+
+| 事件类型 | 说明 | data 字段 |
+|---------|------|---------|
+| sentence | 答案句子 | AnswerSentence 对象 |
+| citation | 引用文献 | Citation 对象 |
+| done | 流式结束 | 无 |
+| error | 错误信息 | 错误消息 |
+
+---
+
+#### POST /v1/rag/query/stream
+
+RAG 流式查询（POST 方式）。
+
+**请求**:
+```http
+POST http://localhost:8000/v1/rag/query/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "question": "产品的保修政策是什么？",
+  "scope": {
+    "mode": "single",
+    "corpus_ids": ["550e8400-e29b-41d4-a716-446655440000"],
+    "allow_common_knowledge": false
+  }
+}
+```
+
+**响应 (SSE Stream)**: 与 GET 方式相同
+
+---
+
+### 监控指标接口
+
+#### GET /metrics
+
+获取 Prometheus 格式的监控指标。
+
+**请求**:
+```http
+GET http://localhost:8000/metrics
+```
+
+**响应 (200 OK)**:
+```
+# HELP rag_queries_total Total number of RAG queries
+# TYPE rag_queries_total counter
+rag_queries_total 1500
+...
+```
+
+---
+
+#### GET /metrics/cache
+
+获取查询缓存统计信息。
+
+**请求**:
+```http
+GET http://localhost:8000/metrics/cache
+```
+
+**响应 (200 OK)**:
+```json
+{
+  "enabled": true,
+  "available": true,
+  "size": 150,
+  "max_size": 10000,
+  "hits": 850,
+  "misses": 150,
+  "hit_rate": 0.85
+}
+```
+
+**字段说明**:
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| enabled | boolean | 缓存是否启用 |
+| available | boolean | 缓存是否可用 |
+| size | integer | 当前缓存大小 |
+| max_size | integer | 最大缓存容量 |
+| hits | integer | 命中次数 |
+| misses | integer | 未命中次数 |
+| hit_rate | float | 命中率 (0-1) |
+
+---
+
 ## 数据模型
 
 ### Corpus (知识库)
@@ -1097,6 +1296,8 @@ echo -e "\n✓ 完成!"
 
 ### 配置项参考
 
+#### go-api 配置
+
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
 | `HTTP_ADDR` | `:8080` | API 监听地址 |
@@ -1106,6 +1307,52 @@ echo -e "\n✓ 完成!"
 | `ADMIN_PASSWORD` | `ChangeMe123!` | 管理员密码 |
 | `MEMBER_EMAIL` | `member@local` | 普通用户账号 |
 | `MEMBER_PASSWORD` | `ChangeMe123!` | 普通用户密码 |
+
+#### py-rag-service 配置
+
+**基础配置**：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `QDRANT_URL` | `http://qdrant:6333` | Qdrant 向量库地址 |
+| `QDRANT_COLLECTION` | `rag_chunks` | Qdrant 集合名称 |
+| `EMBEDDING_DIM` | `256` | 嵌入向量维度 |
+| `RAG_RETRIEVAL_TOP_N` | `24` | 检索返回数量 |
+| `RAG_RERANK_TOP_K` | `8` | 重排序保留数量 |
+| `RAG_EVIDENCE_MIN_SCORE` | `0.05` | 证据最小相关性分数 |
+| `RAG_COMMON_KNOWLEDGE_MAX_RATIO` | `0.15` | 常识补充最大比例 |
+| `RAG_SOURCE_SENTENCE_LIMIT` | `6` | 来源句子数量限制 |
+| `LLM_PROVIDER` | `openai` | LLM 提供商 |
+| `LLM_BASE_URL` | - | 自定义 API 地址 |
+| `LLM_API_KEY` | - | LLM API 密钥 |
+| `LLM_EMBEDDING_MODEL` | `text-embedding-3-small` | 嵌入模型名称 |
+| `LLM_CHAT_MODEL` | `gpt-4o-mini` | 对话模型名称 |
+| `LLM_TIMEOUT_SECONDS` | `30` | LLM 请求超时 (秒) |
+| `LLM_MAX_RETRIES` | `2` | 最大重试次数 |
+| `LLM_RETRY_DELAY_MILLISECONDS` | `600` | 重试延迟 (毫秒) |
+
+**高级优化配置（可选）**：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `HYBRID_SEARCH_DENSE_WEIGHT` | `0.7` | 混合检索密集权重 (0-1) |
+| `HYBRID_SEARCH_SPARSE_WEIGHT` | `0.3` | 混合检索稀疏权重 (0-1) |
+| `MULTI_QUERY_ENABLED` | `false` | 是否启用多查询检索 |
+| `MULTI_QUERY_MAX_VARIANTS` | `3` | 最大查询变体数 |
+| `MULTI_QUERY_TIMEOUT_MS` | `500` | 查询重写超时 (毫秒) |
+| `INTENT_CLASSIFICATION_ENABLED` | `true` | 是否启用意图分类 |
+| `CONTEXT_COMPRESSOR_ENABLED` | `false` | 是否启用上下文压缩 |
+| `CONTEXT_COMPRESSOR_MODEL` | `llm` | 压缩模型：`llm` 或 `extractive` |
+| `CONTEXT_MAX_TOKENS` | `3200` | 最大上下文长度 |
+| `QUERY_CACHE_ENABLED` | `true` | 是否启用查询缓存 |
+| `QUERY_CACHE_TTL_HOURS` | `24` | 缓存过期时间 (小时) |
+| `QUERY_CACHE_MAX_SIZE` | `10000` | 最大缓存条目数 |
+| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 重排序模型 |
+| `RERANKER_TOP_K` | `8` | 重排序保留数量 |
+| `DEFAULT_CHUNK_SIZE` | `1024` | 默认分块大小 |
+| `DEFAULT_CHUNK_OVERLAP` | `100` | 默认分块重叠 |
+| `METADATA_ENHANCEMENT_ENABLED` | `true` | 是否启用元数据增强 |
+| `MAX_KEYWORDS` | `5` | 最大关键词数 |
 
 ### 支持的文件类型
 
@@ -1122,11 +1369,13 @@ echo -e "\n✓ 完成!"
 | 登录响应时间 | < 100ms | 本地验证 |
 | 创建知识库 | < 200ms | 数据库插入 |
 | 文档列表查询 | < 500ms | 取决于文档数量 |
-| 问答响应时间 | < 5s | 取决于 LLM 响应 |
+| 问答响应时间（同步） | < 5s | 取决于 LLM 响应 |
+| 问答首字延迟（流式） | < 1s | 首个句子输出时间 |
 | 文档上传 | < 2s | 元数据创建 |
 | 文档入库 | < 60s | 异步处理，取决于文件大小 |
+| 缓存查询 | < 50ms | 命中缓存时 |
 
 ---
 
 **文档维护**: RAG-QA Team  
-**最后更新**: 2026-03-04
+**最后更新**: 2026-03-05

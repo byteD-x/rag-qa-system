@@ -1,0 +1,10 @@
+-r requirements.runtime.txt
+
+# Test dependencies
+pytest==8.3.5
+
+# Optional offline evaluation and experimental reranker dependencies.
+# Keep these out of the runtime Docker image unless they are actually needed.
+sentence-transformers==3.3.1
+ragas>=0.2.0
+datasets>=2.14.0

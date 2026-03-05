@@ -1,0 +1,140 @@
+:root {
+  /* ========================================================================= */
+  /* COLOR SYSTEM / THEME VARIABLES                                            */
+  /* ========================================================================= */
+  
+  /* Primary & Brand */
+  --el-color-primary: #3b82f6;      /* Modern Blue */
+  --el-color-primary-light-3: #60a5fa;
+  --el-color-primary-light-5: #93c5fd;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-8: #dbeafe;
+  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary-dark-2: #2563eb;
+
+  /* Neutral & Backgrounds */
+  --bg-base: #f8fafc;        /* App Main Background */
+  --bg-surface: #ffffff;     /* Card/Panel Background */
+  --bg-sidebar: #ffffff;
+  --border-color-light: #e2e8f0;
+  --border-color: #cbd5e1;
+
+  /* Typography */
+  --text-primary: #1e293b;
+  --text-regular: #334155;
+  --text-secondary: #64748b;
+  --text-placeholder: #94a3b8;
+
+  /* Element Plus Root Overrides */
+  --el-bg-color: var(--bg-surface);
+  --el-bg-color-page: var(--bg-base);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-regular);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-placeholder);
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-color-light);
+  --el-border-radius-base: 8px;
+  --el-border-radius-round: 20px;
+  --el-transition-duration: 0.3s;
+  
+  /* ========================================================================= */
+  /* SHADOWS & EFFECTS                                                         */
+  /* ========================================================================= */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-blue: 0 10px 15px -3px rgba(59, 130, 246, 0.2);
+
+  /* Glassmorphism */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.4);
+}
+
+/* Base Body Styles */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+}
+
+/* ========================================================================= */
+/* UTILITY CLASSES                                                           */
+/* ========================================================================= */
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpFade {
+  from { 
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUpFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* fade-transform transition for router-view */
+.fade-transform-leave-active,
+.fade-transform-enter-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.fade-transform-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.fade-transform-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* Smooth Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

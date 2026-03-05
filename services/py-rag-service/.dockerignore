@@ -1,0 +1,9 @@
+.pytest_cache/
+__pycache__/
+tests/
+examples/
+benchmark.py
+evaluate.py
+evaluation_dataset_example.json
+test_evaluation_dataset.json
+test_retrieval_report.json

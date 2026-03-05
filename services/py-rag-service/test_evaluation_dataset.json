@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "created_at": "2026-03-05T21:54:02.916658",
+  "samples": [
+    {
+      "question": "如何使用 Python 读取文件？",
+      "answer": "使用 open() 函数可以读取文件。例如：with open('file.txt', 'r') as f: content = f.read()",
+      "contexts": [
+        "Python 提供了多种文件操作方法，最常用的是 open() 函数。",
+        "open() 函数支持多种模式，包括读取 ('r')、写入 ('w') 和追加 ('a')。",
+        "使用 with 语句可以自动管理文件资源，无需手动关闭。"
+      ],
+      "ground_truth": "使用 open() 函数读取文件，推荐使用 with 语句自动管理资源。",
+      "metadata": {}
+    },
+    {
+      "question": "Docker 是什么？",
+      "answer": "Docker 是一个容器化平台，可以将应用及其依赖打包到容器中运行。",
+      "contexts": [
+        "Docker 是一个开源的容器化平台。",
+        "容器技术可以实现应用的隔离和便携性。",
+        "Docker 容器可以在任何支持 Docker 的环境中运行。"
+      ],
+      "ground_truth": "Docker 是一个开源的容器化平台，用于打包和部署应用。",
+      "metadata": {}
+    }
+  ]
+}

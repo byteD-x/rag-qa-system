@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 本文件定义本仓库的人机协作协议（Owner / AI Agent / Reviewer）。
-> Last updated: 2026-03-04
+> Last updated: 2026-03-06
 
 ## 1. 目标与范围
 
@@ -62,13 +62,13 @@
 在仓库根目录执行：
 
 - `python scripts/check_encoding.py`
-- `cd go-api && go test ./...`
-- `cd py-rag-service && python -m pytest -q`
-- `cd py-worker && python -m pytest -q`
-- `docker compose config`
+- `cd services/go-api && go test ./...`
+- `cd services/py-rag-service && python -m pytest -q`
+- `cd services/py-worker && python -m pytest -q`
+- `docker compose config --quiet`
 
 说明：
-- 文档类改动至少执行编码检查与 `docker compose config`
+- 文档类改动至少执行编码检查与 `docker compose config --quiet`
 - 涉及服务逻辑时需补跑对应模块测试
 
 ## 8. 任务记录规范
@@ -103,4 +103,3 @@
 - `Why`：为什么这样改
 - `How to verify`：如何验证（命令 + 预期结果）
 - `Risk`：已知风险与回滚方式
-

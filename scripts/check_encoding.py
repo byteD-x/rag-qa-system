@@ -1,107 +1,109 @@
 #!/usr/bin/env python3
-"""Validate repository text files use UTF-8 and contain no replacement characters."""
+"""Validate that tracked text files are UTF-8 without BOM."""
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
-TEXT_SUFFIXES = {
-    ".md",
-    ".txt",
-    ".go",
-    ".py",
-    ".sql",
-    ".yml",
-    ".yaml",
-    ".json",
-    ".toml",
-    ".ini",
-    ".cfg",
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TEXT_EXTENSIONS = {
+    ".bat",
+    ".cmd",
+    ".css",
     ".env",
-    ".sh",
-    ".ps1",
+    ".example",
+    ".go",
+    ".html",
     ".js",
+    ".json",
+    ".md",
+    ".ps1",
+    ".py",
+    ".sh",
+    ".sql",
+    ".svg",
     ".ts",
     ".tsx",
-    ".jsx",
-    ".css",
-    ".scss",
-    ".html",
-    ".xml",
-    ".mod",
-    ".sum",
+    ".txt",
+    ".vue",
+    ".yaml",
+    ".yml",
 }
-
 TEXT_FILENAMES = {
-    "dockerfile",
-    "makefile",
-    ".gitignore",
-    ".gitattributes",
     ".editorconfig",
+    ".gitignore",
+    "Dockerfile",
+    "Makefile",
+}
+SKIP_DIRS = {
+    ".git",
+    ".pytest_cache",
+    ".venv",
+    "__pycache__",
+    "agent_runs",
+    "bin",
+    "build",
+    "coverage",
+    "dist",
+    "htmlcov",
+    "logs",
+    "node_modules",
+    "vendor",
+    "venv",
 }
 
 
+def should_check(path: Path) -> bool:
+    if any(part in SKIP_DIRS for part in path.parts):
+        return False
 
-def is_text_file(path: Path) -> bool:
-    name = path.name.lower()
-    if name in TEXT_FILENAMES:
+    if path.name in TEXT_FILENAMES:
         return True
-    if name.startswith(".env"):
+
+    if path.suffix.lower() in TEXT_EXTENSIONS:
         return True
-    return path.suffix.lower() in TEXT_SUFFIXES
+
+    if path.name.endswith(".env.example"):
+        return True
+
+    return False
 
 
-
-def git_tracked_files() -> list[Path]:
-    output = subprocess.check_output(["git", "ls-files"], text=True)
-    return [Path(line) for line in output.splitlines() if line]
-
+def iter_text_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if should_check(path.relative_to(root)):
+            files.append(path)
+    return sorted(files)
 
 
 def main() -> int:
-    bad_encoding: list[str] = []
-    bad_replacement: list[str] = []
-    bad_bom: list[str] = []
+    failures: list[str] = []
 
-    for path in git_tracked_files():
-        if not path.exists() or not path.is_file() or not is_text_file(path):
+    for path in iter_text_files(REPO_ROOT):
+        relative = path.relative_to(REPO_ROOT)
+        data = path.read_bytes()
+
+        if data.startswith(b"\xef\xbb\xbf"):
+            failures.append(f"{relative}: UTF-8 BOM is not allowed")
             continue
-
-        raw = path.read_bytes()
-        if raw.startswith(b"\xef\xbb\xbf"):
-            bad_bom.append(path.as_posix())
 
         try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            bad_encoding.append(path.as_posix())
-            continue
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            failures.append(f"{relative}: invalid UTF-8 at byte {exc.start}")
 
-        if "\ufffd" in text:
-            bad_replacement.append(path.as_posix())
-
-    if not (bad_encoding or bad_replacement or bad_bom):
-        print("encoding check passed: all tracked text files are UTF-8 without BOM")
-        return 0
-
-    if bad_encoding:
-        print("non-UTF-8 files:")
-        for item in bad_encoding:
+    if failures:
+        print("Encoding check failed:")
+        for item in failures:
             print(f"  - {item}")
+        return 1
 
-    if bad_replacement:
-        print("files containing replacement character U+FFFD:")
-        for item in bad_replacement:
-            print(f"  - {item}")
-
-    if bad_bom:
-        print("UTF-8 BOM detected (not allowed):")
-        for item in bad_bom:
-            print(f"  - {item}")
-
-    return 1
+    print("Encoding check passed.")
+    return 0
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ info:
     - 知识库管理（CRUD）
     - 文档上传与处理
     - 智能问答与引用溯源
+    - 流式问答（SSE）
+    - 查询缓存优化
     
     ## 服务架构
     - **go-api**: REST API 网关 (Port 8080)
@@ -28,7 +30,12 @@ info:
     ## 获取 Token
     POST /v1/auth/login
     
-  version: 2.1.0
+    ## 流式问答
+    RAG 服务支持 SSE 流式输出，可通过以下端点使用:
+    - `GET /v1/rag/query/stream` - URL 参数方式
+    - `POST /v1/rag/query/stream` - JSON body 方式
+    
+  version: 2.2.0
   contact:
     name: RAG-QA Team
   license:
@@ -52,6 +59,10 @@ tags:
     description: 文档上传与管理
   - name: Chat
     description: 问答会话
+  - name: RAG
+    description: RAG 检索与问答（py-rag-service）
+  - name: Metrics
+    description: 监控指标
 
 paths:
   /healthz:
@@ -1372,6 +1383,65 @@ components:
           type: string
           description: 错误消息
 
+    # RAG Query
+    QueryRequest:
+      type: object
+      required:
+        - question
+        - scope
+      properties:
+        question:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: 问题内容
+        scope:
+          $ref: '#/components/schemas/Scope'
+
+    QueryResponse:
+      type: object
+      required:
+        - answer_sentences
+        - citations
+      properties:
+        answer_sentences:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnswerSentence'
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+
+    CacheMetricsResponse:
+      type: object
+      required:
+        - enabled
+        - available
+      properties:
+        enabled:
+          type: boolean
+          description: 缓存是否启用
+        available:
+          type: boolean
+          description: 缓存是否可用
+        size:
+          type: integer
+          description: 当前缓存大小
+        max_size:
+          type: integer
+          description: 最大缓存容量
+        hits:
+          type: integer
+          description: 命中次数
+        misses:
+          type: integer
+          description: 未命中次数
+        hit_rate:
+          type: number
+          format: float
+          description: 命中率
+
   responses:
     Unauthorized:
       description: 未认证
@@ -1392,3 +1462,214 @@ components:
               summary: Token 无效或过期
               value:
                 error: invalid or expired token
+
+  /v1/rag/query:
+    post:
+      tags:
+        - RAG
+      summary: RAG 查询
+      description: |
+        基于 RAG 的问答查询端点（同步模式）
+        
+        ## 工作流程
+        1. 向量检索（Top-N=24）
+        2. 混合重排序（Top-K=8）
+        3. LLM 生成摘要
+        4. 构建结构化回答（句子 + 引用）
+        
+        ## 降级策略
+        - RAG 服务异常时返回常识补充降级结果
+        - 无证据时返回提示消息
+      operationId: ragQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+            example:
+              question: 产品的保修政策是什么？
+              scope:
+                mode: single
+                corpus_ids:
+                  - 550e8400-e29b-41d4-a716-446655440000
+                allow_common_knowledge: false
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '500':
+          description: RAG 服务异常（返回降级响应）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+              example:
+                answer_sentences:
+                  - text: "【常识补充】当前检索服务暂不可用，请稍后重试。"
+                    evidence_type: common_knowledge
+                    citation_ids: []
+                    confidence: 0.1
+                citations: []
+
+  /v1/rag/query/stream:
+    get:
+      tags:
+        - RAG
+      summary: RAG 流式查询（GET）
+      description: |
+        基于 RAG 的问答查询端点（SSE 流式模式）
+        
+        ## SSE 事件格式
+        - `{"type": "sentence", "data": {...}}` - 答案句子
+        - `{"type": "citation", "data": {...}}` - 引用文献
+        - `{"type": "done"}` - 流式结束
+        - `{"type": "error", "message": "..."}` - 错误信息
+        
+        ## 使用示例
+        ```bash
+        curl -N "http://localhost:8000/v1/rag/query/stream?question=测试&scope_json={...}"
+        ```
+      operationId: ragQueryStreamGET
+      parameters:
+        - name: question
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 8000
+          example: 产品的保修政策是什么？
+        - name: scope_json
+          in: query
+          required: true
+          schema:
+            type: string
+          description: JSON encoded Scope object
+          example: '{"mode":"single","corpus_ids":["550e8400-e29b-41d4-a716-446655440000"],"allow_common_knowledge":false}'
+      responses:
+        '200':
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                data: {"type":"sentence","data":{"text":"正在检索相关知识...","evidence_type":"source","citation_ids":[],"confidence":0.5}}
+                
+                data: {"type":"citation","data":{"citation_id":"c1","file_name":"manual.pdf","page_or_loc":"Page 5","chunk_id":"uuid","snippet":"保修政策..."}}
+                
+                data: {"type":"sentence","data":{"text":"产品提供一年有限保修...","evidence_type":"source","citation_ids":["c1"],"confidence":0.95}}
+                
+                data: {"type":"done"}
+    
+    post:
+      tags:
+        - RAG
+      summary: RAG 流式查询（POST）
+      description: |
+        基于 RAG 的问答查询端点（SSE 流式模式 - POST 方式）
+        
+        ## SSE 事件格式
+        - `{"type": "sentence", "data": {...}}` - 答案句子
+        - `{"type": "citation", "data": {...}}` - 引用文献
+        - `{"type": "done"}` - 流式结束
+        - `{"type": "error", "message": "..."}` - 错误信息
+        
+        ## 使用示例
+        ```bash
+        curl -N -X POST "http://localhost:8000/v1/rag/query/stream" \
+          -H "Content-Type: application/json" \
+          -d '{"question": "测试", "scope": {...}}'
+        ```
+      operationId: ragQueryStreamPOST
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+            example:
+              question: 产品的保修政策是什么？
+              scope:
+                mode: single
+                corpus_ids:
+                  - 550e8400-e29b-41d4-a716-446655440000
+                allow_common_knowledge: false
+      responses:
+        '200':
+          description: SSE 流式响应
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /healthz:
+    get:
+      tags:
+        - Health
+      summary: 健康检查（go-api）
+      description: 检查 go-api 服务是否正常运行
+      operationId: healthCheckGoAPI
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                service: go-api
+                time: "2026-03-04T10:30:00Z"
+
+  /metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Prometheus 指标
+      description: 导出 Prometheus 格式的监控指标
+      operationId: metrics
+      responses:
+        '200':
+          description: Prometheus 指标
+          content:
+            text/plain; version=0.0.4:
+              schema:
+                type: string
+
+  /metrics/cache:
+    get:
+      tags:
+        - Metrics
+      summary: 查询缓存指标
+      description: |
+        查询 RAG 查询缓存的统计信息
+        
+        ## 返回字段
+        - `enabled`: 缓存是否启用
+        - `available`: 缓存是否可用
+        - `size`: 当前缓存大小
+        - `max_size`: 最大缓存容量
+        - `hits`: 命中次数
+        - `misses`: 未命中次数
+        - `hit_rate`: 命中率
+      operationId: cacheMetrics
+      responses:
+        '200':
+          description: 缓存指标
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheMetricsResponse'
+              example:
+                enabled: true
+                available: true
+                size: 150
+                max_size: 10000
+                hits: 850
+                misses: 150
+                hit_rate: 0.85
