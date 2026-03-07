@@ -1,26 +1,25 @@
 POWERSHELL ?= powershell
 PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
 
-.PHONY: help up down logs logs-follow export-logs ci test build fmt encoding
+.PHONY: help up down logs logs-follow export-logs ci test build encoding
 
 help:
 	@echo Available targets:
-	@echo   make up           - 启动本地环境
+	@echo   make up           - 启动双内核本地环境
 	@echo   make down         - 停止本地环境
 	@echo   make logs         - 查看最近日志
 	@echo   make logs-follow  - 持续跟随日志
 	@echo   make export-logs  - 导出日志快照
-	@echo   make ci           - 执行回归检查
-	@echo   make test         - 运行后端测试
+	@echo   make ci           - 执行基础检查
+	@echo   make test         - 执行前端构建和 Python 语法检查
 	@echo   make build        - 构建 Docker 镜像
-	@echo   make fmt          - 格式化 Go 代码
 	@echo   make encoding     - 检查文本文件编码
 
 up:
-	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev-up.ps1
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/up.ps1
 
 down:
-	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev-down.ps1 -Force
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/down.ps1 -Force
 
 logs:
 	$(POWERSHELL) $(PS_FLAGS) -Command "& .\\logs.bat"
@@ -29,21 +28,17 @@ logs-follow:
 	$(POWERSHELL) $(PS_FLAGS) -Command "& .\\logs.bat -f"
 
 export-logs:
-	$(POWERSHELL) $(PS_FLAGS) -File scripts/aggregate-logs.ps1
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/observability/aggregate-logs.ps1
 
 ci:
-	$(POWERSHELL) $(PS_FLAGS) -File scripts/ci-check.ps1
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/quality/ci-check.ps1
 
 test:
-	cd services/go-api && go test ./...
-	cd services/py-rag-service && python -m pytest -q
-	cd services/py-worker && python -m pytest -q
+	python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service
+	cd apps/web && npm run build
 
 build:
 	docker compose build --pull
 
-fmt:
-	cd services/go-api && go fmt ./...
-
 encoding:
-	python scripts/check_encoding.py
+	python scripts/quality/check-encoding.py

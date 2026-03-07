@@ -1,15 +1,4 @@
-# === Go (services/go-api/) ===
-bin/
-coverage.out
-*.test
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-vendor/
-
-# === Python (services/py-rag-service/, services/py-worker/) ===
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -25,10 +14,9 @@ build/
 .coverage
 htmlcov/
 
-# === Node.js / Frontend (apps/web/) ===
+# Frontend
 node_modules/
 .vite/
-dist/
 dist-ssr/
 npm-debug.log*
 yarn-debug.log*
@@ -38,7 +26,7 @@ lerna-debug.log*
 .pnp/
 .pnp.js
 
-# === Environment and Secrets ===
+# Environment and secrets
 .env
 .env.*
 !.env.example
@@ -47,7 +35,7 @@ lerna-debug.log*
 *.cert
 secrets/
 
-# === IDE and Editors ===
+# IDE
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
@@ -60,18 +48,22 @@ secrets/
 *.sln
 *~
 
-# === Logs ===
+# Logs and local runtime state
 *.log
 logs/
+agent_runs/
+.trae/
+.kiro/
 
-# === Docker ===
+# Docker
 docker-compose.override.yml
 
-# === Build Outputs ===
-*.orig
-*.bak
+# Local data
+data/
+*.sqlite
+*.db
 
-# === OS ===
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -81,12 +73,15 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# === Storage / State ===
-data/
-*.sqlite
-*.db
-
-# === Agents / Subsystems ===
-agent_runs/
-.trae/
-.kiro/
+# Misc
+*.orig
+*.bak
+bin/
+coverage.out
+*.test
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vendor/

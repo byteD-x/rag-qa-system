@@ -1,4 +1,0 @@
--r requirements.runtime.txt
-
-# Test dependencies
-pytest==8.3.5
