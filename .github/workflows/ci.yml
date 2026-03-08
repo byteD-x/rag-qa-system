@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - "codex/**"
+  pull_request:
+
+jobs:
+  python-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -r apps/backend/gateway/requirements.runtime.txt \
+            -r apps/backend/novel-service/requirements.runtime.txt \
+            -r apps/backend/kb-service/requirements.runtime.txt \
+            pytest
+
+      - name: Encoding check
+        run: python scripts/quality/check-encoding.py
+
+      - name: Python compile
+        run: python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service
+
+      - name: Pytest
+        run: python -m pytest tests -q
+
+      - name: Retrieval ablation smoke
+        run: python scripts/evals/run-retrieval-ablation.py --fixture tests/evals/retrieval-ablation-fixture.json --output docs/reports/ci_retrieval_ablation.json --summary-output docs/reports/ci_retrieval_ablation.md
+
+      - name: Local ingest benchmark smoke
+        run: python scripts/evals/benchmark-local-ingest.py --output docs/reports/ci_local_ingest_benchmark.json --summary-output docs/reports/ci_local_ingest_benchmark.md
+
+      - name: Docker compose config
+        run: docker compose config --quiet
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build

@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/auth';
 const routes = [
   {
     path: '/',
-    redirect: '/entry'
+    redirect: '/workspace/chat'
   },
   {
     path: '/entry',
@@ -34,6 +34,11 @@ const routes = [
         component: () => import('@/views/EntryView.vue')
       },
       {
+        path: 'chat',
+        name: 'UnifiedChatView',
+        component: () => import('@/views/chat/UnifiedChatView.vue')
+      },
+      {
         path: 'ai/chat',
         name: 'AIChatView',
         component: () => import('@/views/ai/AIChatView.vue')
@@ -45,8 +50,13 @@ const routes = [
       },
       {
         path: 'novel/chat',
-        name: 'NovelChatView',
-        component: () => import('@/views/novel/NovelChatView.vue')
+        redirect: (to: any) => ({
+          path: '/workspace/chat',
+          query: {
+            ...to.query,
+            preset: 'novel'
+          }
+        })
       },
       {
         path: 'novel/documents/:id',
@@ -60,8 +70,13 @@ const routes = [
       },
       {
         path: 'kb/chat',
-        name: 'KBChatView',
-        component: () => import('@/views/kb/KBChatView.vue')
+        redirect: (to: any) => ({
+          path: '/workspace/chat',
+          query: {
+            ...to.query,
+            preset: 'kb'
+          }
+        })
       },
       {
         path: 'kb/documents/:id',
@@ -72,11 +87,11 @@ const routes = [
   },
   {
     path: '/chat',
-    redirect: '/workspace/ai/chat'
+    redirect: '/workspace/chat'
   },
   {
     path: '/dashboard/:pathMatch(.*)*',
-    redirect: '/workspace/entry'
+    redirect: '/workspace/chat'
   }
 ];
 
@@ -93,7 +108,7 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresAdmin && !authStore.isAdmin()) {
-    return { path: '/workspace/entry' };
+    return { path: '/workspace/chat' };
   }
 });
 

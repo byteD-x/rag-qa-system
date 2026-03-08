@@ -2,399 +2,89 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shared.auth import CurrentUser
 from shared.logging import setup_logging
+from shared.tracing import TRACE_ID_HEADER, current_trace_id, ensure_trace_id, reset_trace_id, set_trace_id
 from shared.sse import iter_query_sse_messages
 
-from .db import NovelDatabase, to_json
-from .parsing import ParsedNovel, parse_novel_text, read_text_with_fallback
-from .query import Citation, build_refusal_response, compact_quote, detect_strategy, extract_entity_hint, score_text
+from .db import to_json
+from .query import build_refusal_response, compact_quote, detect_strategy
+from .retrieve import retrieve_novel_result
+from .runtime import db, ensure_runtime, storage
 
 
 logger = setup_logging("novel-service")
+UPLOAD_PART_EXPIRES_SECONDS = int(os.getenv("UPLOAD_PART_EXPIRES_SECONDS", "3600"))
 
-POSTGRES_DSN = os.getenv("NOVEL_DATABASE_DSN", "postgresql://rag:rag@postgres:5432/novel_app?sslmode=disable")
-BLOB_ROOT = Path(os.getenv("NOVEL_BLOB_ROOT", "/data/novel")).resolve()
-MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
-db = NovelDatabase(POSTGRES_DSN, MIGRATIONS_DIR)
-
-app = FastAPI(title="RAG-QA 2.0 Novel Service", version="2.0.0")
+app = FastAPI(title="RAG-QA 2.0 Novel Service", version="3.0.0")
 
 
 class CreateLibraryRequest(BaseModel):
-    name: str
-    description: str = ""
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+
+
+class CreateUploadRequest(BaseModel):
+    library_id: str
+    title: str = Field(min_length=1, max_length=255)
+    volume_label: str = Field(default="", max_length=120)
+    spoiler_ack: bool = True
+    file_name: str = Field(min_length=1, max_length=255)
+    file_type: str = Field(min_length=1, max_length=16)
+    size_bytes: int = Field(gt=0)
+
+
+class PresignPartsRequest(BaseModel):
+    part_numbers: list[int] = Field(min_length=1, max_length=1000)
+
+
+class UploadPartItem(BaseModel):
+    part_number: int = Field(ge=1)
+    etag: str = Field(min_length=1, max_length=256)
+    size_bytes: int = Field(default=0, ge=0)
+
+
+class CompleteUploadRequest(BaseModel):
+    parts: list[UploadPartItem] = Field(default_factory=list)
+    content_hash: str = Field(default="", max_length=128)
+
+
+class RetrieveRequest(BaseModel):
+    library_id: str
+    question: str = Field(min_length=1, max_length=12000)
+    document_ids: list[str] = Field(default_factory=list)
+    limit: int = Field(default=8, ge=1, le=20)
 
 
 class NovelQueryRequest(BaseModel):
     library_id: str
-    question: str
-    document_ids: list[str] = []
+    question: str = Field(min_length=1, max_length=12000)
+    document_ids: list[str] = Field(default_factory=list)
     debug: bool = False
-
-
-def _ensure_blob_root() -> None:
-    BLOB_ROOT.mkdir(parents=True, exist_ok=True)
-
-
-def _append_event(document_id: str, stage: str, message: str, details: dict[str, Any] | None = None) -> None:
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO novel_document_events (document_id, stage, message, details_json)
-                VALUES (%s, %s, %s, %s::jsonb)
-                """,
-                (document_id, stage, message, to_json(details)),
-            )
-        conn.commit()
-
-
-def _update_document_status(
-    document_id: str,
-    *,
-    status: str,
-    chapter_count: int | None = None,
-    scene_count: int | None = None,
-    passage_count: int | None = None,
-    stats: dict[str, Any] | None = None,
-) -> None:
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE novel_documents
-                SET status = %s,
-                    chapter_count = COALESCE(%s, chapter_count),
-                    scene_count = COALESCE(%s, scene_count),
-                    passage_count = COALESCE(%s, passage_count),
-                    stats_json = COALESCE(%s::jsonb, stats_json),
-                    updated_at = NOW()
-                WHERE id = %s
-                """,
-                (
-                    status,
-                    chapter_count,
-                    scene_count,
-                    passage_count,
-                    to_json(stats) if stats is not None else None,
-                    document_id,
-                ),
-            )
-        conn.commit()
-
-
-def _load_document(document_id: str) -> dict[str, Any]:
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM novel_documents WHERE id = %s", (document_id,))
-            row = cur.fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="document not found")
-    return row
-
-
-def _replace_document_units(document_id: str, parsed: ParsedNovel) -> None:
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM novel_aliases WHERE document_id = %s", (document_id,))
-            cur.execute("DELETE FROM novel_event_digests WHERE document_id = %s", (document_id,))
-            cur.execute("DELETE FROM novel_passages WHERE document_id = %s", (document_id,))
-            cur.execute("DELETE FROM novel_scenes WHERE document_id = %s", (document_id,))
-            cur.execute("DELETE FROM novel_chapters WHERE document_id = %s", (document_id,))
-
-            for chapter in parsed.chapters:
-                cur.execute(
-                    """
-                    INSERT INTO novel_chapters (id, document_id, chapter_index, chapter_number, title, summary, char_start, char_end)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (chapter.id, document_id, chapter.chapter_index, chapter.chapter_number, chapter.title, chapter.summary, chapter.char_start, chapter.char_end),
-                )
-
-            for scene in parsed.scenes:
-                cur.execute(
-                    """
-                    INSERT INTO novel_scenes (id, document_id, chapter_id, chapter_index, scene_index, title, summary, search_text, char_start, char_end)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (scene.id, document_id, scene.chapter_id, scene.chapter_index, scene.scene_index, scene.title, scene.summary, scene.search_text, scene.char_start, scene.char_end),
-                )
-
-            for passage in parsed.passages:
-                cur.execute(
-                    """
-                    INSERT INTO novel_passages (id, document_id, chapter_id, scene_id, chapter_index, scene_index, passage_index, text_content, search_text, char_start, char_end)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (passage.id, document_id, passage.chapter_id, passage.scene_id, passage.chapter_index, passage.scene_index, passage.passage_index, passage.text, passage.search_text, passage.char_start, passage.char_end),
-                )
-
-            for item in parsed.event_digests:
-                cur.execute(
-                    """
-                    INSERT INTO novel_event_digests (id, document_id, chapter_id, scene_id, chapter_index, scene_index, who_text, where_text, what_text, result_text, search_text)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (item.id, document_id, item.chapter_id, item.scene_id, item.chapter_index, item.scene_index, item.who_text, item.where_text, item.what_text, item.result_text, item.search_text),
-                )
-
-            for alias in parsed.aliases:
-                cur.execute(
-                    """
-                    INSERT INTO novel_aliases (document_id, alias, canonical, kind, first_chapter_index)
-                    VALUES (%s, %s, %s, %s, %s)
-                    """,
-                    (document_id, alias.alias, alias.canonical, alias.kind, alias.first_chapter_index),
-                )
-        conn.commit()
-
-
-def _index_document(document_id: str) -> None:
-    document = _load_document(document_id)
-    _append_event(document_id, "parsing", "开始解析小说文本")
-    _update_document_status(document_id, status="parsing")
-    text = read_text_with_fallback(Path(document["storage_path"]))
-    parsed = parse_novel_text(text)
-    _replace_document_units(document_id, parsed)
-    preview = [chapter.title for chapter in parsed.chapters[:10]]
-    stats = {
-        "chapter_preview": preview,
-        "document_chars": len(text),
-        "event_digest_count": len(parsed.event_digests),
-        "alias_count": len(parsed.aliases),
-    }
-    _update_document_status(
-        document_id,
-        status="fast_index_ready",
-        chapter_count=len(parsed.chapters),
-        scene_count=len(parsed.scenes),
-        passage_count=len(parsed.passages),
-        stats=stats,
-    )
-    _append_event(document_id, "fast_index_ready", "小说已可检索，可直接发起剧情与细节问答", stats)
-    _update_document_status(document_id, status="enhancing", stats=stats)
-    _append_event(document_id, "enhancing", "正在补充人物别名与剧情事件摘要")
-    _update_document_status(document_id, status="ready", stats=stats)
-    _append_event(document_id, "ready", "小说增强完成")
-
-
-def _save_upload(file: UploadFile, document_id: str) -> tuple[Path, str, int]:
-    _ensure_blob_root()
-    extension = Path(file.filename or "source.txt").suffix or ".txt"
-    target_dir = BLOB_ROOT / document_id
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"source{extension}"
-    hasher = hashlib.sha256()
-    size_bytes = 0
-    with target_path.open("wb") as buffer:
-        while True:
-            chunk = file.file.read(1024 * 1024)
-            if not chunk:
-                break
-            hasher.update(chunk)
-            size_bytes += len(chunk)
-            buffer.write(chunk)
-    return target_path, hasher.hexdigest(), size_bytes
-
-
-def _fetch_library_documents(library_id: str) -> list[dict[str, Any]]:
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM novel_documents WHERE library_id = %s ORDER BY created_at DESC", (library_id,))
-            return cur.fetchall()
-
-
-def _novel_citations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        Citation(
-            unit_id=str(row["id"]),
-            document_id=str(row["document_id"]),
-            section_title=f"第{row['chapter_index']}章 / 场景{row['scene_index']}",
-            char_range=f"{row['char_start']}-{row['char_end']}",
-            quote=compact_quote(row["text_content"]),
-        ).__dict__
-        for row in rows
-    ]
-
-
-def _rank_passages(rows: list[dict[str, Any]], question: str) -> list[dict[str, Any]]:
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for row in rows:
-        value = score_text(question, row["search_text"])
-        if value <= 0:
-            continue
-        value += max(0.0, 2 - (row["chapter_index"] * 0.02))
-        scored.append((value, row))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    return [row for _, row in scored]
-
-
-def _extract_chapter_number(question: str) -> int:
-    match = re.search(r"第\s*([0-9]+)\s*章", question)
-    if match:
-        return int(match.group(1))
-    mapping = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
-    match = re.search(r"第\s*([一二三四五六七八九十两]+)\s*章", question)
-    if not match:
-        return 0
-    raw = match.group(1)
-    if raw == "十":
-        return 10
-    if raw.startswith("十"):
-        return 10 + mapping.get(raw[1], 0)
-    if raw.endswith("十"):
-        return mapping.get(raw[0], 0) * 10
-    if "十" in raw:
-        left, right = raw.split("十", 1)
-        return mapping.get(left, 0) * 10 + mapping.get(right, 0)
-    return mapping.get(raw, 0)
-
-
-def _query_novel(payload: NovelQueryRequest) -> dict[str, Any]:
-    strategy = detect_strategy(payload.question)
-    documents = _fetch_library_documents(payload.library_id)
-    doc_ids = payload.document_ids or [str(item["id"]) for item in documents if item["status"] in {"fast_index_ready", "enhancing", "ready"}]
-    if not doc_ids:
-        return build_refusal_response(strategy=strategy, reason="no_queryable_document")
-
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            if strategy == "chapter_summary":
-                number = _extract_chapter_number(payload.question)
-                cur.execute(
-                    """
-                    SELECT c.*, d.title AS document_title
-                    FROM novel_chapters c
-                    JOIN novel_documents d ON d.id = c.document_id
-                    WHERE c.document_id = ANY(%s::uuid[]) AND c.chapter_number = %s
-                    ORDER BY d.created_at DESC
-                    LIMIT 1
-                    """,
-                    (doc_ids, number),
-                )
-                chapter = cur.fetchone()
-                if chapter is None:
-                    return build_refusal_response(strategy=strategy, reason="chapter_not_found")
-                cur.execute(
-                    """
-                    SELECT *
-                    FROM novel_passages
-                    WHERE document_id = %s AND chapter_id = %s
-                    ORDER BY scene_index, passage_index
-                    LIMIT 2
-                    """,
-                    (chapter["document_id"], chapter["id"]),
-                )
-                passages = cur.fetchall()
-                return {
-                    "answer": f"{chapter['title']}主要围绕：{chapter['summary']}",
-                    "strategy_used": strategy,
-                    "evidence_status": "grounded",
-                    "grounding_score": 0.91,
-                    "refusal_reason": "",
-                    "citations": _novel_citations(passages),
-                }
-
-            cur.execute(
-                """
-                SELECT *
-                FROM novel_passages
-                WHERE document_id = ANY(%s::uuid[])
-                ORDER BY chapter_index, scene_index, passage_index
-                """,
-                (doc_ids,),
-            )
-            ranked = _rank_passages(cur.fetchall(), payload.question)
-
-    if strategy == "entity_detail":
-        entity = extract_entity_hint(payload.question)
-        if entity:
-            ranked = [row for row in ranked if entity in row["text_content"] or entity in row["search_text"]] or ranked
-        if not ranked:
-            return build_refusal_response(strategy=strategy, reason="entity_not_found")
-        return {
-            "answer": compact_quote(ranked[0]["text_content"], 140),
-            "strategy_used": strategy,
-            "evidence_status": "grounded",
-            "grounding_score": 0.88,
-            "refusal_reason": "",
-            "citations": _novel_citations(ranked[:1]),
-        }
-
-    if strategy == "plot_causal":
-        if len(ranked) < 2:
-            return build_refusal_response(strategy=strategy, reason="causal_evidence_insufficient")
-        first = ranked[0]
-        second = ranked[1] if ranked[1]["id"] != first["id"] else ranked[min(2, len(ranked) - 1)]
-        answer = f"从原文线索看，先发生“{compact_quote(first['text_content'], 70)}”，随后又出现“{compact_quote(second['text_content'], 70)}”，因此问题中的结果更接近这条因果链。"
-        return {
-            "answer": answer,
-            "strategy_used": strategy,
-            "evidence_status": "grounded",
-            "grounding_score": 0.86,
-            "refusal_reason": "",
-            "citations": _novel_citations([first, second]),
-        }
-
-    if strategy == "character_arc":
-        if len(ranked) < 2:
-            return build_refusal_response(strategy=strategy, reason="character_arc_insufficient")
-        first = ranked[0]
-        last = ranked[-1] if ranked[-1]["chapter_index"] != first["chapter_index"] else ranked[min(len(ranked) - 1, 1)]
-        answer = f"从已命中的章节看，人物状态有明显推进：前段更接近“{compact_quote(first['text_content'], 60)}”，后段则转向“{compact_quote(last['text_content'], 60)}”。"
-        return {
-            "answer": answer,
-            "strategy_used": strategy,
-            "evidence_status": "grounded",
-            "grounding_score": 0.84,
-            "refusal_reason": "",
-            "citations": _novel_citations([first, last]),
-        }
-
-    if strategy == "setting_theme":
-        if len(ranked) < 3:
-            return build_refusal_response(strategy=strategy, reason="theme_evidence_insufficient")
-        picks = [ranked[0], ranked[min(1, len(ranked) - 1)], ranked[min(2, len(ranked) - 1)]]
-        answer = f"结合多处原文，这一设定/主题主要体现为：{compact_quote(picks[0]['text_content'], 65)}；同时还能从“{compact_quote(picks[1]['text_content'], 55)}”和“{compact_quote(picks[2]['text_content'], 55)}”得到补强。"
-        return {
-            "answer": answer,
-            "strategy_used": strategy,
-            "evidence_status": "grounded",
-            "grounding_score": 0.82,
-            "refusal_reason": "",
-            "citations": _novel_citations(picks),
-        }
-
-    if not ranked:
-        return build_refusal_response(strategy=strategy, reason="plot_evidence_insufficient")
-    picks = ranked[:2]
-    answer = f"从已命中的情节片段看，直接相关的剧情是：{compact_quote(picks[0]['text_content'], 110)}"
-    if len(picks) > 1:
-        answer += f"。补充线索还包括：{compact_quote(picks[1]['text_content'], 70)}"
-    return {
-        "answer": answer,
-        "strategy_used": strategy,
-        "evidence_status": "grounded",
-        "grounding_score": 0.85,
-        "refusal_reason": "",
-        "citations": _novel_citations(picks),
-    }
 
 
 @app.on_event("startup")
 def on_startup() -> None:
-    _ensure_blob_root()
-    db.ensure_schema()
+    ensure_runtime()
+
+
+@app.middleware("http")
+async def trace_middleware(request: Request, call_next):
+    trace_id = ensure_trace_id(request.headers.get(TRACE_ID_HEADER), prefix="novel-")
+    token = set_trace_id(trace_id)
+    try:
+        response = await call_next(request)
+    finally:
+        reset_trace_id(token)
+    response.headers[TRACE_ID_HEADER] = trace_id
+    return response
 
 
 @app.get("/healthz")
@@ -407,9 +97,19 @@ def create_library(payload: CreateLibraryRequest, user: CurrentUser) -> dict[str
     library_id = str(uuid4())
     with db.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO novel_libraries (id, name, description, created_by) VALUES (%s, %s, %s, %s)", (library_id, payload.name.strip(), payload.description.strip(), user.user_id))
+            cur.execute(
+                """
+                INSERT INTO novel_libraries (id, name, description, created_by)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (library_id, payload.name.strip(), payload.description.strip(), user.user_id),
+            )
         conn.commit()
-    return {"id": library_id, "name": payload.name.strip(), "description": payload.description.strip()}
+    return {
+        "id": library_id,
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+    }
 
 
 @app.get("/api/v1/novel/libraries")
@@ -426,35 +126,6 @@ def list_library_documents(library_id: str, user: CurrentUser) -> dict[str, Any]
     return {"items": _fetch_library_documents(library_id)}
 
 
-@app.post("/api/v1/novel/documents/upload")
-def upload_document(
-    background_tasks: BackgroundTasks,
-    user: CurrentUser,
-    library_id: str = Form(...),
-    title: str = Form(...),
-    volume_label: str = Form(""),
-    spoiler_ack: bool = Form(False),
-    file: UploadFile = File(...),
-) -> dict[str, Any]:
-    if Path(file.filename or "").suffix.lower() != ".txt":
-        raise HTTPException(status_code=400, detail="novel upload only accepts txt in v1")
-    document_id = str(uuid4())
-    target_path, content_hash, size_bytes = _save_upload(file, document_id)
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO novel_documents (id, library_id, title, volume_label, file_name, content_hash, storage_path, size_bytes, status, created_by, stats_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'uploaded', %s, %s::jsonb)
-                """,
-                (document_id, library_id, title.strip(), volume_label.strip(), file.filename or "source.txt", content_hash, str(target_path), size_bytes, user.user_id, to_json({"spoiler_ack": bool(spoiler_ack)})),
-            )
-        conn.commit()
-    _append_event(document_id, "uploaded", "文件已接收，等待快速索引", {"size_bytes": size_bytes})
-    background_tasks.add_task(_index_document, document_id)
-    return {"id": document_id, "library_id": library_id, "title": title.strip(), "volume_label": volume_label.strip(), "status": "uploaded", "size_bytes": size_bytes, "content_hash": content_hash}
-
-
 @app.get("/api/v1/novel/documents/{document_id}")
 def get_document(document_id: str, user: CurrentUser) -> dict[str, Any]:
     return _load_document(document_id)
@@ -464,21 +135,513 @@ def get_document(document_id: str, user: CurrentUser) -> dict[str, Any]:
 def get_document_events(document_id: str, user: CurrentUser) -> dict[str, Any]:
     with db.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM novel_document_events WHERE document_id = %s ORDER BY created_at DESC", (document_id,))
+            cur.execute(
+                """
+                SELECT *
+                FROM novel_document_events
+                WHERE document_id = %s
+                ORDER BY created_at DESC
+                """,
+                (document_id,),
+            )
             rows = cur.fetchall()
     return {"items": rows}
 
 
+@app.post("/api/v1/novel/uploads")
+def create_upload(payload: CreateUploadRequest, user: CurrentUser) -> dict[str, Any]:
+    file_type = payload.file_type.lower().lstrip(".")
+    if file_type != "txt":
+        raise HTTPException(status_code=400, detail="novel upload currently supports txt only")
+    _ensure_library_exists(payload.library_id)
+
+    upload_id = str(uuid4())
+    storage_key = storage.build_storage_key(service="novel", document_id=upload_id, file_name=payload.file_name)
+    s3_upload_id = storage.create_multipart_upload(
+        storage_key,
+        metadata={
+            "upload_id": upload_id,
+            "library_id": payload.library_id,
+            "created_by": user.user_id,
+        },
+    )
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO novel_upload_sessions (
+                    id, library_id, title, volume_label, file_name, file_type, size_bytes,
+                    storage_key, s3_upload_id, status, created_by, spoiler_ack, expires_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, 'pending_upload', %s, %s, NOW() + INTERVAL '1 hour'
+                )
+                """,
+                (
+                    upload_id,
+                    payload.library_id,
+                    payload.title.strip(),
+                    payload.volume_label.strip(),
+                    payload.file_name,
+                    file_type,
+                    payload.size_bytes,
+                    storage_key,
+                    s3_upload_id,
+                    user.user_id,
+                    payload.spoiler_ack,
+                ),
+            )
+        conn.commit()
+    return _serialize_upload_session(_load_upload_session(upload_id))
+
+
+@app.get("/api/v1/novel/uploads/{upload_id}")
+def get_upload(upload_id: str, user: CurrentUser) -> dict[str, Any]:
+    return _serialize_upload_session(_load_upload_session(upload_id))
+
+
+@app.post("/api/v1/novel/uploads/{upload_id}/parts/presign")
+def presign_upload_parts(upload_id: str, payload: PresignPartsRequest, user: CurrentUser) -> dict[str, Any]:
+    session = _load_upload_session(upload_id)
+    uploaded_parts = _list_uploaded_parts(session)
+    uploaded_numbers = {item["part_number"] for item in uploaded_parts}
+
+    urls = []
+    for part_number in payload.part_numbers:
+        if part_number in uploaded_numbers:
+            continue
+        urls.append(
+            {
+                "part_number": int(part_number),
+                "url": storage.presign_upload_part(
+                    str(session["storage_key"]),
+                    str(session["s3_upload_id"]),
+                    int(part_number),
+                    expires_in=UPLOAD_PART_EXPIRES_SECONDS,
+                ),
+            }
+        )
+
+    _update_upload_status(upload_id, "uploading")
+    return {
+        "upload_id": upload_id,
+        "uploaded_parts": uploaded_parts,
+        "presigned_parts": urls,
+        "chunk_size_bytes": 5 * 1024 * 1024,
+    }
+
+
+@app.post("/api/v1/novel/uploads/{upload_id}/complete")
+def complete_upload(upload_id: str, payload: CompleteUploadRequest, user: CurrentUser) -> dict[str, Any]:
+    session = _load_upload_session(upload_id)
+    if session.get("document_id"):
+        return _complete_payload(str(session["document_id"]))
+
+    parts = [
+        {
+            "PartNumber": int(item.part_number),
+            "ETag": item.etag,
+            "size_bytes": int(item.size_bytes),
+        }
+        for item in payload.parts
+    ]
+    if not parts:
+        parts = _list_uploaded_parts(session, internal_shape=True)
+    if not parts:
+        raise HTTPException(status_code=400, detail="no uploaded parts found")
+
+    storage.complete_multipart_upload(
+        str(session["storage_key"]),
+        str(session["s3_upload_id"]),
+        [{"PartNumber": item["PartNumber"], "ETag": item["ETag"]} for item in sorted(parts, key=lambda row: row["PartNumber"])],
+    )
+    _persist_upload_parts(upload_id, parts)
+    object_meta = storage.stat_object(str(session["storage_key"]))
+
+    document_id = str(uuid4())
+    job_id = str(uuid4())
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO novel_documents (
+                    id, library_id, title, volume_label, file_name, content_hash, storage_path,
+                    storage_key, size_bytes, status, query_ready, enhancement_status,
+                    created_by, stats_json, upload_session_id
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, '',
+                    %s, %s, 'uploaded', FALSE, '', %s, %s::jsonb, %s
+                )
+                """,
+                (
+                    document_id,
+                    session["library_id"],
+                    session["title"],
+                    session["volume_label"],
+                    session["file_name"],
+                    payload.content_hash.strip(),
+                    session["storage_key"],
+                    int(object_meta.get("ContentLength") or session["size_bytes"]),
+                    user.user_id,
+                    to_json({"spoiler_ack": bool(session.get("spoiler_ack")), "upload_mode": "multipart"}),
+                    upload_id,
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO novel_ingest_jobs (
+                    id, document_id, status, phase, query_ready, enhancement_status, checkpoint_json
+                )
+                VALUES (%s, %s, 'queued', 'uploaded', FALSE, '', '{}'::jsonb)
+                """,
+                (job_id, document_id),
+            )
+            cur.execute(
+                """
+                UPDATE novel_upload_sessions
+                SET status = 'completed',
+                    content_hash = %s,
+                    document_id = %s,
+                    completed_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (payload.content_hash.strip(), document_id, upload_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO novel_document_events (document_id, stage, message, details_json)
+                VALUES (%s, 'uploaded', 'multipart upload completed', %s::jsonb)
+                """,
+                (document_id, to_json({"job_id": job_id, "size_bytes": int(object_meta.get("ContentLength") or 0)})),
+            )
+        conn.commit()
+    return _complete_payload(document_id)
+
+
+@app.get("/api/v1/novel/ingest-jobs/{job_id}")
+def get_ingest_job(job_id: str, user: CurrentUser) -> dict[str, Any]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT jobs.*, documents.status AS document_status, documents.query_ready,
+                       documents.enhancement_status AS document_enhancement_status,
+                       documents.query_ready_at, documents.hybrid_ready_at, documents.ready_at,
+                       documents.query_ready_until_chapter
+                FROM novel_ingest_jobs jobs
+                JOIN novel_documents documents ON documents.id = jobs.document_id
+                WHERE jobs.id = %s
+                """,
+                (job_id,),
+            )
+            row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="ingest job not found")
+    return row
+
+
+@app.post("/api/v1/novel/retrieve")
+def retrieve_novel(payload: RetrieveRequest, user: CurrentUser) -> dict[str, Any]:
+    result = retrieve_novel_result(
+        library_id=payload.library_id,
+        question=payload.question,
+        document_ids=payload.document_ids,
+        limit=payload.limit,
+    )
+    return {
+        "items": [_serialize_evidence(item, corpus_id=f"novel:{payload.library_id}") for item in result.items],
+        "retrieval": result.stats.as_dict(),
+        "trace_id": current_trace_id(),
+    }
+
+
 @app.post("/api/v1/novel/query")
 def query_novel(payload: NovelQueryRequest, user: CurrentUser) -> dict[str, Any]:
-    return _query_novel(payload)
+    return _build_query_response(payload)
 
 
 @app.post("/api/v1/novel/query/stream")
 def stream_query_novel(payload: NovelQueryRequest, user: CurrentUser) -> StreamingResponse:
-    result = _query_novel(payload)
+    result = _build_query_response(payload)
 
     def generate() -> Any:
         yield from iter_query_sse_messages(result)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/api/v1/novel/documents/upload")
+def upload_document(
+    user: CurrentUser,
+    library_id: str = Form(...),
+    title: str = Form(...),
+    volume_label: str = Form(""),
+    spoiler_ack: bool = Form(True),
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    file_type = (file.filename or "").split(".")[-1].lower()
+    if file_type != "txt":
+        raise HTTPException(status_code=400, detail="novel upload currently supports txt only")
+
+    raw = file.file.read()
+    content_hash = hashlib.sha256(raw).hexdigest()
+    document_id = str(uuid4())
+    job_id = str(uuid4())
+    storage_key = storage.build_storage_key(service="novel-legacy", document_id=document_id, file_name=file.filename or "source.txt")
+    storage.put_bytes(storage_key, raw, metadata={"document_id": document_id, "legacy": "true"})
+
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO novel_documents (
+                    id, library_id, title, volume_label, file_name, content_hash, storage_path,
+                    storage_key, size_bytes, status, query_ready, enhancement_status,
+                    created_by, stats_json
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, '',
+                    %s, %s, 'uploaded', FALSE, '', %s, %s::jsonb
+                )
+                """,
+                (
+                    document_id,
+                    library_id,
+                    title.strip(),
+                    volume_label.strip(),
+                    file.filename or "source.txt",
+                    content_hash,
+                    storage_key,
+                    len(raw),
+                    user.user_id,
+                    to_json({"spoiler_ack": bool(spoiler_ack), "legacy_upload": True}),
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO novel_ingest_jobs (id, document_id, status, phase, checkpoint_json)
+                VALUES (%s, %s, 'queued', 'uploaded', '{}'::jsonb)
+                """,
+                (job_id, document_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO novel_document_events (document_id, stage, message, details_json)
+                VALUES (%s, 'uploaded', 'legacy direct upload completed', %s::jsonb)
+                """,
+                (document_id, to_json({"job_id": job_id})),
+            )
+        conn.commit()
+    return {
+        "id": document_id,
+        "job_id": job_id,
+        "status": "uploaded",
+    }
+
+
+def _build_query_response(payload: NovelQueryRequest) -> dict[str, Any]:
+    strategy = detect_strategy(payload.question)
+    retrieval = retrieve_novel_result(
+        library_id=payload.library_id,
+        question=payload.question,
+        document_ids=payload.document_ids,
+        limit=8,
+    )
+    evidence = retrieval.items
+    if not evidence:
+        result = build_refusal_response(strategy=strategy, reason="no_relevant_evidence")
+        result["answer_mode"] = "refusal"
+        result["evidence_path"] = []
+        result["retrieval"] = retrieval.stats.as_dict()
+        result["trace_id"] = current_trace_id()
+        return result
+
+    top_score = float(evidence[0].evidence_path.final_score)
+    strong_items = [item for item in evidence if float(item.evidence_path.final_score) >= 0.02]
+    if len(strong_items) >= 2 and top_score >= 0.02:
+        answer_mode = "grounded"
+        evidence_status = "grounded"
+        grounding_score = min(0.95, 0.62 + (len(strong_items) * 0.05) + top_score)
+        answer = _grounded_answer(evidence[:2])
+        refusal_reason = ""
+    elif top_score >= 0.01:
+        answer_mode = "weak_grounded"
+        evidence_status = "partial"
+        grounding_score = min(0.72, 0.46 + top_score)
+        answer = (
+            f"根据当前证据，我只能保守确认：{compact_quote(evidence[0].raw_text, 160)}。"
+            "现有证据不足以支持更强结论。 [1]"
+        )
+        refusal_reason = "partial_evidence"
+    else:
+        answer_mode = "refusal"
+        evidence_status = "insufficient"
+        grounding_score = 0.0
+        answer = "当前小说证据不足，无法给出可靠回答。"
+        refusal_reason = "insufficient_evidence"
+
+    citations = [_serialize_evidence(item, corpus_id=f"novel:{payload.library_id}") for item in evidence]
+    return {
+        "answer": answer,
+        "answer_mode": answer_mode,
+        "strategy_used": strategy,
+        "evidence_status": evidence_status,
+        "grounding_score": grounding_score,
+        "refusal_reason": refusal_reason,
+        "citations": citations,
+        "evidence_path": [item["evidence_path"] for item in citations],
+        "retrieval": retrieval.stats.as_dict(),
+        "trace_id": current_trace_id(),
+    }
+
+
+def _grounded_answer(evidence: list[Any]) -> str:
+    first = evidence[0]
+    answer = f"最直接的证据来自《{first.document_title}》的 {first.section_title}：{compact_quote(first.raw_text, 130)} [1]"
+    if len(evidence) > 1:
+        second = evidence[1]
+        answer += f"；补充证据见 {second.section_title}：{compact_quote(second.raw_text, 90)} [2]"
+    return answer
+
+
+def _ensure_library_exists(library_id: str) -> None:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM novel_libraries WHERE id = %s", (library_id,))
+            exists = cur.fetchone()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="novel library not found")
+
+
+def _fetch_library_documents(library_id: str) -> list[dict[str, Any]]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM novel_documents
+                WHERE library_id = %s
+                ORDER BY created_at DESC
+                """,
+                (library_id,),
+            )
+            return cur.fetchall()
+
+
+def _load_document(document_id: str) -> dict[str, Any]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM novel_documents WHERE id = %s", (document_id,))
+            row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return row
+
+
+def _load_upload_session(upload_id: str) -> dict[str, Any]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM novel_upload_sessions WHERE id = %s", (upload_id,))
+            row = cur.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="upload session not found")
+    return row
+
+
+def _update_upload_status(upload_id: str, status: str) -> None:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE novel_upload_sessions
+                SET status = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (status, upload_id),
+            )
+        conn.commit()
+
+
+def _list_uploaded_parts(session: dict[str, Any], *, internal_shape: bool = False) -> list[dict[str, Any]]:
+    parts = storage.list_parts(str(session["storage_key"]), str(session["s3_upload_id"]))
+    normalized = []
+    for item in parts:
+        if internal_shape:
+            normalized.append(
+                {
+                    "PartNumber": int(item["PartNumber"]),
+                    "ETag": str(item["ETag"]),
+                    "size_bytes": int(item.get("Size") or 0),
+                }
+            )
+        else:
+            normalized.append(
+                {
+                    "part_number": int(item["PartNumber"]),
+                    "etag": str(item["ETag"]),
+                    "size_bytes": int(item.get("Size") or 0),
+                }
+            )
+    return normalized
+
+
+def _persist_upload_parts(upload_id: str, parts: list[dict[str, Any]]) -> None:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO novel_upload_parts (upload_session_id, part_number, etag, size_bytes, status)
+                VALUES (%s, %s, %s, %s, 'uploaded')
+                ON CONFLICT (upload_session_id, part_number)
+                DO UPDATE SET etag = EXCLUDED.etag, size_bytes = EXCLUDED.size_bytes, status = EXCLUDED.status
+                """,
+                [
+                    (
+                        upload_id,
+                        int(item["PartNumber"]),
+                        str(item["ETag"]),
+                        int(item.get("size_bytes") or 0),
+                    )
+                    for item in parts
+                ],
+            )
+        conn.commit()
+
+
+def _complete_payload(document_id: str) -> dict[str, Any]:
+    document = _load_document(document_id)
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id::text
+                FROM novel_ingest_jobs
+                WHERE document_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (document_id,),
+            )
+            job = cur.fetchone()
+    return {
+        "document_id": document_id,
+        "job_id": str(job["id"]) if job else "",
+        "document": document,
+    }
+
+
+def _serialize_upload_session(session: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **session,
+        "uploaded_parts": _list_uploaded_parts(session),
+    }
+
+
+def _serialize_evidence(item: Any, *, corpus_id: str) -> dict[str, Any]:
+    payload = item.as_dict()
+    payload["corpus_id"] = corpus_id
+    payload["service_type"] = "novel"
+    return payload

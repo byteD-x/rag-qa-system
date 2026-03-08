@@ -5,4 +5,4 @@
 ## 文件说明
 
 - `check-encoding.py`：检查文本文件编码
-- `ci-check.ps1`：统一执行编码、编译、前端构建和 compose 校验
+- `ci-check.ps1`：统一执行编码、编译、前端构建、pytest、ablation smoke、local benchmark 和 compose 校验

@@ -2,11 +2,11 @@
   <div class="page">
     <section class="page-header kb-header">
       <div>
-        <el-tag type="success" effect="dark">企业库线路</el-tag>
-        <h1>企业知识库上传线路</h1>
-        <p>支持 txt / pdf / docx 批量导入。与小说线路分开校验、分开状态、分开问答。</p>
+        <el-tag type="success" effect="dark">企业文档上传</el-tag>
+        <h1>分块直传与异步索引</h1>
+        <p>文件按 5MB 分块直传对象存储，上传完成立即返回，解析与增强在后台继续推进。</p>
       </div>
-      <el-button plain @click="router.push('/workspace/kb/chat')">前往企业库问答</el-button>
+      <el-button plain @click="router.push('/workspace/chat')">前往统一 QA</el-button>
     </section>
 
     <section class="grid two-columns">
@@ -15,7 +15,7 @@
           <div class="card-head">
             <div>
               <h2>知识库</h2>
-              <p>企业库上传只能进入企业知识库内核。</p>
+              <p>先选择或创建知识库，再开始上传。</p>
             </div>
             <el-tag effect="plain">{{ bases.length }} 个知识库</el-tag>
           </div>
@@ -31,7 +31,7 @@
             <el-input v-model="baseForm.name" placeholder="例如：运营制度库" />
           </el-form-item>
           <el-form-item label="分类">
-            <el-input v-model="baseForm.category" placeholder="例如：制度 / 培训 / 合同" />
+            <el-input v-model="baseForm.category" placeholder="例如：制度 / FAQ / 合同" />
           </el-form-item>
           <el-form-item label="说明">
             <el-input v-model="baseForm.description" type="textarea" :rows="3" placeholder="描述该知识库的用途" />
@@ -44,8 +44,8 @@
         <template #header>
           <div class="card-head">
             <div>
-              <h2>批量上传</h2>
-              <p>支持多文件同批导入，并保留文档分类。</p>
+              <h2>上传任务</h2>
+              <p>浏览器直传 MinIO，支持断点续传与后台索引。</p>
             </div>
             <el-tag type="success" effect="plain">TXT / PDF / DOCX</el-tag>
           </div>
@@ -62,13 +62,21 @@
             </div>
             <input ref="fileInputRef" class="hidden-input" type="file" accept=".txt,.pdf,.docx" multiple @change="handleFileChange" />
           </el-form-item>
+
           <div class="selected-files">
-            <el-empty v-if="!selectedFiles.length" description="选择文件后将在这里展示批处理清单" />
-            <ul v-else>
-              <li v-for="file in selectedFiles" :key="file.name">{{ file.name }} · {{ file.size }} bytes</li>
-            </ul>
+            <el-empty v-if="!selectedFiles.length" description="选择文件后会显示上传进度" />
+            <div v-else class="file-progress-list">
+              <div v-for="file in selectedFiles" :key="fileFingerprint(file)" class="file-progress-item">
+                <div class="status-row">
+                  <strong>{{ file.name }}</strong>
+                  <span>{{ formatBytes(file.size) }}</span>
+                </div>
+                <el-progress :percentage="Math.round((uploadProgress[fileFingerprint(file)] || 0) * 100)" />
+              </div>
+            </div>
           </div>
-          <el-button type="primary" :loading="uploading" @click="handleUpload">批量上传并启动索引</el-button>
+
+          <el-button type="primary" :loading="uploading" @click="handleUpload">开始上传并索引</el-button>
         </el-form>
       </el-card>
     </section>
@@ -78,13 +86,13 @@
         <template #header>
           <div class="card-head">
             <div>
-              <h2>最近批次</h2>
-              <p>企业库线路按文档逐个追踪状态。</p>
+              <h2>最近文档</h2>
+              <p>上传完成后会立即出现，索引状态持续刷新。</p>
             </div>
           </div>
         </template>
 
-        <el-empty v-if="!latestDocuments.length" description="当前没有上传批次" />
+        <el-empty v-if="!latestDocuments.length" description="当前没有文档记录" />
         <div v-else class="document-list">
           <el-card v-for="document in latestDocuments" :key="document.id" shadow="hover" class="document-card">
             <div class="status-row">
@@ -105,7 +113,7 @@
         <DocumentEvents
           :items="events"
           title="处理事件"
-          description="企业库线路独立记录上传、解析、快速可查与增强阶段。"
+          description="记录上传、解析、快速可查、混合检索就绪与增强阶段。"
         />
       </el-card>
     </section>
@@ -118,13 +126,17 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import DocumentEvents from '@/components/DocumentEvents.vue';
 import {
+  completeKBUpload,
+  createKBUpload,
   createKnowledgeBase,
-  getKBDocument,
   getKBDocumentEvents,
+  getKBIngestJob,
+  getKBUpload,
   listKBDocuments,
   listKnowledgeBases,
-  uploadKBDocuments
+  presignKBUploadParts
 } from '@/api/kb';
+import { uploadMultipartFile } from '@/utils/multipartUpload';
 import { statusMeta } from '@/utils/status';
 
 const router = useRouter();
@@ -135,6 +147,7 @@ const selectedBaseId = ref('');
 const selectedFiles = ref<File[]>([]);
 const latestDocuments = ref<any[]>([]);
 const events = ref<any[]>([]);
+const uploadProgress = ref<Record<string, number>>({});
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const creatingBase = ref(false);
@@ -150,6 +163,18 @@ const baseForm = reactive({
 const uploadForm = reactive({
   category: ''
 });
+
+const fileFingerprint = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+
+const formatBytes = (value: number) => {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  if (value < 1024 * 1024) {
+    return `${(value / 1024).toFixed(1)} KB`;
+  }
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 const clearPoller = () => {
   if (pollTimer !== null) {
@@ -169,6 +194,16 @@ const loadBases = async () => {
 const loadDocuments = async (baseId: string) => {
   const res: any = await listKBDocuments(baseId);
   latestDocuments.value = res.items || [];
+};
+
+const refreshEventFocus = async () => {
+  if (!latestDocuments.value.length) {
+    events.value = [];
+    return;
+  }
+  const focus = latestDocuments.value[0];
+  const result: any = await getKBDocumentEvents(focus.id);
+  events.value = result.items || [];
 };
 
 const pickFiles = () => {
@@ -203,19 +238,9 @@ const handleCreateBase = async () => {
   }
 };
 
-const refreshEventFocus = async () => {
-  if (!latestDocuments.value.length) {
-    events.value = [];
-    return;
-  }
-  const focus = latestDocuments.value[0];
-  const result: any = await getKBDocumentEvents(focus.id);
-  events.value = result.items || [];
-};
-
-const pollDocuments = async (documentIds: string[]) => {
-  const snapshots = await Promise.all(documentIds.map((id) => getKBDocument(id)));
-  const completed = snapshots.every((document: any) => ['ready', 'failed'].includes(String(document.status)));
+const pollJobs = async (jobIds: string[]) => {
+  const snapshots = await Promise.all(jobIds.map((jobId) => getKBIngestJob(jobId)));
+  const completed = snapshots.every((job: any) => ['ready', 'failed'].includes(String(job.document_status || job.status)));
   if (selectedBaseId.value) {
     await loadDocuments(selectedBaseId.value);
   }
@@ -225,8 +250,39 @@ const pollDocuments = async (documentIds: string[]) => {
     return;
   }
   pollTimer = window.setTimeout(() => {
-    void pollDocuments(documentIds);
+    void pollJobs(jobIds);
   }, 2000);
+};
+
+const uploadSingleFile = async (file: File) => {
+  const fingerprint = fileFingerprint(file);
+  const result = await uploadMultipartFile({
+    file,
+    resumeKey: `kb-upload:${selectedBaseId.value}:${fingerprint}`,
+    controller: {
+      createUpload: () => createKBUpload({
+        base_id: selectedBaseId.value,
+        file_name: file.name,
+        file_type: file.name.split('.').pop()?.toLowerCase() || 'txt',
+        size_bytes: file.size,
+        category: uploadForm.category.trim()
+      }) as Promise<any>,
+      getUpload: (uploadId: string) => getKBUpload(uploadId) as Promise<any>,
+      presignParts: (uploadId: string, partNumbers: number[]) => presignKBUploadParts(uploadId, partNumbers) as Promise<any>,
+      completeUpload: (uploadId: string, parts) => completeKBUpload(uploadId, parts) as Promise<any>
+    },
+    onProgress: ({ ratio }) => {
+      uploadProgress.value = {
+        ...uploadProgress.value,
+        [fingerprint]: ratio
+      };
+    }
+  });
+  uploadProgress.value = {
+    ...uploadProgress.value,
+    [fingerprint]: 1
+  };
+  return result.result;
 };
 
 const handleUpload = async () => {
@@ -240,16 +296,14 @@ const handleUpload = async () => {
   }
   uploading.value = true;
   try {
-    const result: any = await uploadKBDocuments({
-      baseId: selectedBaseId.value,
-      category: uploadForm.category.trim(),
-      files: selectedFiles.value
-    });
-    const items = result.items || [];
+    const completed = [];
+    for (const file of selectedFiles.value) {
+      completed.push(await uploadSingleFile(file));
+    }
     await loadDocuments(selectedBaseId.value);
     await refreshEventFocus();
-    await pollDocuments(items.map((item: any) => item.id));
-    ElMessage.success('企业文档已接收，正在索引');
+    await pollJobs(completed.map((item: any) => String(item.job_id)));
+    ElMessage.success('文件已接收，后台正在分阶段索引');
   } finally {
     uploading.value = false;
   }
@@ -261,8 +315,9 @@ const openDocument = (documentId: string) => {
 
 const openInChat = (documentId: string) => {
   router.push({
-    path: '/workspace/kb/chat',
+    path: '/workspace/chat',
     query: {
+      preset: 'kb',
       baseId: selectedBaseId.value,
       documentId
     }
@@ -319,13 +374,10 @@ onBeforeUnmount(() => {
   line-height: 1.7;
 }
 
-.grid {
+.grid.two-columns {
   display: grid;
-  gap: 20px;
-}
-
-.two-columns {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
 }
 
 .panel {
@@ -341,7 +393,6 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: flex-start;
 }
 
 .card-head h2 {
@@ -359,32 +410,25 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.hidden-input {
-  display: none;
-}
-
 .file-name {
   color: var(--text-secondary);
 }
 
-.selected-files {
-  margin-bottom: 18px;
+.hidden-input {
+  display: none;
 }
 
-.selected-files ul {
-  margin: 0;
-  padding-left: 20px;
-  line-height: 1.8;
-}
-
+.selected-files,
+.file-progress-list,
 .document-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 14px;
 }
 
+.file-progress-item,
 .document-card {
-  border-radius: 20px;
+  border-radius: 18px;
 }
 
 .status-row,
@@ -395,8 +439,8 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-@media (max-width: 1080px) {
-  .two-columns {
+@media (max-width: 1200px) {
+  .grid.two-columns {
     grid-template-columns: 1fr;
   }
 }

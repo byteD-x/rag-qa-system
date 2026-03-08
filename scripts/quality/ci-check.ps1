@@ -5,6 +5,9 @@ param(
     [switch]$SkipBackendCompile,
     [switch]$SkipFrontendBuild,
     [switch]$SkipDockerConfig,
+    [switch]$SkipPytest,
+    [switch]$SkipEvalSmoke,
+    [switch]$SkipLocalBenchmark,
     [switch]$IncludeDockerBuild
 )
 
@@ -80,6 +83,41 @@ if (-not $SkipFrontendBuild) {
 if (-not $SkipDockerConfig) {
     Invoke-Check "Docker Compose Config" {
         Invoke-DockerCompose -Arguments @("config", "--quiet")
+    }
+}
+
+if (-not $SkipPytest) {
+    Invoke-Check "Pytest" {
+        $args = @($python.BaseArguments) + @("-m", "pytest", "tests", "-q")
+        Invoke-RepoTool -Command $python.Command -Arguments $args
+    }
+}
+
+if (-not $SkipEvalSmoke) {
+    Invoke-Check "Retrieval Ablation Smoke" {
+        $args = @($python.BaseArguments) + @(
+            "scripts/evals/run-retrieval-ablation.py",
+            "--fixture",
+            "tests/evals/retrieval-ablation-fixture.json",
+            "--output",
+            "docs/reports/ci_retrieval_ablation.json",
+            "--summary-output",
+            "docs/reports/ci_retrieval_ablation.md"
+        )
+        Invoke-RepoTool -Command $python.Command -Arguments $args
+    }
+}
+
+if (-not $SkipLocalBenchmark) {
+    Invoke-Check "Local Ingest Benchmark" {
+        $args = @($python.BaseArguments) + @(
+            "scripts/evals/benchmark-local-ingest.py",
+            "--output",
+            "docs/reports/ci_local_ingest_benchmark.json",
+            "--summary-output",
+            "docs/reports/ci_local_ingest_benchmark.md"
+        )
+        Invoke-RepoTool -Command $python.Command -Arguments $args
     }
 }
 

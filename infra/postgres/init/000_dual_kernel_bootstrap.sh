@@ -7,4 +7,7 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'novel_app')\gexec
 
 SELECT 'CREATE DATABASE kb_app'
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'kb_app')\gexec
+
+SELECT 'CREATE DATABASE gateway_app'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'gateway_app')\gexec
 EOSQL

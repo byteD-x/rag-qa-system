@@ -1,4 +1,5 @@
 import request, { streamRequest, type StreamRequestOptions } from './request';
+import type { UploadPartPayload } from './kb';
 
 export function listNovelLibraries() {
   return request.get('/novel/libraries');
@@ -18,6 +19,39 @@ export function getNovelDocument(documentId: string) {
 
 export function getNovelDocumentEvents(documentId: string) {
   return request.get(`/novel/documents/${documentId}/events`);
+}
+
+export function createNovelUpload(data: {
+  library_id: string;
+  title: string;
+  volume_label?: string;
+  spoiler_ack?: boolean;
+  file_name: string;
+  file_type: string;
+  size_bytes: number;
+}) {
+  return request.post('/novel/uploads', data);
+}
+
+export function getNovelUpload(uploadId: string) {
+  return request.get(`/novel/uploads/${uploadId}`);
+}
+
+export function presignNovelUploadParts(uploadId: string, partNumbers: number[]) {
+  return request.post(`/novel/uploads/${uploadId}/parts/presign`, {
+    part_numbers: partNumbers
+  });
+}
+
+export function completeNovelUpload(uploadId: string, parts: UploadPartPayload[], contentHash = '') {
+  return request.post(`/novel/uploads/${uploadId}/complete`, {
+    parts,
+    content_hash: contentHash
+  });
+}
+
+export function getNovelIngestJob(jobId: string) {
+  return request.get(`/novel/ingest-jobs/${jobId}`);
 }
 
 export async function uploadNovelDocument(payload: {

@@ -3,7 +3,7 @@
     <div class="section-header">
       <div>
         <h3>{{ title }}</h3>
-        <p>所有答案都必须回落到明确引用。</p>
+        <p>所有回答都必须回落到明确引用。</p>
       </div>
       <el-tag type="info" effect="plain">{{ citations.length }} 条引用</el-tag>
     </div>
@@ -15,11 +15,23 @@
         <div class="citation-top">
           <div>
             <strong>{{ citation.section_title || '未命名片段' }}</strong>
+            <p>{{ citation.document_title || citation.document_id }}</p>
             <p>{{ citation.char_range || '-' }}</p>
           </div>
-          <router-link :to="documentPath(citation.document_id)" class="document-link">
+          <router-link :to="documentPath(citation)" class="document-link">
             打开文档
           </router-link>
+        </div>
+        <div class="citation-meta">
+          <el-tag size="small" effect="plain">{{ citation.corpus_type || mode }}</el-tag>
+          <el-tag
+            v-if="citation.evidence_path?.final_score !== undefined"
+            size="small"
+            effect="plain"
+            type="success"
+          >
+            score {{ Number(citation.evidence_path.final_score || 0).toFixed(3) }}
+          </el-tag>
         </div>
         <p class="quote">{{ citation.quote }}</p>
       </el-card>
@@ -31,22 +43,28 @@
 interface CitationItem {
   unit_id: string;
   document_id: string;
+  document_title?: string;
   section_title: string;
   char_range: string;
   quote: string;
+  corpus_type?: 'novel' | 'kb';
+  evidence_path?: {
+    final_score?: number;
+  };
 }
 
 const props = defineProps<{
   citations: CitationItem[];
   title?: string;
-  mode: 'novel' | 'kb';
+  mode: 'novel' | 'kb' | 'mixed';
 }>();
 
-const documentPath = (documentId: string) => {
-  if (props.mode === 'novel') {
-    return `/workspace/novel/documents/${documentId}`;
+const documentPath = (citation: CitationItem) => {
+  const corpusType = props.mode === 'mixed' ? citation.corpus_type : props.mode;
+  if (corpusType === 'novel') {
+    return `/workspace/novel/documents/${citation.document_id}`;
   }
-  return `/workspace/kb/documents/${documentId}`;
+  return `/workspace/kb/documents/${citation.document_id}`;
 };
 </script>
 
@@ -93,6 +111,13 @@ const documentPath = (documentId: string) => {
   margin: 4px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.citation-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
 }
 
 .document-link {

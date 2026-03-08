@@ -1,37 +1,12 @@
-# API 说明
+# API Specification
 
-本文档描述当前双内核系统和独立 AI 对话能力的公开接口。统一入口由 `gateway` 暴露，前端默认只访问 `gateway`。
+统一入口由 `gateway` 暴露，前端默认只访问 `gateway` 的 `/api/v1/*`。
 
-## 服务边界
+## 1. Authentication
 
-### Gateway
+### `POST /api/v1/auth/login`
 
-- 默认地址：`http://localhost:8080`
-- 可通过根目录 `.env` 中的 `GATEWAY_HOST_PORT` 覆盖宿主机端口
-- 职责：登录认证、身份透传、路由聚合、AI 对话代理
-- 对外前缀：`/api/v1`
-
-### Novel Service
-
-- 默认地址：`http://localhost:8100`
-- 可通过根目录 `.env` 中的 `NOVEL_HOST_PORT` 覆盖宿主机端口
-- 职责：小说库管理、TXT 上传、章节/场景索引、剧情问答
-- 通过 `gateway` 暴露为 `/api/v1/novel/*`
-
-### KB Service
-
-- 默认地址：`http://localhost:8300`
-- 可通过根目录 `.env` 中的 `KB_HOST_PORT` 覆盖宿主机端口；容器内服务端口仍为 `8200`
-- 职责：知识库管理、多文件上传、事实问答
-- 通过 `gateway` 暴露为 `/api/v1/kb/*`
-
-## 认证
-
-### 登录
-
-`POST /api/v1/auth/login`
-
-请求体：
+请求：
 
 ```json
 {
@@ -40,7 +15,7 @@
 }
 ```
 
-成功响应：
+响应：
 
 ```json
 {
@@ -58,263 +33,331 @@
 
 ```http
 Authorization: Bearer <access_token>
+X-Trace-Id: <optional-client-trace-id>
 ```
 
-### 当前用户
+### `GET /api/v1/auth/me`
 
-`GET /api/v1/auth/me`
+返回当前用户信息。
 
-## AI 对话接口
+## 2. Unified Chat
 
-### 获取 AI 配置状态
+### `GET /api/v1/chat/corpora`
 
-`GET /api/v1/ai/config`
+返回当前用户可见的统一 corpus 列表。
 
-响应示例：
+响应字段：
+
+- `corpus_id`: `kb:<uuid>` 或 `novel:<uuid>`
+- `corpus_type`: `kb | novel`
+- `name`
+- `description`
+- `document_count`
+- `queryable_document_count`
+
+### `GET /api/v1/chat/corpora/{corpus_id}/documents`
+
+返回某个 corpus 下的文档列表。
+
+响应字段：
+
+- `document_id`
+- `corpus_id`
+- `corpus_type`
+- `display_name`
+- `status`
+- `query_ready`
+
+### `POST /api/v1/chat/sessions`
+
+请求：
 
 ```json
 {
-  "enabled": true,
-  "configured": true,
-  "provider": "openai-compatible",
-  "model": "qwen3.5-plus",
-  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "timeout_seconds": 120,
-  "default_temperature": 0.7,
-  "default_max_tokens": 2048,
-  "has_system_prompt": true
-}
-```
-
-### 发起 AI 对话
-
-`POST /api/v1/ai/chat`
-
-请求体：
-
-```json
-{
-  "messages": [
-    {
-      "role": "user",
-      "content": "帮我整理一份项目上线检查清单。"
-    }
-  ],
-  "system_prompt": "你是一个简洁、可靠的中文助手。",
-  "temperature": 0.7,
-  "max_tokens": 2048
-}
-```
-
-响应体：
-
-```json
-{
-  "answer": "可以按环境、部署、监控三部分检查……",
-  "reasoning": "",
-  "provider": "openai-compatible",
-  "model": "qwen3.5-plus",
-  "finish_reason": "stop",
-  "usage": {
-    "total_tokens": 1234
+  "title": "产品评审",
+  "scope": {
+    "mode": "multi",
+    "corpus_ids": ["kb:uuid-1", "novel:uuid-2"],
+    "document_ids": [],
+    "allow_common_knowledge": false
   }
 }
 ```
 
-约束：
+### `GET /api/v1/chat/sessions`
 
-- `messages` 至少 1 条，最多 32 条
-- 单条 `content` 最长 12000 字符
-- 总消息内容最长 50000 字符
-- 支持的 `role` 仅有 `system`、`user`、`assistant`
+返回当前用户的会话列表。
 
-## 小说接口
+### `GET /api/v1/chat/sessions/{id}`
 
-### 小说库
+返回单个会话。
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/novel/libraries` | 创建小说库 |
-| `GET` | `/api/v1/novel/libraries` | 获取小说库列表 |
-| `GET` | `/api/v1/novel/libraries/{library_id}/documents` | 获取小说库下文档列表 |
+### `GET /api/v1/chat/sessions/{id}/messages`
 
-### 小说文档上传
+返回会话消息列表。
 
-`POST /api/v1/novel/documents/upload`
+### `POST /api/v1/chat/sessions/{id}/messages`
 
-请求类型：`multipart/form-data`
-
-表单字段：
-
-- `library_id`
-- `title`
-- `volume_label`
-- `spoiler_ack`
-- `file`
-
-约束：
-
-- 首版仅接受 `.txt`
-- 成功后文档先进入 `uploaded`
-- 后台继续推进到 `fast_index_ready` 和 `ready`
-
-### 小说文档详情与事件
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/api/v1/novel/documents/{document_id}` | 获取文档详情 |
-| `GET` | `/api/v1/novel/documents/{document_id}/events` | 获取事件时间线 |
-
-小说状态枚举：
-
-- `uploaded`
-- `parsing`
-- `fast_index_ready`
-- `enhancing`
-- `ready`
-- `failed`
-
-### 小说问答
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/novel/query` | 非流式问答 |
-| `POST` | `/api/v1/novel/query/stream` | SSE 流式问答 |
-
-SSE 事件约定，适用于 `/api/v1/novel/query/stream` 与 `/api/v1/kb/query/stream`：
-
-- `metadata`：先返回策略、证据状态、拒答原因
-- `citation`：返回 0 到多条引用
-- `answer`：可能返回多次，`answer` 字段按累积文本递增，最后一条为完整答案
-- `done`：流式输出结束
-
-请求体：
+请求：
 
 ```json
 {
-  "library_id": "library-id",
-  "question": "第 12 章发生了什么？",
-  "document_ids": [],
-  "debug": false
+  "question": "请总结审批流程",
+  "scope": {
+    "mode": "single",
+    "corpus_ids": ["kb:uuid-1"],
+    "document_ids": ["doc-uuid-1"],
+    "allow_common_knowledge": false
+  }
 }
 ```
 
-小说 `strategy_used` 可能取值：
-
-- `entity_detail`
-- `chapter_summary`
-- `plot_event`
-- `plot_causal`
-- `character_arc`
-- `setting_theme`
-
-响应公共字段：
+响应固定字段：
 
 - `answer`
+- `answer_mode`
 - `strategy_used`
 - `evidence_status`
 - `grounding_score`
 - `refusal_reason`
 - `citations[]`
+- `evidence_path[]`
+- `provider`
+- `model`
+- `usage`
+- `scope_snapshot`
+- `trace_id`
+- `retrieval`
+- `latency`
+- `cost`
 
-`citations[]` 字段：
+`answer_mode` 可能值：
+
+- `grounded`
+- `weak_grounded`
+- `refusal`
+
+`evidence_status` 可能值：
+
+- `grounded`
+- `partial`
+- `insufficient`
+
+### `POST /api/v1/chat/sessions/{id}/messages/stream`
+
+SSE 事件：
+
+- `metadata`
+- `citation`
+- `answer`
+- `done`
+
+说明：
+
+- 网关会在响应头中返回 `X-Trace-Id`
+- `retrieval.aggregate` 会汇总各下游服务的 candidate 数与 retrieval 耗时
+- `latency` 会返回 `scope_ms / retrieval_ms / generation_ms / total_ms`
+- `cost` 会优先依据 `AI_PRICE_TIERS_JSON` 按输入 token 所在档位估算；未配置阶梯时才回退到 `AI_INPUT_PRICE_PER_1K_TOKENS` 与 `AI_OUTPUT_PRICE_PER_1K_TOKENS`
+- `cost` 额外包含 `pricing_mode / input_price_per_1k_tokens / output_price_per_1k_tokens / selected_tier / currency`
+
+## 3. Novel Upload and Retrieval
+
+### `POST /api/v1/novel/uploads`
+
+创建 multipart 上传会话。
+
+请求：
+
+```json
+{
+  "library_id": "uuid",
+  "title": "三体",
+  "volume_label": "第一卷",
+  "spoiler_ack": true,
+  "file_name": "three-body.txt",
+  "file_type": "txt",
+  "size_bytes": 35651584
+}
+```
+
+### `GET /api/v1/novel/uploads/{upload_id}`
+
+返回上传会话与已上传 part 列表。
+
+### `POST /api/v1/novel/uploads/{upload_id}/parts/presign`
+
+请求：
+
+```json
+{
+  "part_numbers": [1, 2, 3]
+}
+```
+
+响应：
+
+- `uploaded_parts[]`
+- `presigned_parts[]`
+- `chunk_size_bytes`
+
+### `POST /api/v1/novel/uploads/{upload_id}/complete`
+
+请求：
+
+```json
+{
+  "parts": [
+    {
+      "part_number": 1,
+      "etag": "\"etag-value\"",
+      "size_bytes": 5242880
+    }
+  ],
+  "content_hash": ""
+}
+```
+
+响应：
+
+- `document_id`
+- `job_id`
+- `document`
+
+### `GET /api/v1/novel/ingest-jobs/{job_id}`
+
+返回小说上传任务状态。
+
+关键字段：
+
+- `status`
+- `phase`
+- `query_ready`
+- `document_status`
+- `document_enhancement_status`
+- `query_ready_until_chapter`
+- `query_ready_at`
+- `hybrid_ready_at`
+- `ready_at`
+
+### `POST /api/v1/novel/retrieve`
+
+请求：
+
+```json
+{
+  "library_id": "uuid",
+  "question": "主角第一次拿到关键线索是在什么时候？",
+  "document_ids": [],
+  "limit": 8
+}
+```
+
+返回统一 evidence block 列表。
+
+新增响应字段：
+
+- `retrieval`
+- `trace_id`
+
+## 4. KB Upload and Retrieval
+
+### `POST /api/v1/kb/uploads`
+
+请求：
+
+```json
+{
+  "base_id": "uuid",
+  "file_name": "policy.pdf",
+  "file_type": "pdf",
+  "size_bytes": 2987771,
+  "category": "制度"
+}
+```
+
+### `GET /api/v1/kb/uploads/{upload_id}`
+
+返回上传会话与已上传 part 列表。
+
+### `POST /api/v1/kb/uploads/{upload_id}/parts/presign`
+
+请求：
+
+```json
+{
+  "part_numbers": [1, 2, 3]
+}
+```
+
+### `POST /api/v1/kb/uploads/{upload_id}/complete`
+
+请求结构与 novel 相同。
+
+### `GET /api/v1/kb/ingest-jobs/{job_id}`
+
+返回企业文档上传任务状态。
+
+### `POST /api/v1/kb/retrieve`
+
+请求：
+
+```json
+{
+  "base_id": "uuid",
+  "question": "报销审批需要哪些角色签字？",
+  "document_ids": [],
+  "limit": 8
+}
+```
+
+新增响应字段：
+
+- `retrieval`
+- `trace_id`
+
+## 5. Legacy Compatibility
+
+以下旧接口仍保留兼容，但前端主流程已切换到 multipart 上传和统一聊天：
+
+- `POST /api/v1/novel/documents/upload`
+- `POST /api/v1/novel/query`
+- `POST /api/v1/novel/query/stream`
+- `POST /api/v1/kb/documents/upload`
+- `POST /api/v1/kb/query`
+- `POST /api/v1/kb/query/stream`
+- `POST /api/v1/ai/chat`
+
+## 6. Evidence Block Shape
+
+`citations[]` 的主要字段：
 
 - `unit_id`
 - `document_id`
+- `document_title`
 - `section_title`
+- `chapter_title`
+- `scene_index`
 - `char_range`
 - `quote`
+- `corpus_id`
+- `corpus_type`
+- `service_type`
+- `evidence_path`
 
-## 企业库接口
+`evidence_path` 的主要字段：
 
-### 知识库
+- `structure_hit`
+- `fts_rank`
+- `vector_rank`
+- `final_rank`
+- `final_score`
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/kb/bases` | 创建知识库 |
-| `GET` | `/api/v1/kb/bases` | 获取知识库列表 |
-| `GET` | `/api/v1/kb/bases/{base_id}/documents` | 获取知识库下文档列表 |
-
-### 企业库文档上传
-
-`POST /api/v1/kb/documents/upload`
-
-请求类型：`multipart/form-data`
-
-表单字段：
-
-- `base_id`
-- `category`
-- `files`
-
-约束：
-
-- 接受 `.txt`、`.pdf`、`.docx`
-- 支持一次上传多个文件
-
-### 企业库文档详情与事件
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `GET` | `/api/v1/kb/documents/{document_id}` | 获取文档详情 |
-| `GET` | `/api/v1/kb/documents/{document_id}/events` | 获取事件时间线 |
-
-### 企业库问答
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/api/v1/kb/query` | 非流式问答 |
-| `POST` | `/api/v1/kb/query/stream` | SSE 流式问答 |
-
-企业库 `strategy_used` 可能取值：
-
-- `exact_match`
-- `section_summary`
-- `cross_doc_answer`
-- `policy_extract`
-
-## 错误模型
+## 7. Error Codes
 
 常见状态码：
 
-| 状态码 | 含义 |
-| --- | --- |
-| `400` | 参数错误或文件类型不支持 |
-| `401` | 未登录或 token 无效 |
-| `403` | 权限不足 |
-| `404` | 资源不存在 |
-| `500` | 服务内部错误 |
-| `502` | 网关调用下游或模型服务失败 |
-| `503` | 下游服务或 AI 对话未配置 |
-
-## 推荐调用顺序
-
-### AI 对话
-
-```text
-1. POST /api/v1/auth/login
-2. GET  /api/v1/ai/config
-3. POST /api/v1/ai/chat
-```
-
-### 小说线路
-
-```text
-1. POST /api/v1/auth/login
-2. POST /api/v1/novel/libraries
-3. POST /api/v1/novel/documents/upload
-4. GET  /api/v1/novel/documents/{document_id}
-5. GET  /api/v1/novel/documents/{document_id}/events
-6. POST /api/v1/novel/query 或 /api/v1/novel/query/stream
-```
-
-### 企业库线路
-
-```text
-1. POST /api/v1/auth/login
-2. POST /api/v1/kb/bases
-3. POST /api/v1/kb/documents/upload
-4. GET  /api/v1/kb/documents/{document_id}
-5. GET  /api/v1/kb/documents/{document_id}/events
-6. POST /api/v1/kb/query 或 /api/v1/kb/query/stream
-```
+- `400`: 参数错误或 scope 越界
+- `401`: 未认证或 token 无效
+- `404`: 资源不存在
+- `502`: 网关调用下游失败
+- `503`: AI provider 不可用或未配置

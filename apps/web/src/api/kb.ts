@@ -1,5 +1,11 @@
 import request, { streamRequest, type StreamRequestOptions } from './request';
 
+export interface UploadPartPayload {
+  part_number: number;
+  etag: string;
+  size_bytes: number;
+}
+
 export function listKnowledgeBases() {
   return request.get('/kb/bases');
 }
@@ -18,6 +24,37 @@ export function getKBDocument(documentId: string) {
 
 export function getKBDocumentEvents(documentId: string) {
   return request.get(`/kb/documents/${documentId}/events`);
+}
+
+export function createKBUpload(data: {
+  base_id: string;
+  file_name: string;
+  file_type: string;
+  size_bytes: number;
+  category?: string;
+}) {
+  return request.post('/kb/uploads', data);
+}
+
+export function getKBUpload(uploadId: string) {
+  return request.get(`/kb/uploads/${uploadId}`);
+}
+
+export function presignKBUploadParts(uploadId: string, partNumbers: number[]) {
+  return request.post(`/kb/uploads/${uploadId}/parts/presign`, {
+    part_numbers: partNumbers
+  });
+}
+
+export function completeKBUpload(uploadId: string, parts: UploadPartPayload[], contentHash = '') {
+  return request.post(`/kb/uploads/${uploadId}/complete`, {
+    parts,
+    content_hash: contentHash
+  });
+}
+
+export function getKBIngestJob(jobId: string) {
+  return request.get(`/kb/ingest-jobs/${jobId}`);
 }
 
 export async function uploadKBDocuments(payload: {

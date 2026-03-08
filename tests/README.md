@@ -1,12 +1,20 @@
 # Tests
 
-`tests/` 存放评测数据和后续集成测试入口。
+`tests/` 存放评测数据、纯 Python 回归测试和脚本 smoke 入口。
 
 ## 目录说明
 
-- `evals/`：当前保留的评测样本与问题集
+- `evals/`：评测样本与问题集
+- `test_*.py`：shared 能力、评测指标、gateway 成本估算和脚本 smoke
 
-## 约定
+## 当前覆盖范围
 
-- 大体量评测数据集中放在这里
-- 若后续增加集成测试或 E2E，按类型继续分子目录
+- query rewrite、rerank、embedding、trace header
+- eval 指标与离线 ablation 脚本
+- `gateway` 的 `CNY + 阶梯计费` 成本估算
+
+## 默认回归命令
+
+```powershell
+python -m pytest tests -q
+```

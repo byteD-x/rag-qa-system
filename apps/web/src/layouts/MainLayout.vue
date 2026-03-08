@@ -7,35 +7,31 @@
         </div>
         <div>
           <h2>RAG-QA 2.0</h2>
-          <p>双内核检索 + 独立 AI 对话</p>
+          <p>统一 QA / 极速上传 / 证据优先</p>
         </div>
       </div>
 
       <div class="sidebar-menu-container">
         <el-menu :default-active="$route.path" router class="app-menu">
+          <el-menu-item index="/workspace/chat" class="menu-item-custom">
+            <el-icon><ChatDotRound /></el-icon>
+            <template #title>统一 QA</template>
+          </el-menu-item>
           <el-menu-item index="/workspace/entry" class="menu-item-custom">
             <el-icon><Grid /></el-icon>
-            <template #title>工作台入口</template>
-          </el-menu-item>
-          <el-menu-item index="/workspace/ai/chat" class="menu-item-custom">
-            <el-icon><ChatDotRound /></el-icon>
-            <template #title>AI 对话</template>
+            <template #title>概览</template>
           </el-menu-item>
           <el-menu-item index="/workspace/novel/upload" class="menu-item-custom">
             <el-icon><Reading /></el-icon>
-            <template #title>小说上传线路</template>
-          </el-menu-item>
-          <el-menu-item index="/workspace/novel/chat" class="menu-item-custom">
-            <el-icon><ChatLineRound /></el-icon>
-            <template #title>小说问答</template>
+            <template #title>小说上传</template>
           </el-menu-item>
           <el-menu-item index="/workspace/kb/upload" class="menu-item-custom">
             <el-icon><Files /></el-icon>
-            <template #title>企业库上传线路</template>
+            <template #title>企业文档上传</template>
           </el-menu-item>
-          <el-menu-item index="/workspace/kb/chat" class="menu-item-custom">
-            <el-icon><DataLine /></el-icon>
-            <template #title>企业库问答</template>
+          <el-menu-item index="/workspace/ai/chat" class="menu-item-custom">
+            <el-icon><Connection /></el-icon>
+            <template #title>纯模型对话</template>
           </el-menu-item>
         </el-menu>
       </div>
@@ -84,8 +80,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import {
   ChatDotRound,
-  ChatLineRound,
-  DataLine,
+  Connection,
   Files,
   Grid,
   MoreFilled,
@@ -104,16 +99,19 @@ const userInitial = computed(() => {
 });
 
 const currentMode = computed(() => {
+  if (route.path.includes('/workspace/chat')) {
+    return '统一 QA';
+  }
   if (route.path.includes('/workspace/ai/')) {
-    return 'AI 对话';
+    return '纯模型对话';
   }
   if (route.path.includes('/workspace/novel/')) {
-    return '小说内核';
+    return '小说上传链路';
   }
   if (route.path.includes('/workspace/kb/')) {
-    return '企业知识库内核';
+    return '企业文档链路';
   }
-  return '入口选择';
+  return '概览';
 });
 
 const handleCommand = (command: string) => {
