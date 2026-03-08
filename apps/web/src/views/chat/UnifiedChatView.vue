@@ -3,11 +3,10 @@
     <section class="chat-hero">
       <div>
         <el-tag type="primary" effect="dark">统一 QA</el-tag>
-        <h1>跨小说与企业文档的有依据问答</h1>
+        <h1>企业知识库的有依据问答</h1>
         <p>支持单库、多库、全库检索；回答默认绑定证据，证据不足时明确拒答。</p>
       </div>
       <div class="hero-actions">
-        <el-button plain @click="router.push('/workspace/novel/upload')">上传小说</el-button>
         <el-button plain @click="router.push('/workspace/kb/upload')">上传企业文档</el-button>
       </div>
     </section>
@@ -71,7 +70,7 @@
             type="textarea"
             :rows="4"
             resize="none"
-            placeholder="例如：请对比这份制度和这部小说里对“审批”或“责任”的描述。"
+            placeholder="例如：报销审批需要哪些角色签字？试用期请假怎么走流程？"
             @keydown.ctrl.enter.prevent="ask"
           />
           <div class="composer-actions">
@@ -111,22 +110,12 @@
                 placeholder="选择要参与检索的知识库"
                 @change="handleCorpusChange"
               >
-                <el-option-group label="企业文档">
-                  <el-option
-                    v-for="corpus in kbCorpora"
-                    :key="corpus.corpus_id"
-                    :label="`${corpus.name} (${corpus.queryable_document_count}/${corpus.document_count})`"
-                    :value="corpus.corpus_id"
-                  />
-                </el-option-group>
-                <el-option-group label="小说">
-                  <el-option
-                    v-for="corpus in novelCorpora"
-                    :key="corpus.corpus_id"
-                    :label="`${corpus.name} (${corpus.queryable_document_count}/${corpus.document_count})`"
-                    :value="corpus.corpus_id"
-                  />
-                </el-option-group>
+                <el-option
+                  v-for="corpus in kbCorpora"
+                  :key="corpus.corpus_id"
+                  :label="`${corpus.name} (${corpus.queryable_document_count}/${corpus.document_count})`"
+                  :value="corpus.corpus_id"
+                />
               </el-select>
             </el-form-item>
 
@@ -152,7 +141,7 @@
         </el-card>
 
         <el-card shadow="hover" class="panel">
-          <CitationList :citations="activeCitations" title="证据链" mode="mixed" />
+          <CitationList :citations="activeCitations" title="证据链" mode="kb" />
         </el-card>
       </div>
     </section>
@@ -193,7 +182,6 @@ const selectedCorpusIds = ref<string[]>([]);
 const selectedDocumentIds = ref<string[]>([]);
 
 const kbCorpora = computed(() => corpora.value.filter((item) => item.corpus_type === 'kb'));
-const novelCorpora = computed(() => corpora.value.filter((item) => item.corpus_type === 'novel'));
 
 const documentOptions = computed(() => {
   const ids = new Set(selectedCorpusIds.value);
@@ -334,21 +322,11 @@ async function handleCorpusChange() {
 async function applyRoutePreset() {
   const preset = String(route.query.preset || '');
   const baseId = String(route.query.baseId || '');
-  const libraryId = String(route.query.libraryId || '');
   const documentId = String(route.query.documentId || '');
   if (preset === 'kb' && baseId) {
     applyScope({
       mode: 'single',
       corpus_ids: [`kb:${baseId}`],
-      document_ids: documentId ? [documentId] : []
-    });
-    await ensureDocuments(selectedCorpusIds.value);
-    return;
-  }
-  if (preset === 'novel' && libraryId) {
-    applyScope({
-      mode: 'single',
-      corpus_ids: [`novel:${libraryId}`],
       document_ids: documentId ? [documentId] : []
     });
     await ensureDocuments(selectedCorpusIds.value);

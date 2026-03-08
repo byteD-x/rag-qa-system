@@ -7,6 +7,7 @@ param(
     [switch]$SkipDockerConfig,
     [switch]$SkipPytest,
     [switch]$SkipEvalSmoke,
+    [switch]$SkipEmbeddingBenchmark,
     [switch]$SkipLocalBenchmark,
     [switch]$IncludeDockerBuild
 )
@@ -20,6 +21,7 @@ $repoRoot = Get-RepoRoot
 $python = Get-PythonCommandSpec
 $failures = New-Object System.Collections.Generic.List[string]
 $totalChecks = 0
+$artifactReportsDir = "artifacts/reports"
 
 function Invoke-Check {
     param(
@@ -65,10 +67,9 @@ if (-not $SkipBackendCompile) {
         $args = @($python.BaseArguments) + @(
             "-m",
             "compileall",
-            "packages/shared/python",
-            "apps/backend/gateway",
-            "apps/backend/novel-service",
-            "apps/backend/kb-service"
+            "packages/python",
+            "apps/services/api-gateway",
+            "apps/services/knowledge-base"
         )
         Invoke-RepoTool -Command $python.Command -Arguments $args
     }
@@ -96,13 +97,26 @@ if (-not $SkipPytest) {
 if (-not $SkipEvalSmoke) {
     Invoke-Check "Retrieval Ablation Smoke" {
         $args = @($python.BaseArguments) + @(
-            "scripts/evals/run-retrieval-ablation.py",
+            "scripts/evaluation/run-retrieval-ablation.py",
             "--fixture",
-            "tests/evals/retrieval-ablation-fixture.json",
+            "tests/fixtures/evals/retrieval-ablation-fixture.json",
             "--output",
-            "docs/reports/ci_retrieval_ablation.json",
+            "$artifactReportsDir/ci_retrieval_ablation.json",
             "--summary-output",
-            "docs/reports/ci_retrieval_ablation.md"
+            "$artifactReportsDir/ci_retrieval_ablation.md"
+        )
+        Invoke-RepoTool -Command $python.Command -Arguments $args
+    }
+}
+
+if (-not $SkipEmbeddingBenchmark) {
+    Invoke-Check "Embedding Benchmark Smoke" {
+        $args = @($python.BaseArguments) + @(
+            "scripts/evaluation/compare-embedding-providers.py",
+            "--output",
+            "$artifactReportsDir/ci_embedding_retrieval_benchmark.json",
+            "--summary-output",
+            "$artifactReportsDir/ci_embedding_retrieval_benchmark.md"
         )
         Invoke-RepoTool -Command $python.Command -Arguments $args
     }
@@ -111,11 +125,11 @@ if (-not $SkipEvalSmoke) {
 if (-not $SkipLocalBenchmark) {
     Invoke-Check "Local Ingest Benchmark" {
         $args = @($python.BaseArguments) + @(
-            "scripts/evals/benchmark-local-ingest.py",
+            "scripts/evaluation/benchmark-local-ingest.py",
             "--output",
-            "docs/reports/ci_local_ingest_benchmark.json",
+            "$artifactReportsDir/ci_local_ingest_benchmark.json",
             "--summary-output",
-            "docs/reports/ci_local_ingest_benchmark.md"
+            "$artifactReportsDir/ci_local_ingest_benchmark.md"
         )
         Invoke-RepoTool -Command $python.Command -Arguments $args
     }

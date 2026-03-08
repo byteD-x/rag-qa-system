@@ -1,117 +1,175 @@
 # RAG-QA 2.0
 
-这是一个面向 QA 场景的本地优先 RAG 系统，当前版本重点解决三件事：
+面向企业知识库场景的本地化 RAG 问答系统。
 
-- 统一 `KB + Novel` 会话问答，支持单库、多库、全库 scope
-- 34MB 级 TXT 与企业文档的极速上传，走 `MinIO multipart` 分块直传
-- 回答必须绑定知识库证据，证据不足时明确拒答
-- 把检索质量、时延和 ingest 阶段耗时做成可量化、可回归的报告
+当前仓库只保留一条业务主线：企业文档接入、异步 ingest、混合检索、证据化问答、评测与观测。项目不再维护独立的“纯大模型聊天”分支，也不再包含小说或泛内容检索逻辑。
 
-## 当前架构
+## 项目定位
 
-```text
-apps/
-  backend/
-    gateway/        统一登录、统一 QA 会话、跨库检索编排
-    novel-service/  小说上传、流式解析、检索、增强
-    kb-service/     企业文档上传、分段、检索、增强
-  web/              统一聊天页、上传页、文档详情页
-packages/shared/    共享认证、SSE、对象存储、检索与 embedding 工具
-infra/postgres/     pgvector + pg_trgm
-scripts/evals/      长文上传与 RAG 评测脚本
-```
+系统围绕企业 RAG-QA 的四段式业务边界组织：
 
-## 关键能力
+1. 接入层：认证、会话管理、统一问答入口、成本与时延回传。
+2. 知识处理层：上传、对象存储、文档解析、切段、索引构建、异步任务推进。
+3. 检索编排层：结构检索、全文检索、向量检索、重写、融合、轻量 rerank、证据筛选。
+4. 运维评测层：本地启动脚本、质量门禁、离线 benchmark、在线 eval、日志汇总。
 
-### 1. 统一 QA
+默认最小运行闭环如下：
 
-- 主入口：`/workspace/chat`
-- 接口入口：`/api/v1/chat/*`
-- scope 支持：
-  - `single`
-  - `multi`
-  - `all`
-- corpus 统一编码：
-  - `kb:<uuid>`
-  - `novel:<uuid>`
-- 回答固定返回：
-  - `answer`
-  - `answer_mode`
-  - `evidence_status`
-  - `grounding_score`
-  - `citations[]`
-  - `evidence_path[]`
+- `gateway`：统一登录、统一会话、证据化回答、跨库检索编排、成本估算。
+- `kb-service`：知识库、文档上传、解析、索引、检索、ingest 状态管理。
+- `kb-worker`：异步向量化、增强处理、任务收尾。
+- `web`：统一控制台，承载登录、上传、问答和文档详情。
+- `postgres + minio`：结构化数据、检索索引与对象存储基础设施。
 
-### 2. 极速上传
+`docker-compose.yml` 当前只保留企业 RAG-QA 所需的 5 个长期运行服务：
 
-- 浏览器按 `5 MiB/part` 直传对象存储
-- 默认并发 `4` 个 part
-- 支持续传：
-  - 服务端保存 `upload_sessions / upload_parts`
-  - 前端按文件指纹缓存 `upload_id`
-  - 重新上传时只补传缺失 part
-- 上传完成立即返回 `document_id + job_id`
-- 解析、摘要、向量化由 worker 异步推进
+- `postgres`
+- `minio`
+- `kb-service`
+- `kb-worker`
+- `gateway`
 
-### 3. 超长文本处理
+## 仓库结构
 
-- 小说 TXT 走 `mmap + 流式行扫描`
-- 每 `10` 章批量刷库并更新 `query_ready_until_chapter`
-- 企业文档按 section/chunk 分批落库
-- `fast_index_ready` 后即可问答
-- `hybrid_ready` 后摘要层向量可用
-- `ready` 后叶子向量、摘要树和关系增强完成
+| 路径 | 作用 |
+| --- | --- |
+| `apps/services/api-gateway/` | 网关服务；`src/app` 放 Python 源码，`database/migrations` 放迁移 |
+| `apps/services/knowledge-base/` | 企业知识库服务；`src/app` 放 API / 解析 / 检索 / worker |
+| `apps/web/` | Vue 3 企业 RAG 控制台 |
+| `packages/python/shared/` | 跨服务共享 Python 包，如 `auth`、`storage`、`embeddings`、`eval_metrics` |
+| `ops/docker/postgres/` | PostgreSQL 镜像与初始化脚本 |
+| `ops/logging/` | 日志查看与导出辅助资源 |
+| `scripts/dev/` | 一键启动、一键停止、前端托管与本地开发辅助脚本 |
+| `scripts/evaluation/` | 在线评测、离线 ablation、embedding 对照、ingest benchmark |
+| `scripts/observability/` | 日报与日志汇总 |
+| `scripts/quality/` | 编码检查、CI 聚合校验 |
+| `tests/fixtures/evals/` | 统一问答、拒答、检索 fixture |
+| `datasets/demo/` | Demo 语料、评测样例与对抗样例 |
+| `docs/reference/` | API 参考文档 |
+| `docs/development/` | 开发脚本与本地工作流说明 |
+| `docs/operations/` | Runbook 与排障说明 |
+| `docs/reports/` | 需要长期留档的报告快照 |
+| `artifacts/reports/` | 本地运行、测试与 CI 生成物 |
+| `artifacts/evals/` | 评测动态配置与资产清单 |
+| `data/` | 本地运行态数据 |
+| `logs/` | 本地日志与前端托管状态 |
 
-## 检索策略
+前端源码位于 `apps/web/src/`：
 
-- 结构检索：章节 / scene / alias / event / section
-- FTS：应用层 tokenizer 产出 `tsvector`
-- Query rewrite：实体/章节聚焦 + 问句词裁剪 + 词项扩展
-- 向量：`pgvector vector(512)` + HNSW
-- 默认本地 baseline：`local-projection-512`
-- 可选 benchmark baseline：外部 embedding provider
-- Rerank：融合后追加轻量 lexical rerank
-- 融合：加权 RRF
-  - `structure = 1.3`
-  - `fts = 1.0`
-  - `vector = 0.9`
+- `api/`：HTTP 请求封装
+- `components/`：复用组件
+- `layouts/`：页面壳层
+- `router/`：前端路由
+- `store/`：Pinia 状态
+- `utils/`：纯工具函数
+- `views/`：页面级视图
 
-## 可观测性
+## 业务主线
 
-- 网关、Novel、KB 全链路透传 `X-Trace-Id`
-- 聊天返回补充：
-  - `trace_id`
-  - `retrieval`
-  - `latency`
-  - `cost`
-- ingest worker 事件记录：
-  - 阶段耗时
-  - embedding cache hits / misses
-- 可直接生成日报：
-  - `python scripts/observability/rag-daily-report.py`
+### 1. 企业文档接入
 
-## 上传与状态
+- 浏览器按 `5 MiB / part` 直传对象存储。
+- 服务端维护 `upload_sessions / upload_parts`，支持缺失 part 补传。
+- 上传完成后立即返回 `document_id + job_id`。
 
-统一状态流：
+### 2. 异步 ingest
 
-- `pending_upload`
-- `uploading`
-- `uploaded`
-- `parsing_fast`
-- `fast_index_ready`
-- `hybrid_ready`
-- `ready`
-- `failed`
+- `kb-worker` 负责解析文档、抽取 section/chunk、向量化与增强处理。
+- 文档状态按 `uploaded -> fast_index_ready -> hybrid_ready -> ready` 推进。
+- `fast_index_ready` 后即可参与基础问答，`ready` 表示混合检索链完整可用。
+
+### 3. 统一问答
+
+- 前端主入口：`/workspace/chat`
+- 问答接口入口：`/api/v1/chat/*`
+- scope 支持：`single / multi / all`
+- 统一 corpus 编码：`kb:<uuid>`
+
+### 4. 混合检索与证据化回答
+
+- 检索信号：结构检索、全文检索、向量检索。
+- 重写策略：实体聚焦、问句裁剪、检索增强词扩展。
+- 融合策略：加权 RRF + 轻量 lexical rerank。
+- 回答约束：必须附带引文，证据不足时拒答或保守回答。
+
+### 5. 观测与评测
+
+- 网关透传 `X-Trace-Id`。
+- 聊天响应返回 `trace_id`、`retrieval`、`latency`、`cost`。
+- 仓库内保留离线检索对照、本地 ingest benchmark、在线 eval suite。
+
+## 服务边界
+
+### Gateway
+
+`apps/services/api-gateway/` 负责：
+
+- JWT 登录与本地账号鉴权
+- 会话与消息持久化
+- 调用 `kb-service` 检索并组织证据化回答
+- LLM 答案生成、token 用量与成本估算
+
+关键环境变量：
+
+- `GATEWAY_DATABASE_DSN`
+- `KB_SERVICE_URL`
+- `LLM_ENABLED`
+- `LLM_PROVIDER`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
+- `LLM_MODEL`
+- `LLM_PRICE_CURRENCY`
+- `LLM_PRICE_TIERS_JSON`
+
+兼容说明：
+
+- 历史 `AI_*` 变量仍可读取，但已降级为兼容别名。
+- 新增配置请统一使用 `LLM_*` 命名。
+
+### Knowledge Base
+
+`apps/services/knowledge-base/` 负责：
+
+- 上传会话创建、分片直传预签名、完成确认
+- 文档解析、切段、索引、检索
+- ingest 状态推进与文档详情查询
+
+核心代码分层：
+
+- `src/app/main.py`：服务入口
+- `src/app/parsing.py`：文档解析
+- `src/app/retrieve.py`：检索与引文构造
+- `src/app/query.py`：查询协议
+- `src/app/worker.py`：异步 ingest worker
+- `database/migrations/`：知识库迁移
+
+### Web
+
+`apps/web/` 负责：
+
+- 登录与权限展示
+- 企业知识库上传、统一问答、文档详情
+
+主要路由：
+
+| 路由 | 说明 |
+| --- | --- |
+| `/login` | 登录页 |
+| `/workspace/entry` | 业务入口页 |
+| `/workspace/chat` | 统一企业问答 |
+| `/workspace/kb/upload` | 文档上传 |
+| `/workspace/kb/chat` | 知识库问答入口 |
+| `/workspace/kb/documents/:id` | 文档详情 |
 
 ## 运行
 
-### 1. 初始化环境变量
+### 1. 初始化
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-### 2. 启动
+### 2. 一键启动
 
 ```powershell
 make up
@@ -123,88 +181,92 @@ make up
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/up.ps1
 ```
 
-### 3. 访问地址
+### 3. 一键停止
 
-- Web: `http://localhost:5173`
-- Gateway: `http://localhost:8080`
-- Novel Service: `http://localhost:8100`
-- KB Service: `http://localhost:8200`
-- MinIO API: `http://localhost:9000`
-- MinIO Console: `http://localhost:9001`
+```powershell
+make down
+```
+
+等价命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/down.ps1 -Force
+```
+
+### 4. 访问地址
+
+- Web：`http://localhost:5173`
+- Gateway：`http://localhost:8080`
+- KB Service：`http://localhost:8300`
+- MinIO API：`http://localhost:9000`
+- MinIO Console：`http://localhost:9001`
 
 默认本地账号：
 
 - `admin@local / ChangeMe123!`
 - `member@local / ChangeMe123!`
 
-## 主要接口
+## 常用命令
 
-### 统一聊天
+```powershell
+.\logs.bat -s gateway kb-service
+.\logs.bat -l ERROR -s gateway kb-service
+python -m pytest tests -q
+python scripts/evaluation/run-retrieval-ablation.py
+python scripts/evaluation/benchmark-local-ingest.py
+python scripts/evaluation/compare-embedding-providers.py
+python scripts/evaluation/run-demo-eval-suite.py --password <pwd>
+```
 
-- `GET /api/v1/chat/corpora`
-- `GET /api/v1/chat/corpora/{corpus_id}/documents`
-- `POST /api/v1/chat/sessions`
-- `GET /api/v1/chat/sessions`
-- `GET /api/v1/chat/sessions/{id}`
-- `GET /api/v1/chat/sessions/{id}/messages`
-- `POST /api/v1/chat/sessions/{id}/messages`
-- `POST /api/v1/chat/sessions/{id}/messages/stream`
+## 测试、语料与报告
 
-### 小说上传
+### 测试
 
-- `POST /api/v1/novel/uploads`
-- `GET /api/v1/novel/uploads/{upload_id}`
-- `POST /api/v1/novel/uploads/{upload_id}/parts/presign`
-- `POST /api/v1/novel/uploads/{upload_id}/complete`
-- `GET /api/v1/novel/ingest-jobs/{job_id}`
-- `POST /api/v1/novel/retrieve`
+`tests/` 当前覆盖：
 
-### 企业文档上传
+- shared 基础能力
+- 统一评测指标
+- 网关成本估算
+- 评测脚本 smoke
 
-- `POST /api/v1/kb/uploads`
-- `GET /api/v1/kb/uploads/{upload_id}`
-- `POST /api/v1/kb/uploads/{upload_id}/parts/presign`
-- `POST /api/v1/kb/uploads/{upload_id}/complete`
-- `GET /api/v1/kb/ingest-jobs/{job_id}`
-- `POST /api/v1/kb/retrieve`
+### 评测资产
 
-## 评测脚本
+`tests/fixtures/evals/` 当前包含：
 
-- `python scripts/evals/benchmark-long-ingest.py --service novel --corpus-id <library-id> --file <path> --password <pwd>`
-- `python scripts/evals/benchmark-long-ingest.py --service kb --corpus-id <base-id> --file <path> --password <pwd>`
-- `python scripts/evals/eval-long-rag.py --scope-mode single --corpus-id novel:<uuid> --password <pwd>`
-- `python scripts/evals/run-eval-suite.py --password <pwd> --config tests/evals/suite.sample.json`
-- `python scripts/evals/run-retrieval-ablation.py`
-- `python scripts/evals/benchmark-local-ingest.py`
+- `kb-smoke-eval.json`
+- `adversarial-refusal-eval.json`
+- `retrieval-ablation-fixture.json`
+- `suite.sample.json`
 
-已提交报告：
+### Demo 数据
 
-- `docs/reports/retrieval_ablation_report.json`
-- `docs/reports/retrieval_ablation_report.md`
-- `docs/reports/local_ingest_benchmark.json`
-- `docs/reports/local_ingest_benchmark.md`
+`datasets/demo/` 当前包含：
+
+- `documents/`：demo 企业文档
+- `evaluation/`：在线 eval 问题集
+- `adversarial/`：拒答与异常输入样例
+
+### 报告目录约定
+
+- `artifacts/reports/`：脚本、测试和 CI 默认输出位置
+- `artifacts/evals/`：临时 config 与 asset manifest
+- `docs/reports/`：筛选后需要留档的快照
 
 ## 验证
 
 ```powershell
 python scripts/quality/check-encoding.py
 cd apps/web && npm run build
-python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service
+python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 python -m pytest tests -q
-python scripts/evals/run-retrieval-ablation.py
-python scripts/evals/benchmark-local-ingest.py
+python scripts/evaluation/run-retrieval-ablation.py
+python scripts/evaluation/benchmark-local-ingest.py
+python scripts/evaluation/compare-embedding-providers.py
 docker compose config --quiet
 ```
 
-## 文档
+## 进一步文档
 
-- [docs/API_SPECIFICATION.md](docs/API_SPECIFICATION.md)
-- [docs/dev-scripts.md](docs/dev-scripts.md)
-- [docs/runbook.md](docs/runbook.md)
-- [docs/reports](docs/reports)
-
-## Pricing
-
-- `cost.currency` defaults to `CNY`.
-- `cost` uses `AI_PRICE_TIERS_JSON` first and falls back to flat `AI_INPUT_PRICE_PER_1K_TOKENS` / `AI_OUTPUT_PRICE_PER_1K_TOKENS`.
-- The bundled sample tiers match DashScope `qwen3.5-plus` mainland pricing for `<=128K`, `<=256K`, and `<=1M` input token ranges.
+- [docs/reference/api-specification.md](docs/reference/api-specification.md)
+- [docs/development/dev-scripts.md](docs/development/dev-scripts.md)
+- [docs/operations/runbook.md](docs/operations/runbook.md)

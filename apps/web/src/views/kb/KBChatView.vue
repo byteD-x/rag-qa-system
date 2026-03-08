@@ -4,7 +4,7 @@
       <div>
         <el-tag type="success" effect="dark">企业知识库问答</el-tag>
         <h1>企业库问答工作台</h1>
-        <p>这条线路专注精确问答、跨文档汇总、制度提取，不使用小说剧情型策略。</p>
+        <p>这条线路专注精确问答、跨文档汇总、制度提取与证据化回答。</p>
       </div>
       <el-button plain @click="router.push('/workspace/kb/upload')">返回上传线路</el-button>
     </section>

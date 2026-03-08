@@ -9,6 +9,7 @@ from shared.eval_metrics import ndcg_at_k, recall_at_k, reciprocal_rank, summari
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+ARTIFACT_REPORTS_DIR = REPO_ROOT / "artifacts/reports"
 
 
 def _load_module(path: Path, name: str):
@@ -29,7 +30,7 @@ def test_eval_metrics_summary_helpers() -> None:
 
 
 def test_eval_long_rag_scoring_exposes_latency_and_refusal() -> None:
-    module = _load_module(REPO_ROOT / "scripts/evals/eval-long-rag.py", "eval_long_rag_test")
+    module = _load_module(REPO_ROOT / "scripts/evaluation/eval-long-rag.py", "eval_long_rag_test")
     case = {
         "id": "case-1",
         "category": "refusal",
@@ -56,13 +57,13 @@ def test_retrieval_ablation_script_runs() -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "scripts/evals/run-retrieval-ablation.py",
+            "scripts/evaluation/run-retrieval-ablation.py",
             "--fixture",
-            "tests/evals/retrieval-ablation-fixture.json",
+            "tests/fixtures/evals/retrieval-ablation-fixture.json",
             "--output",
-            "docs/reports/test_retrieval_ablation.json",
+            str(ARTIFACT_REPORTS_DIR / "test_retrieval_ablation.json"),
             "--summary-output",
-            "docs/reports/test_retrieval_ablation.md",
+            str(ARTIFACT_REPORTS_DIR / "test_retrieval_ablation.md"),
         ],
         cwd=str(REPO_ROOT),
         check=True,
@@ -70,3 +71,21 @@ def test_retrieval_ablation_script_runs() -> None:
         text=True,
     )
     assert "fusion_only" in result.stdout
+
+
+def test_embedding_benchmark_script_runs() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/evaluation/compare-embedding-providers.py",
+            "--output",
+            str(ARTIFACT_REPORTS_DIR / "test_embedding_retrieval_benchmark.json"),
+            "--summary-output",
+            str(ARTIFACT_REPORTS_DIR / "test_embedding_retrieval_benchmark.md"),
+        ],
+        cwd=str(REPO_ROOT),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "local-projection" in result.stdout

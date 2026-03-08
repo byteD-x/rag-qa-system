@@ -47,7 +47,7 @@ interface CitationItem {
   section_title: string;
   char_range: string;
   quote: string;
-  corpus_type?: 'novel' | 'kb';
+  corpus_type?: 'kb';
   evidence_path?: {
     final_score?: number;
   };
@@ -56,16 +56,10 @@ interface CitationItem {
 const props = defineProps<{
   citations: CitationItem[];
   title?: string;
-  mode: 'novel' | 'kb' | 'mixed';
+  mode: 'kb';
 }>();
 
-const documentPath = (citation: CitationItem) => {
-  const corpusType = props.mode === 'mixed' ? citation.corpus_type : props.mode;
-  if (corpusType === 'novel') {
-    return `/workspace/novel/documents/${citation.document_id}`;
-  }
-  return `/workspace/kb/documents/${citation.document_id}`;
-};
+const documentPath = (citation: CitationItem) => `/workspace/kb/documents/${citation.document_id}`;
 </script>
 
 <style scoped>

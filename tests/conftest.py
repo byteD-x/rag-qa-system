@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SHARED_PATH = REPO_ROOT / "packages/shared/python"
+SHARED_PATH = REPO_ROOT / "packages/python"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))

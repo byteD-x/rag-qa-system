@@ -4,6 +4,7 @@ from shared.embeddings import embed_texts, load_embedding_settings
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath
+from shared.text_encoding import detect_text_encoding_from_bytes
 from shared.tracing import ensure_trace_id, trace_headers
 
 
@@ -54,3 +55,8 @@ def test_trace_id_generation_and_headers() -> None:
     headers = trace_headers(trace_id)
     assert trace_id.startswith("gateway-")
     assert headers["X-Trace-Id"] == trace_id
+
+
+def test_detect_text_encoding_prefers_utf8_without_bom() -> None:
+    sample = "第01章：将死之人\n夏德来到这里。".encode("utf-8")
+    assert detect_text_encoding_from_bytes(sample) == "utf-8"

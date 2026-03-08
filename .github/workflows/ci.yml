@@ -22,25 +22,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install \
-            -r apps/backend/gateway/requirements.runtime.txt \
-            -r apps/backend/novel-service/requirements.runtime.txt \
-            -r apps/backend/kb-service/requirements.runtime.txt \
+            -r apps/services/api-gateway/requirements.runtime.txt \
+            -r apps/services/knowledge-base/requirements.runtime.txt \
             pytest
 
       - name: Encoding check
         run: python scripts/quality/check-encoding.py
 
       - name: Python compile
-        run: python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service
+        run: python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 
       - name: Pytest
         run: python -m pytest tests -q
 
       - name: Retrieval ablation smoke
-        run: python scripts/evals/run-retrieval-ablation.py --fixture tests/evals/retrieval-ablation-fixture.json --output docs/reports/ci_retrieval_ablation.json --summary-output docs/reports/ci_retrieval_ablation.md
+        run: python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/ci_retrieval_ablation.json --summary-output artifacts/reports/ci_retrieval_ablation.md
+
+      - name: Embedding benchmark smoke
+        run: python scripts/evaluation/compare-embedding-providers.py --output artifacts/reports/ci_embedding_retrieval_benchmark.json --summary-output artifacts/reports/ci_embedding_retrieval_benchmark.md
 
       - name: Local ingest benchmark smoke
-        run: python scripts/evals/benchmark-local-ingest.py --output docs/reports/ci_local_ingest_benchmark.json --summary-output docs/reports/ci_local_ingest_benchmark.md
+        run: python scripts/evaluation/benchmark-local-ingest.py --output artifacts/reports/ci_local_ingest_benchmark.json --summary-output artifacts/reports/ci_local_ingest_benchmark.md
 
       - name: Docker compose config
         run: docker compose config --quiet

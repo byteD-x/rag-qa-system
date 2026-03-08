@@ -5,7 +5,7 @@ PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
 
 help:
 	@echo Available targets:
-	@echo   make up           - 启动双内核本地环境
+	@echo   make up           - 启动企业 RAG 本地环境
 	@echo   make down         - 停止本地环境
 	@echo   make logs         - 查看最近日志
 	@echo   make logs-follow  - 持续跟随日志
@@ -34,7 +34,7 @@ ci:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/quality/ci-check.ps1
 
 test:
-	python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service
+	python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 	cd apps/web && npm run build
 
 build:

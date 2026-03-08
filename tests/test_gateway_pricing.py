@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib
+import sys
+from pathlib import Path
 
 
 PRICE_TIERS_JSON = (
@@ -8,14 +10,23 @@ PRICE_TIERS_JSON = (
     '{"max_input_tokens":262144,"input_price_per_1k_tokens":0.002,"output_price_per_1k_tokens":0.012},'
     '{"max_input_tokens":1048576,"input_price_per_1k_tokens":0.004,"output_price_per_1k_tokens":0.024}]'
 )
+REPO_ROOT = Path(__file__).resolve().parents[1]
+GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
 
 
 def _load_gateway_main(monkeypatch):
-    monkeypatch.setenv("AI_PRICE_CURRENCY", "CNY")
-    monkeypatch.setenv("AI_PRICE_TIERS_JSON", PRICE_TIERS_JSON)
-    monkeypatch.setenv("AI_INPUT_PRICE_PER_1K_TOKENS", "0")
-    monkeypatch.setenv("AI_OUTPUT_PRICE_PER_1K_TOKENS", "0")
-    module = importlib.import_module("apps.backend.gateway.app.main")
+    monkeypatch.setenv("LLM_PRICE_CURRENCY", "CNY")
+    monkeypatch.setenv("LLM_PRICE_TIERS_JSON", PRICE_TIERS_JSON)
+    monkeypatch.setenv("LLM_INPUT_PRICE_PER_1K_TOKENS", "0")
+    monkeypatch.setenv("LLM_OUTPUT_PRICE_PER_1K_TOKENS", "0")
+
+    if str(GATEWAY_SRC) not in sys.path:
+        sys.path.insert(0, str(GATEWAY_SRC))
+
+    for name in ("app.main", "app.ai_client", "app.db", "app"):
+        sys.modules.pop(name, None)
+
+    module = importlib.import_module("app.main")
     return importlib.reload(module)
 
 

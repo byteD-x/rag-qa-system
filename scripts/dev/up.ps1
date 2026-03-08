@@ -26,7 +26,6 @@ try {
 
     $services = Get-ComposeServices
     Write-Info "Compose services: $($services -join ', ')"
-    Reset-ComposeOneShotServices -ServiceNames @("db-bootstrap")
 
     if ($SkipPull) {
         Write-Info "Skipping remote image pull."

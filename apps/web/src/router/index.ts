@@ -39,31 +39,6 @@ const routes = [
         component: () => import('@/views/chat/UnifiedChatView.vue')
       },
       {
-        path: 'ai/chat',
-        name: 'AIChatView',
-        component: () => import('@/views/ai/AIChatView.vue')
-      },
-      {
-        path: 'novel/upload',
-        name: 'NovelUploadView',
-        component: () => import('@/views/novel/NovelUploadView.vue')
-      },
-      {
-        path: 'novel/chat',
-        redirect: (to: any) => ({
-          path: '/workspace/chat',
-          query: {
-            ...to.query,
-            preset: 'novel'
-          }
-        })
-      },
-      {
-        path: 'novel/documents/:id',
-        name: 'NovelDocumentView',
-        component: () => import('@/views/novel/NovelDocumentView.vue')
-      },
-      {
         path: 'kb/upload',
         name: 'KBUploadView',
         component: () => import('@/views/kb/KBUploadView.vue')

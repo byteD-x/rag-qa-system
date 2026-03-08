@@ -1,130 +1,159 @@
 {
-  "novel": {
-    "file": "E:\\Project\\rag-qa-system\\docs\\呢喃诗章(咸鱼飞行家).txt",
-    "size_bytes": 39992759,
-    "chapter_blocks": 1,
-    "chapters": 1,
-    "scenes": 1,
-    "passages": 25911,
-    "aliases": 0,
-    "relation_edges": 0,
-    "block_scan_ms": 1747.832,
-    "parse_ms": 1961.059,
-    "size_mib": 38.1401,
-    "throughput_mib_per_s": 10.2834
-  },
   "kb": {
-    "file_count": 15,
-    "size_mib": 0.0011,
-    "sections": 15,
-    "chunks": 15,
-    "mean_parse_ms": 0.2804,
-    "throughput_mib_per_s": 0.2551,
+    "file_count": 20,
+    "input_patterns": [
+      "datasets/demo/documents/doc_*.txt",
+      "README.md",
+      "docs/reference/api-specification.md",
+      "docs/operations/runbook.md",
+      "CONTRIBUTING.md",
+      "SECURITY.md"
+    ],
+    "size_mib": 0.0158,
+    "sections": 75,
+    "chunks": 76,
+    "mean_parse_ms": 0.2795,
+    "throughput_mib_per_s": 2.8308,
     "items": [
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_1.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_1.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 1.109
+        "parse_ms": 0.304
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_10.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_10.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.31
+        "parse_ms": 0.217
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_11.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_11.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.214
+        "parse_ms": 0.16
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_12.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_12.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.181
+        "parse_ms": 0.153
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_13.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_13.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.174
+        "parse_ms": 0.144
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_14.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_14.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.416
+        "parse_ms": 0.144
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_15.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_15.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.224
+        "parse_ms": 0.242
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_2.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_2.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.221
+        "parse_ms": 0.202
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_3.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_3.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.198
+        "parse_ms": 0.182
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_4.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_4.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.189
+        "parse_ms": 0.213
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_5.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_5.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.195
+        "parse_ms": 0.184
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_6.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_6.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.214
+        "parse_ms": 0.152
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_7.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_7.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.188
+        "parse_ms": 0.142
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_8.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_8.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.185
+        "parse_ms": 0.26
       },
       {
-        "file": "E:\\Project\\rag-qa-system\\docs\\demo-dataset\\doc_9.txt",
+        "file": "E:\\Project\\rag-qa-system\\datasets\\demo\\documents\\doc_9.txt",
         "size_bytes": 75,
         "sections": 1,
         "chunks": 1,
-        "parse_ms": 0.188
+        "parse_ms": 0.152
+      },
+      {
+        "file": "E:\\Project\\rag-qa-system\\README.md",
+        "size_bytes": 8118,
+        "sections": 26,
+        "chunks": 27,
+        "parse_ms": 0.853
+      },
+      {
+        "file": "E:\\Project\\rag-qa-system\\docs\\reference\\api-specification.md",
+        "size_bytes": 2583,
+        "sections": 16,
+        "chunks": 16,
+        "parse_ms": 0.626
+      },
+      {
+        "file": "E:\\Project\\rag-qa-system\\docs\\operations\\runbook.md",
+        "size_bytes": 1716,
+        "sections": 6,
+        "chunks": 6,
+        "parse_ms": 0.307
+      },
+      {
+        "file": "E:\\Project\\rag-qa-system\\CONTRIBUTING.md",
+        "size_bytes": 1911,
+        "sections": 7,
+        "chunks": 7,
+        "parse_ms": 0.501
+      },
+      {
+        "file": "E:\\Project\\rag-qa-system\\SECURITY.md",
+        "size_bytes": 1137,
+        "sections": 5,
+        "chunks": 5,
+        "parse_ms": 0.451
       }
     ]
   }

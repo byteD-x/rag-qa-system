@@ -32,11 +32,41 @@ x-embedding-env: &embedding-env
   EMBEDDING_TIMEOUT_SECONDS: ${EMBEDDING_TIMEOUT_SECONDS:-60}
   EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
 
+x-llm-env: &llm-env
+  LLM_ENABLED: ${LLM_ENABLED:-}
+  AI_CHAT_ENABLED: ${AI_CHAT_ENABLED:-}
+  LLM_PROVIDER: ${LLM_PROVIDER:-}
+  AI_PROVIDER: ${AI_PROVIDER:-}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  AI_BASE_URL: ${AI_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  AI_API_KEY: ${AI_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  AI_MODEL: ${AI_MODEL:-}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-}
+  AI_CHAT_TIMEOUT_SECONDS: ${AI_CHAT_TIMEOUT_SECONDS:-}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-}
+  AI_DEFAULT_TEMPERATURE: ${AI_DEFAULT_TEMPERATURE:-}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+  AI_DEFAULT_MAX_TOKENS: ${AI_DEFAULT_MAX_TOKENS:-}
+  LLM_SYSTEM_PROMPT: ${LLM_SYSTEM_PROMPT:-}
+  AI_SYSTEM_PROMPT: ${AI_SYSTEM_PROMPT:-}
+  LLM_EXTRA_BODY_JSON: ${LLM_EXTRA_BODY_JSON:-}
+  AI_EXTRA_BODY_JSON: ${AI_EXTRA_BODY_JSON:-}
+  LLM_PRICE_CURRENCY: ${LLM_PRICE_CURRENCY:-}
+  AI_PRICE_CURRENCY: ${AI_PRICE_CURRENCY:-}
+  LLM_PRICE_TIERS_JSON: ${LLM_PRICE_TIERS_JSON:-}
+  AI_PRICE_TIERS_JSON: ${AI_PRICE_TIERS_JSON:-}
+  LLM_INPUT_PRICE_PER_1K_TOKENS: ${LLM_INPUT_PRICE_PER_1K_TOKENS:-}
+  AI_INPUT_PRICE_PER_1K_TOKENS: ${AI_INPUT_PRICE_PER_1K_TOKENS:-}
+  LLM_OUTPUT_PRICE_PER_1K_TOKENS: ${LLM_OUTPUT_PRICE_PER_1K_TOKENS:-}
+  AI_OUTPUT_PRICE_PER_1K_TOKENS: ${AI_OUTPUT_PRICE_PER_1K_TOKENS:-}
+
 services:
   postgres:
     build:
-      context: ./infra/postgres
-      dockerfile: postgres.Dockerfile
+      context: ./ops/docker/postgres
+      dockerfile: Dockerfile
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-postgres}
       POSTGRES_USER: ${POSTGRES_USER:-rag}
@@ -52,23 +82,6 @@ services:
       retries: 20
     logging: *default-logging
 
-  db-bootstrap:
-    image: postgres:16
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-postgres}
-      POSTGRES_USER: ${POSTGRES_USER:-rag}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
-      PGHOST: postgres
-      PGPASSWORD: ${POSTGRES_PASSWORD:-rag}
-    volumes:
-      - ./infra/postgres/init/000_dual_kernel_bootstrap.sh:/bootstrap/000_dual_kernel_bootstrap.sh:ro
-    entrypoint: ["/bin/sh", "/bootstrap/000_dual_kernel_bootstrap.sh"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-    logging: *default-logging
-
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -81,58 +94,16 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "/bin/sh", "-c", "wget -q -O- http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 20
-    logging: *default-logging
-
-  novel-service:
-    build:
-      context: .
-      dockerfile: apps/backend/novel-service/Dockerfile
-    environment:
-      <<: [*common-auth-env, *object-storage-env, *embedding-env]
-      NOVEL_DATABASE_DSN: ${NOVEL_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/novel_app}
-      NOVEL_BLOB_ROOT: /data/novel
-    volumes:
-      - ./data/novel:/data/novel
-    ports:
-      - "${NOVEL_HOST_PORT:-8100}:8100"
-    depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-      minio:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/healthz', timeout=3)"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    logging: *default-logging
-
-  novel-worker:
-    build:
-      context: .
-      dockerfile: apps/backend/novel-service/Dockerfile
-    command: ["python", "-m", "app.worker"]
-    environment:
-      <<: [*common-auth-env, *object-storage-env, *embedding-env]
-      NOVEL_DATABASE_DSN: ${NOVEL_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/novel_app}
-      NOVEL_BLOB_ROOT: /data/novel
-    volumes:
-      - ./data/novel:/data/novel
-    depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-      minio:
-        condition: service_healthy
     logging: *default-logging
 
   kb-service:
     build:
       context: .
-      dockerfile: apps/backend/kb-service/Dockerfile
+      dockerfile: apps/services/knowledge-base/Dockerfile
     environment:
       <<: [*common-auth-env, *object-storage-env, *embedding-env]
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
@@ -142,8 +113,8 @@ services:
     ports:
       - "${KB_HOST_PORT:-8300}:8200"
     depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:
@@ -156,7 +127,7 @@ services:
   kb-worker:
     build:
       context: .
-      dockerfile: apps/backend/kb-service/Dockerfile
+      dockerfile: apps/services/knowledge-base/Dockerfile
     command: ["python", "-m", "app.worker"]
     environment:
       <<: [*common-auth-env, *object-storage-env, *embedding-env]
@@ -165,47 +136,28 @@ services:
     volumes:
       - ./data/kb:/data/kb
     depends_on:
-      db-bootstrap:
-        condition: service_completed_successfully
-      minio:
+      kb-service:
         condition: service_healthy
     logging: *default-logging
 
   gateway:
     build:
       context: .
-      dockerfile: apps/backend/gateway/Dockerfile
+      dockerfile: apps/services/api-gateway/Dockerfile
     environment:
-      <<: *common-auth-env
+      <<: [*common-auth-env, *llm-env]
       GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/gateway_app}
       GATEWAY_TIMEOUT_SECONDS: ${GATEWAY_TIMEOUT_SECONDS:-180}
-      NOVEL_SERVICE_URL: ${NOVEL_SERVICE_URL:-http://novel-service:8100}
       KB_SERVICE_URL: ${KB_SERVICE_URL:-http://kb-service:8200}
-      AI_CHAT_ENABLED: ${AI_CHAT_ENABLED:-true}
-      AI_PROVIDER: ${AI_PROVIDER:-openai-compatible}
-      AI_BASE_URL: ${AI_BASE_URL:-}
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-}
-      AI_CHAT_TIMEOUT_SECONDS: ${AI_CHAT_TIMEOUT_SECONDS:-120}
-      AI_DEFAULT_TEMPERATURE: ${AI_DEFAULT_TEMPERATURE:-0.7}
-      AI_DEFAULT_MAX_TOKENS: ${AI_DEFAULT_MAX_TOKENS:-2048}
-      AI_SYSTEM_PROMPT: ${AI_SYSTEM_PROMPT:-}
-      AI_EXTRA_BODY_JSON: ${AI_EXTRA_BODY_JSON:-{}}
-      AI_PRICE_CURRENCY: ${AI_PRICE_CURRENCY:-CNY}
-      AI_PRICE_TIERS_JSON: ${AI_PRICE_TIERS_JSON:-[]}
-      AI_INPUT_PRICE_PER_1K_TOKENS: ${AI_INPUT_PRICE_PER_1K_TOKENS:-0}
-      AI_OUTPUT_PRICE_PER_1K_TOKENS: ${AI_OUTPUT_PRICE_PER_1K_TOKENS:-0}
       CHAT_MAX_EVIDENCE: ${CHAT_MAX_EVIDENCE:-8}
       CHAT_HISTORY_MESSAGES: ${CHAT_HISTORY_MESSAGES:-8}
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     depends_on:
-      novel-service:
-        condition: service_healthy
       kb-service:
         condition: service_healthy
-      db-bootstrap:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
       interval: 5s

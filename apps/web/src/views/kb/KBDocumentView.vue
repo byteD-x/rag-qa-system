@@ -74,7 +74,7 @@
       <DocumentEvents
         :items="events"
         title="处理事件"
-        description="事件由企业库内核独立产生，不复用小说线路事件。"
+        description="事件由企业库索引链路独立产生，用于排查解析与增强阶段状态。"
       />
     </el-card>
   </div>

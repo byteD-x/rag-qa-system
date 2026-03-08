@@ -51,6 +51,12 @@ secrets/
 # Logs and local runtime state
 *.log
 logs/
+artifacts/*
+artifacts/.gitkeep
+artifacts/evals/
+artifacts/evals/.gitkeep
+artifacts/reports/
+artifacts/reports/.gitkeep
 agent_runs/
 .trae/
 .kiro/

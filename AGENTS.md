@@ -63,7 +63,7 @@
 
 - `python scripts/quality/check-encoding.py`
 - `cd apps/web && npm run build`
-- `python -m compileall packages/shared/python apps/backend/gateway apps/backend/novel-service apps/backend/kb-service`
+- `python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base`
 - `docker compose config --quiet`
 
 说明：

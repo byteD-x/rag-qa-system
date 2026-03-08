@@ -21,17 +21,9 @@
             <el-icon><Grid /></el-icon>
             <template #title>概览</template>
           </el-menu-item>
-          <el-menu-item index="/workspace/novel/upload" class="menu-item-custom">
-            <el-icon><Reading /></el-icon>
-            <template #title>小说上传</template>
-          </el-menu-item>
           <el-menu-item index="/workspace/kb/upload" class="menu-item-custom">
             <el-icon><Files /></el-icon>
             <template #title>企业文档上传</template>
-          </el-menu-item>
-          <el-menu-item index="/workspace/ai/chat" class="menu-item-custom">
-            <el-icon><Connection /></el-icon>
-            <template #title>纯模型对话</template>
           </el-menu-item>
         </el-menu>
       </div>
@@ -80,12 +72,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import {
   ChatDotRound,
-  Connection,
   Files,
   Grid,
   MoreFilled,
   Platform,
-  Reading,
   SwitchButton
 } from '@element-plus/icons-vue';
 
@@ -101,12 +91,6 @@ const userInitial = computed(() => {
 const currentMode = computed(() => {
   if (route.path.includes('/workspace/chat')) {
     return '统一 QA';
-  }
-  if (route.path.includes('/workspace/ai/')) {
-    return '纯模型对话';
-  }
-  if (route.path.includes('/workspace/novel/')) {
-    return '小说上传链路';
   }
   if (route.path.includes('/workspace/kb/')) {
     return '企业文档链路';
@@ -267,41 +251,59 @@ const handleCommand = (command: string) => {
   text-overflow: ellipsis;
 }
 
-.user-role,
-.dropdown-icon {
+.user-role {
   font-size: 12px;
   color: var(--text-secondary);
 }
 
+.dropdown-icon {
+  color: var(--text-secondary);
+}
+
 .main-content-wrapper {
-  background: transparent;
+  min-width: 0;
 }
 
 .app-main {
-  height: 100%;
-  padding: 20px;
-  overflow: auto;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px;
 }
 
-@media screen and (max-width: 960px) {
+.fade-transform-enter-active,
+.fade-transform-leave-active {
+  transition: all 0.2s ease;
+}
+
+.fade-transform-enter-from,
+.fade-transform-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+@media (max-width: 960px) {
   .app-sidebar {
-    width: 78px !important;
+    width: 240px !important;
   }
 
-  .sidebar-header h2,
-  .sidebar-header p,
-  .mode-summary,
-  .user-info {
-    display: none;
+  .app-main {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 760px) {
+  .main-layout {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
   }
 
-  .sidebar-header {
-    justify-content: center;
-    padding: 20px 10px;
+  .app-sidebar {
+    width: 100% !important;
   }
 
-  .logo-circle-mini {
-    margin: 0;
+  .app-main {
+    height: auto;
   }
 }
 </style>

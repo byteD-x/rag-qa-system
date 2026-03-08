@@ -271,10 +271,6 @@ function Get-GatewayHostPort {
     return Get-EnvIntSetting -Name "GATEWAY_HOST_PORT" -DefaultValue 8080
 }
 
-function Get-NovelHostPort {
-    return Get-EnvIntSetting -Name "NOVEL_HOST_PORT" -DefaultValue 8100
-}
-
 function Get-KBHostPort {
     return Get-EnvIntSetting -Name "KB_HOST_PORT" -DefaultValue 8300
 }
@@ -404,7 +400,6 @@ function Wait-CoreServices {
 
     $targets = @(
         @{ Name = "gateway"; Url = "http://localhost:$((Get-GatewayHostPort))/healthz" },
-        @{ Name = "novel-service"; Url = "http://localhost:$((Get-NovelHostPort))/healthz" },
         @{ Name = "kb-service"; Url = "http://localhost:$((Get-KBHostPort))/healthz" }
     )
 
@@ -568,6 +563,17 @@ function Start-ManagedFrontend {
     $dependencyDriftMessage = Get-FrontendDependencyDriftMessage
 
     $runnerScript = Resolve-RepoPath -RelativePath "scripts\dev\frontend-runner.ps1"
+    $zoneStream = Get-Item -Path $runnerScript -Stream "Zone.Identifier" -ErrorAction SilentlyContinue
+    if ($null -ne $zoneStream) {
+        try {
+            Unblock-File -Path $runnerScript -ErrorAction Stop
+            Write-Info "Unblocked frontend runner script for background execution."
+        }
+        catch {
+            Write-Warn "Failed to unblock frontend runner script. Background execution may still prompt for confirmation."
+        }
+    }
+
     $runnerShell = Get-ManagedPowerShellCommand
     $runnerArgs = @(
         "-NoProfile",
@@ -578,6 +584,9 @@ function Start-ManagedFrontend {
         "-LogFile", $script:FrontendLogFile
     )
 
+    Write-Info "Starting frontend dev server on port $Port..."
+    Write-Info "Waiting for frontend readiness: $frontendUrl"
+    Write-Info "Frontend logs: $script:FrontendLogFile"
     $proc = Start-Process -FilePath $runnerShell -ArgumentList $runnerArgs -WindowStyle Hidden -PassThru
     Start-Sleep -Seconds 1
 
@@ -645,7 +654,6 @@ function Write-ProjectSummary {
     Write-Host ""
     Write-Host "[DONE] Project is ready."
     Write-Host "Gateway:         http://localhost:$(Get-GatewayHostPort)"
-    Write-Host "Novel Service:   http://localhost:$(Get-NovelHostPort)"
     Write-Host "KB Service:      http://localhost:$(Get-KBHostPort)"
     Write-Host "PostgreSQL:      localhost:$(Get-PostgresHostPort)"
 

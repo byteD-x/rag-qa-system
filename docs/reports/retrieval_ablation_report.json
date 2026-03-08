@@ -1,11 +1,11 @@
 {
-  "fixture": "E:\\Project\\rag-qa-system\\tests\\evals\\retrieval-ablation-fixture.json",
+  "fixture": "E:\\Project\\rag-qa-system\\tests\\fixtures\\evals\\retrieval-ablation-fixture.json",
   "summary": {
     "fusion_only": {
-      "recall_at_1": 0.25,
+      "recall_at_1": 0.5,
       "recall_at_3": 1.0,
-      "mrr": 0.625,
-      "ndcg_at_3": 0.7232
+      "mrr": 0.75,
+      "ndcg_at_3": 0.8155
     },
     "rewrite_plus_fusion": {
       "recall_at_1": 0.75,
@@ -24,32 +24,6 @@
     "fusion_only": [
       {
         "id": "ablation-001",
-        "question": "夏德是谁",
-        "top_units": [
-          "n2",
-          "n1",
-          "n3"
-        ],
-        "recall_at_1": 0.0,
-        "recall_at_3": 1.0,
-        "mrr": 0.5,
-        "ndcg_at_3": 0.6309
-      },
-      {
-        "id": "ablation-002",
-        "question": "第10章讲了什么",
-        "top_units": [
-          "n11",
-          "n10",
-          "n12"
-        ],
-        "recall_at_1": 0.0,
-        "recall_at_3": 1.0,
-        "mrr": 0.5,
-        "ndcg_at_3": 0.6309
-      },
-      {
-        "id": "ablation-003",
         "question": "报销审批需要哪些角色签字",
         "top_units": [
           "k2",
@@ -62,12 +36,38 @@
         "ndcg_at_3": 0.6309
       },
       {
-        "id": "ablation-004",
+        "id": "ablation-002",
         "question": "试用期请假怎么走流程",
         "top_units": [
           "k10",
           "k11",
           "k12"
+        ],
+        "recall_at_1": 1.0,
+        "recall_at_3": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_3": 1.0
+      },
+      {
+        "id": "ablation-003",
+        "question": "系统支持哪些统一聊天 scope",
+        "top_units": [
+          "k21",
+          "k20",
+          "k22"
+        ],
+        "recall_at_1": 0.0,
+        "recall_at_3": 1.0,
+        "mrr": 0.5,
+        "ndcg_at_3": 0.6309
+      },
+      {
+        "id": "ablation-004",
+        "question": "知识库直传对象存储的分块大小是多少",
+        "top_units": [
+          "k30",
+          "k31",
+          "k32"
         ],
         "recall_at_1": 1.0,
         "recall_at_3": 1.0,
@@ -78,32 +78,6 @@
     "rewrite_plus_fusion": [
       {
         "id": "ablation-001",
-        "question": "夏德是谁",
-        "top_units": [
-          "n1",
-          "n2",
-          "n3"
-        ],
-        "recall_at_1": 1.0,
-        "recall_at_3": 1.0,
-        "mrr": 1.0,
-        "ndcg_at_3": 1.0
-      },
-      {
-        "id": "ablation-002",
-        "question": "第10章讲了什么",
-        "top_units": [
-          "n10",
-          "n11",
-          "n12"
-        ],
-        "recall_at_1": 1.0,
-        "recall_at_3": 1.0,
-        "mrr": 1.0,
-        "ndcg_at_3": 1.0
-      },
-      {
-        "id": "ablation-003",
         "question": "报销审批需要哪些角色签字",
         "top_units": [
           "k2",
@@ -116,7 +90,7 @@
         "ndcg_at_3": 0.6309
       },
       {
-        "id": "ablation-004",
+        "id": "ablation-002",
         "question": "试用期请假怎么走流程",
         "top_units": [
           "k10",
@@ -127,37 +101,37 @@
         "recall_at_3": 1.0,
         "mrr": 1.0,
         "ndcg_at_3": 1.0
+      },
+      {
+        "id": "ablation-003",
+        "question": "系统支持哪些统一聊天 scope",
+        "top_units": [
+          "k20",
+          "k21",
+          "k22"
+        ],
+        "recall_at_1": 1.0,
+        "recall_at_3": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_3": 1.0
+      },
+      {
+        "id": "ablation-004",
+        "question": "知识库直传对象存储的分块大小是多少",
+        "top_units": [
+          "k30",
+          "k31",
+          "k32"
+        ],
+        "recall_at_1": 1.0,
+        "recall_at_3": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_3": 1.0
       }
     ],
     "rewrite_plus_fusion_plus_rerank": [
       {
         "id": "ablation-001",
-        "question": "夏德是谁",
-        "top_units": [
-          "n1",
-          "n2",
-          "n3"
-        ],
-        "recall_at_1": 1.0,
-        "recall_at_3": 1.0,
-        "mrr": 1.0,
-        "ndcg_at_3": 1.0
-      },
-      {
-        "id": "ablation-002",
-        "question": "第10章讲了什么",
-        "top_units": [
-          "n10",
-          "n11",
-          "n12"
-        ],
-        "recall_at_1": 1.0,
-        "recall_at_3": 1.0,
-        "mrr": 1.0,
-        "ndcg_at_3": 1.0
-      },
-      {
-        "id": "ablation-003",
         "question": "报销审批需要哪些角色签字",
         "top_units": [
           "k1",
@@ -170,12 +144,38 @@
         "ndcg_at_3": 1.0
       },
       {
-        "id": "ablation-004",
+        "id": "ablation-002",
         "question": "试用期请假怎么走流程",
         "top_units": [
           "k10",
           "k11",
           "k12"
+        ],
+        "recall_at_1": 1.0,
+        "recall_at_3": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_3": 1.0
+      },
+      {
+        "id": "ablation-003",
+        "question": "系统支持哪些统一聊天 scope",
+        "top_units": [
+          "k20",
+          "k21",
+          "k22"
+        ],
+        "recall_at_1": 1.0,
+        "recall_at_3": 1.0,
+        "mrr": 1.0,
+        "ndcg_at_3": 1.0
+      },
+      {
+        "id": "ablation-004",
+        "question": "知识库直传对象存储的分块大小是多少",
+        "top_units": [
+          "k30",
+          "k32",
+          "k31"
         ],
         "recall_at_1": 1.0,
         "recall_at_3": 1.0,

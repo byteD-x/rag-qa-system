@@ -6,7 +6,7 @@
           <el-icon :size="36" color="#ffffff"><Platform /></el-icon>
         </div>
         <h1>RAG-QA 2.0</h1>
-        <p>统一网关，双独立内核。小说线路与企业库线路从入口页分流，上传、索引、问答都各走各的。</p>
+        <p>企业文档优先的 RAG 问答工作台，围绕上传、索引、检索、证据化回答与评测闭环构建。</p>
       </div>
       <div class="bg-shape shape-1"></div>
       <div class="bg-shape shape-2"></div>
@@ -17,7 +17,7 @@
       <div class="auth-wrapper animate-fade-in">
         <div class="auth-header">
           <h2>登录工作台</h2>
-          <p>进入双线路上传与问答界面。</p>
+          <p>进入企业知识库上传与问答界面。</p>
         </div>
         <router-view />
       </div>
