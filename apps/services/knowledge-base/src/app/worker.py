@@ -8,24 +8,49 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import httpx
 from shared.embeddings import EMBEDDING_DIM, embed_texts, load_embedding_settings, stable_content_key, vector_literal
 from shared.logging import setup_logging
+from shared.metrics import Counter, Histogram, start_http_server
 from shared.text_encoding import detect_text_encoding
 from shared.text_search import build_fts_lexeme_text
 
 from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, parse_document
-from .runtime import BLOB_ROOT, db, ensure_runtime, storage
+from .runtime import BLOB_ROOT, db, prepare_runtime, storage
 
 
 logger = setup_logging("kb-worker")
 POLL_SECONDS = float(os.getenv("KB_WORKER_POLL_SECONDS", "2"))
 SECTION_BATCH_SIZE = int(os.getenv("KB_SECTION_BATCH_SIZE", "50"))
 CHUNK_BATCH_SIZE = int(os.getenv("KB_CHUNK_BATCH_SIZE", "500"))
+MAX_ATTEMPTS = max(int(os.getenv("KB_INGEST_MAX_ATTEMPTS", "5")), 1)
+LEASE_SECONDS = max(int(os.getenv("KB_WORKER_LEASE_SECONDS", "300")), 30)
+WORKER_METRICS_PORT = max(int(os.getenv("KB_WORKER_METRICS_PORT", "9300")), 0)
+RETRY_DELAYS_SECONDS = (5, 15, 45, 135, 300)
 EMBEDDING_SETTINGS = load_embedding_settings()
+
+WORKER_INGEST_ATTEMPTS_TOTAL = Counter(
+    "rag_kb_ingest_attempts_total",
+    "KB worker ingest attempt outcomes.",
+    labelnames=("outcome",),
+)
+WORKER_INGEST_PHASE_DURATION_MS = Histogram(
+    "rag_kb_ingest_phase_duration_ms",
+    "KB worker phase duration in milliseconds.",
+    labelnames=("phase",),
+    buckets=(10, 25, 50, 100, 250, 500, 1000, 2000, 5000, 15000, 30000),
+)
+WORKER_DEAD_LETTER_TOTAL = Counter(
+    "rag_kb_dead_letter_total_worker",
+    "KB worker dead-lettered ingest jobs.",
+)
 
 
 def run_forever() -> None:
-    ensure_runtime()
+    prepare_runtime()
+    if WORKER_METRICS_PORT > 0:
+        start_http_server(WORKER_METRICS_PORT)
+        logger.info("kb worker metrics listening port=%s", WORKER_METRICS_PORT)
     logger.info("kb worker started poll_seconds=%s", POLL_SECONDS)
     while True:
         job = _claim_next_job()
@@ -36,10 +61,11 @@ def run_forever() -> None:
             _process_job(job)
         except Exception as exc:  # pragma: no cover - recovery path
             logger.exception("kb ingest job failed job_id=%s", job["id"])
-            _mark_job_failed(str(job["id"]), str(job["document_id"]), str(exc))
+            _handle_job_failure(job, exc)
 
 
 def _claim_next_job() -> dict[str, Any] | None:
+    lease_token = str(uuid4())
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -47,19 +73,33 @@ def _claim_next_job() -> dict[str, Any] | None:
                 WITH picked AS (
                     SELECT id
                     FROM kb_ingest_jobs
-                    WHERE status IN ('queued', 'retry')
-                    ORDER BY created_at ASC
+                    WHERE (
+                        status IN ('queued', 'retry')
+                        AND COALESCE(next_retry_at, created_at) <= NOW()
+                    )
+                    OR (
+                        status = 'processing'
+                        AND lease_expires_at IS NOT NULL
+                        AND lease_expires_at <= NOW()
+                    )
+                    ORDER BY COALESCE(next_retry_at, created_at) ASC, created_at ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
                 UPDATE kb_ingest_jobs AS jobs
                 SET status = 'processing',
                     started_at = COALESCE(started_at, NOW()),
+                    attempt_count = COALESCE(jobs.attempt_count, 0) + 1,
+                    max_attempts = CASE WHEN COALESCE(jobs.max_attempts, 0) > 0 THEN jobs.max_attempts ELSE %s END,
+                    lease_token = %s,
+                    lease_expires_at = NOW() + (%s || ' seconds')::interval,
                     updated_at = NOW()
                 FROM picked
                 WHERE jobs.id = picked.id
                 RETURNING jobs.*
                 """
+                ,
+                (MAX_ATTEMPTS, lease_token, LEASE_SECONDS),
             )
             row = cur.fetchone()
         conn.commit()
@@ -90,6 +130,7 @@ def _process_job(job: dict[str, Any]) -> None:
     else:
         stats = _index_binary_document(document_id=document_id, path=source_path, file_type=str(document["file_type"]))
     stats["parse_ms"] = round((time.perf_counter() - parse_started) * 1000.0, 3)
+    WORKER_INGEST_PHASE_DURATION_MS.labels("parse").observe(float(stats["parse_ms"]))
 
     _update_document(
         document_id,
@@ -129,6 +170,9 @@ def _process_job(job: dict[str, Any]) -> None:
             "embedding_cache": section_embed_stats,
         },
     )
+    WORKER_INGEST_PHASE_DURATION_MS.labels("section_embed").observe(
+        float(round((time.perf_counter() - section_embed_started) * 1000.0, 3))
+    )
     _update_job(
         str(job["id"]),
         phase="hybrid_ready",
@@ -155,6 +199,9 @@ def _process_job(job: dict[str, Any]) -> None:
             "embedding_cache": chunk_embed_stats,
         },
     )
+    WORKER_INGEST_PHASE_DURATION_MS.labels("chunk_embed").observe(
+        float(round((time.perf_counter() - chunk_embed_started) * 1000.0, 3))
+    )
     _update_job(
         str(job["id"]),
         status="done",
@@ -163,6 +210,14 @@ def _process_job(job: dict[str, Any]) -> None:
         enhancement_status="chunk_vectors_ready",
         finished=True,
     )
+    _append_audit_event(
+        action="kb.ingest.complete",
+        outcome="success",
+        resource_type="ingest_job",
+        resource_id=str(job["id"]),
+        details={"document_id": document_id, "trace_id": trace_id},
+    )
+    WORKER_INGEST_ATTEMPTS_TOTAL.labels("success").inc()
 
 
 def _load_document(document_id: str) -> dict[str, Any]:
@@ -566,6 +621,11 @@ def _update_job(
                     query_ready = COALESCE(%s, query_ready),
                     enhancement_status = COALESCE(%s, enhancement_status),
                     checkpoint_json = COALESCE(%s::jsonb, checkpoint_json),
+                    error_message = CASE WHEN %s THEN '' ELSE error_message END,
+                    last_error_code = CASE WHEN %s THEN '' ELSE last_error_code END,
+                    next_retry_at = CASE WHEN %s THEN NULL ELSE next_retry_at END,
+                    lease_token = CASE WHEN %s THEN '' ELSE lease_token END,
+                    lease_expires_at = CASE WHEN %s THEN NULL ELSE lease_expires_at END,
                     finished_at = CASE WHEN %s THEN NOW() ELSE finished_at END,
                     updated_at = NOW()
                 WHERE id = %s
@@ -576,6 +636,11 @@ def _update_job(
                     query_ready,
                     enhancement_status,
                     _to_json(checkpoint) if checkpoint is not None else None,
+                    finished,
+                    finished,
+                    finished,
+                    finished,
+                    finished,
                     finished,
                     job_id,
                 ),
@@ -659,10 +724,149 @@ def _append_event(document_id: str, stage: str, message: str, details: dict[str,
         conn.commit()
 
 
-def _mark_job_failed(job_id: str, document_id: str, message: str) -> None:
-    _update_job(job_id, status="failed", phase="failed", checkpoint={"error": message}, finished=True)
-    _update_document(document_id, status="failed", enhancement_status="failed")
-    _append_event(document_id, "failed", message)
+def _append_audit_event(
+    *,
+    action: str,
+    outcome: str,
+    resource_type: str,
+    resource_id: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    try:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO kb_audit_events (
+                        actor_user_id, actor_email, actor_role, action, resource_type,
+                        resource_id, scope, outcome, trace_id, request_path, details_json
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        "",
+                        "system",
+                        "system",
+                        action,
+                        resource_type,
+                        resource_id,
+                        "system",
+                        outcome,
+                        "",
+                        "kb-worker",
+                        _to_json(details),
+                    ),
+                )
+            conn.commit()
+    except Exception:
+        logger.exception("kb worker audit write failed action=%s outcome=%s", action, outcome)
+
+
+def _retry_delay_seconds(attempt_count: int) -> int:
+    if attempt_count <= 0:
+        return RETRY_DELAYS_SECONDS[0]
+    index = min(attempt_count - 1, len(RETRY_DELAYS_SECONDS) - 1)
+    return int(RETRY_DELAYS_SECONDS[index])
+
+
+def _classify_ingest_failure(exc: Exception) -> tuple[str, bool]:
+    module_name = exc.__class__.__module__.lower()
+    message = str(exc).lower()
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError, httpx.HTTPError)):
+        return "transient_dependency_error", True
+    if "botocore" in module_name or "boto3" in module_name:
+        return "object_storage_error", True
+    if "not found" in message or "missing" in message:
+        return "missing_source", False
+    if isinstance(exc, ValueError) or "unsupported" in message or "invalid" in message:
+        return "invalid_document", False
+    return "internal_error", True
+
+
+def _schedule_job_retry(job: dict[str, Any], *, message: str, error_code: str, delay_seconds: int) -> None:
+    job_id = str(job["id"])
+    document_id = str(job["document_id"])
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE kb_ingest_jobs
+                SET status = 'retry',
+                    phase = 'retry_wait',
+                    checkpoint_json = %s::jsonb,
+                    error_message = %s,
+                    last_error_code = %s,
+                    next_retry_at = NOW() + (%s || ' seconds')::interval,
+                    lease_token = '',
+                    lease_expires_at = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (_to_json({"error": message, "retry_delay_seconds": delay_seconds}), message, error_code, delay_seconds, job_id),
+            )
+        conn.commit()
+    _update_document(document_id, status="uploaded", query_ready=False, enhancement_status="retry_pending")
+    _append_event(
+        document_id,
+        "uploaded",
+        f"retry scheduled in {delay_seconds}s",
+        {"job_id": job_id, "error_code": error_code, "attempt_count": int(job.get("attempt_count") or 0)},
+    )
+    _append_audit_event(
+        action="kb.ingest.retry_scheduled",
+        outcome="retry",
+        resource_type="ingest_job",
+        resource_id=job_id,
+        details={"document_id": document_id, "error": message, "error_code": error_code, "retry_delay_seconds": delay_seconds},
+    )
+    WORKER_INGEST_ATTEMPTS_TOTAL.labels("retry").inc()
+
+
+def _dead_letter_job(job: dict[str, Any], *, message: str, error_code: str) -> None:
+    job_id = str(job["id"])
+    document_id = str(job["document_id"])
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE kb_ingest_jobs
+                SET status = 'dead_letter',
+                    phase = 'dead_letter',
+                    checkpoint_json = %s::jsonb,
+                    error_message = %s,
+                    last_error_code = %s,
+                    dead_lettered_at = NOW(),
+                    finished_at = NOW(),
+                    lease_token = '',
+                    lease_expires_at = NULL,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (_to_json({"error": message}), message, error_code, job_id),
+            )
+        conn.commit()
+    _update_document(document_id, status="failed", query_ready=False, enhancement_status="failed")
+    _append_event(document_id, "failed", message, {"job_id": job_id, "error_code": error_code})
+    _append_audit_event(
+        action="kb.ingest.dead_lettered",
+        outcome="failed",
+        resource_type="ingest_job",
+        resource_id=job_id,
+        details={"document_id": document_id, "error": message, "error_code": error_code},
+    )
+    WORKER_INGEST_ATTEMPTS_TOTAL.labels("dead_letter").inc()
+    WORKER_DEAD_LETTER_TOTAL.inc()
+
+
+def _handle_job_failure(job: dict[str, Any], exc: Exception) -> None:
+    message = str(exc)
+    error_code, retryable = _classify_ingest_failure(exc)
+    attempt_count = int(job.get("attempt_count") or 0)
+    max_attempts = max(int(job.get("max_attempts") or MAX_ATTEMPTS), 1)
+    if retryable and attempt_count < max_attempts:
+        _schedule_job_retry(job, message=message, error_code=error_code, delay_seconds=_retry_delay_seconds(attempt_count))
+        return
+    _dead_letter_job(job, message=message, error_code=error_code)
 
 
 def _summary(text: str, limit: int) -> str:

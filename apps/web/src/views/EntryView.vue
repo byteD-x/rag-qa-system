@@ -1,137 +1,262 @@
 <template>
-  <div class="page">
-    <section class="hero">
-      <div class="hero-copy">
-        <el-tag effect="dark" round>企业文档 RAG / 证据优先 / 问答闭环</el-tag>
-        <h1>围绕企业知识库组织上传、检索与有依据问答</h1>
-        <p>
-          当前工作台聚焦制度、流程、规范、FAQ 与项目文档。
-          系统只保留一条企业 RAG-QA 主业务线：文档上传、异步 ingest、混合检索、证据化回答。
-        </p>
-      </div>
-    </section>
+  <div class="page-shell entry-page">
+    <PageHeaderCompact title="业务总览">
+      <template #actions>
+        <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
+        <el-button plain @click="go('/workspace/kb/upload')">知识库治理</el-button>
+      </template>
+    </PageHeaderCompact>
 
-    <section class="entry-grid">
-      <el-card shadow="hover" class="entry-card kb-card">
-        <div class="entry-badge">Enterprise RAG</div>
-        <h2>企业知识库 QA 业务线</h2>
-        <p>支持 txt / pdf / docx 批量导入，进入知识库批处理、状态追踪与证据化问答工作台。</p>
-        <ul>
-          <li>第 1 步：上传文档到知识库，由 worker 异步 ingest</li>
-          <li>第 2 步：基于 section / chunk / vector 做混合检索</li>
-          <li>第 3 步：以证据和引文为约束生成统一 QA 回答</li>
-        </ul>
-        <div class="entry-actions">
-          <el-button type="primary" @click="router.push('/workspace/kb/upload')">进入上传</el-button>
-          <el-button plain @click="router.push('/workspace/kb/chat')">进入问答</el-button>
+    <div class="entry-content">
+      <section class="quick-actions">
+        <h3 class="section-label">快捷操作</h3>
+        <div class="action-row">
+          <button type="button" class="action-btn" @click="go('/workspace/chat')">
+            <el-icon :size="22"><ChatDotRound /></el-icon>
+            <span>快速问答</span>
+          </button>
+          <button type="button" class="action-btn" @click="go('/workspace/kb/upload')">
+            <el-icon :size="22"><UploadFilled /></el-icon>
+            <span>上传文档</span>
+          </button>
+          <button type="button" class="action-btn" @click="go('/workspace/kb/upload')">
+            <el-icon :size="22"><FolderOpened /></el-icon>
+            <span>知识库管理</span>
+          </button>
         </div>
-      </el-card>
-    </section>
+      </section>
+
+      <section class="recent-grid">
+        <div class="recent-col">
+          <h3 class="section-label">知识库</h3>
+          <div v-if="loading" class="recent-skeleton">
+            <div v-for="i in 4" :key="i" class="skeleton-item" />
+          </div>
+          <EnhancedEmpty
+            v-else-if="!recentKnowledgeBases.length"
+            variant="folder"
+            title="暂无知识库"
+            description="创建知识库后，文档将在此展示"
+            class="recent-empty-inline"
+          />
+          <div v-else class="recent-list">
+            <button
+              v-for="kb in recentKnowledgeBases.slice(0, 4)"
+              :key="kb.id"
+              type="button"
+              class="recent-item"
+              @click="go(`/workspace/kb/upload?baseId=${kb.id}`)"
+            >
+              <el-icon :size="16"><Folder /></el-icon>
+              <span class="recent-name">{{ kb.name }}</span>
+              <span class="recent-meta">{{ kb.docCount }} 篇</span>
+            </button>
+          </div>
+        </div>
+        <div class="recent-col">
+          <h3 class="section-label">最近会话</h3>
+          <div v-if="loading" class="recent-skeleton">
+            <div v-for="i in 4" :key="i" class="skeleton-item" />
+          </div>
+          <EnhancedEmpty
+            v-else-if="!recentSessions.length"
+            variant="chat"
+            title="暂无会话"
+            description="开始新对话后，最近会话将在此展示"
+            class="recent-empty-inline"
+          />
+          <div v-else class="recent-list">
+            <button
+              v-for="session in recentSessions.slice(0, 4)"
+              :key="session.id"
+              type="button"
+              class="recent-item"
+              @click="go(`/workspace/chat?sessionId=${session.id}`)"
+            >
+              <el-icon :size="16"><ChatLineRound /></el-icon>
+              <span class="recent-name">{{ session.title }}</span>
+              <span class="recent-meta">{{ session.questionCount > 0 ? session.questionCount + ' 问' : '继续' }}</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound } from '@element-plus/icons-vue';
+import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
+import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import { listKnowledgeBases } from '@/api/kb';
+import { listChatSessions } from '@/api/chat';
 
 const router = useRouter();
+
+const recentKnowledgeBases = ref<{ id: string; name: string; docCount: number }[]>([]);
+const recentSessions = ref<{ id: string; title: string; questionCount: number }[]>([]);
+const loading = ref(true);
+
+onMounted(async () => {
+  loading.value = true;
+  try {
+    const [kbRes, sessionRes] = await Promise.all([
+      listKnowledgeBases().catch(() => ({ items: [] })),
+      listChatSessions().catch(() => ({ items: [] }))
+    ]);
+    const kbItems = (kbRes as any).items || [];
+    const sessionItems = (sessionRes as any).items || [];
+    recentKnowledgeBases.value = kbItems.slice(0, 6).map((b: any) => ({
+      id: String(b.id || ''),
+      name: String(b.name || '未命名'),
+      docCount: Number(b.document_count ?? 0)
+    }));
+    recentSessions.value = sessionItems.slice(0, 6).map((s: any) => ({
+      id: String(s.id || ''),
+      title: String(s.title || '未命名会话').trim() || '未命名会话',
+      questionCount: Number(s.message_count ?? s.question_count ?? 0)
+    }));
+  } finally {
+    loading.value = false;
+  }
+});
+
+const go = (path: string) => {
+  router.push(path);
+};
 </script>
 
 <style scoped>
-.page {
+.entry-page {
+  gap: var(--content-gap, 20px);
+}
+
+.entry-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--section-gap, 24px);
+  min-height: 0;
+  overflow-y: auto;
 }
 
-.hero {
-  padding: 36px;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.18), transparent 32%),
-    radial-gradient(circle at bottom right, rgba(15, 118, 110, 0.18), transparent 30%),
-    linear-gradient(135deg, #ffffff, #f8fafc);
-  border: 1px solid rgba(148, 163, 184, 0.2);
+.section-label {
+  margin: 0 0 12px;
+  font-size: var(--text-body, 0.9375rem);
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
-.hero-copy {
-  max-width: 760px;
+.quick-actions {
+  flex-shrink: 0;
 }
 
-.hero-copy h1 {
-  margin: 16px 0 12px;
-  font-size: 44px;
-  line-height: 1.1;
-}
-
-.hero-copy p {
-  margin: 0;
-  font-size: 17px;
-  line-height: 1.8;
-  color: var(--text-regular);
-}
-
-.entry-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
-}
-
-.entry-card {
-  border-radius: 28px;
-  border: none;
-}
-
-.entry-card :deep(.el-card__body) {
-  padding: 28px;
-}
-
-.entry-badge {
-  display: inline-flex;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.kb-card {
-  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), #ffffff);
-}
-
-.kb-card .entry-badge {
-  background: rgba(15, 118, 110, 0.14);
-  color: #0f766e;
-}
-
-.entry-card h2 {
-  margin: 18px 0 10px;
-  font-size: 30px;
-}
-
-.entry-card p {
-  margin: 0;
-  line-height: 1.7;
-  color: var(--text-regular);
-}
-
-.entry-card ul {
-  margin: 18px 0 0;
-  padding-left: 20px;
-  color: var(--text-regular);
-  line-height: 1.8;
-}
-
-.entry-actions {
+.action-row {
   display: flex;
-  gap: 12px;
-  margin-top: 24px;
   flex-wrap: wrap;
+  gap: 12px;
 }
 
-@media (max-width: 960px) {
-  .hero-copy h1 {
-    font-size: 34px;
-  }
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: var(--text-body, 0.9375rem);
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base);
+}
+
+.action-btn:hover {
+  border-color: var(--blue-600);
+  background: var(--blue-50);
+}
+
+.recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--section-gap, 24px);
+}
+
+.recent-col {
+  min-width: 0;
+  padding: 18px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base);
+}
+
+.recent-item:hover {
+  border-color: var(--border-color);
+  background: var(--bg-panel);
+}
+
+.recent-name {
+  flex: 1;
+  font-size: var(--text-body, 0.9375rem);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.recent-empty-inline {
+  padding: 32px 16px !important;
+}
+
+.recent-empty-inline :deep(.default-illustration) {
+  width: 56px;
+  height: 56px;
+}
+
+.recent-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-item {
+  height: 48px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-panel-muted) 25%, var(--border-color) 50%, var(--bg-panel-muted) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

@@ -6,9 +6,6 @@ param(
     [switch]$SkipFrontendBuild,
     [switch]$SkipDockerConfig,
     [switch]$SkipPytest,
-    [switch]$SkipEvalSmoke,
-    [switch]$SkipEmbeddingBenchmark,
-    [switch]$SkipLocalBenchmark,
     [switch]$IncludeDockerBuild
 )
 
@@ -21,8 +18,6 @@ $repoRoot = Get-RepoRoot
 $python = Get-PythonCommandSpec
 $failures = New-Object System.Collections.Generic.List[string]
 $totalChecks = 0
-$artifactReportsDir = "artifacts/reports"
-
 function Invoke-Check {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -90,47 +85,6 @@ if (-not $SkipDockerConfig) {
 if (-not $SkipPytest) {
     Invoke-Check "Pytest" {
         $args = @($python.BaseArguments) + @("-m", "pytest", "tests", "-q")
-        Invoke-RepoTool -Command $python.Command -Arguments $args
-    }
-}
-
-if (-not $SkipEvalSmoke) {
-    Invoke-Check "Retrieval Ablation Smoke" {
-        $args = @($python.BaseArguments) + @(
-            "scripts/evaluation/run-retrieval-ablation.py",
-            "--fixture",
-            "tests/fixtures/evals/retrieval-ablation-fixture.json",
-            "--output",
-            "$artifactReportsDir/ci_retrieval_ablation.json",
-            "--summary-output",
-            "$artifactReportsDir/ci_retrieval_ablation.md"
-        )
-        Invoke-RepoTool -Command $python.Command -Arguments $args
-    }
-}
-
-if (-not $SkipEmbeddingBenchmark) {
-    Invoke-Check "Embedding Benchmark Smoke" {
-        $args = @($python.BaseArguments) + @(
-            "scripts/evaluation/compare-embedding-providers.py",
-            "--output",
-            "$artifactReportsDir/ci_embedding_retrieval_benchmark.json",
-            "--summary-output",
-            "$artifactReportsDir/ci_embedding_retrieval_benchmark.md"
-        )
-        Invoke-RepoTool -Command $python.Command -Arguments $args
-    }
-}
-
-if (-not $SkipLocalBenchmark) {
-    Invoke-Check "Local Ingest Benchmark" {
-        $args = @($python.BaseArguments) + @(
-            "scripts/evaluation/benchmark-local-ingest.py",
-            "--output",
-            "$artifactReportsDir/ci_local_ingest_benchmark.json",
-            "--summary-output",
-            "$artifactReportsDir/ci_local_ingest_benchmark.md"
-        )
         Invoke-RepoTool -Command $python.Command -Arguments $args
     }
 }

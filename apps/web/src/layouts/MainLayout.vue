@@ -1,309 +1,666 @@
 <template>
-  <el-container class="main-layout">
-    <el-aside width="280px" class="app-sidebar">
-      <div class="sidebar-header">
-        <div class="logo-circle-mini">
-          <el-icon :size="20"><Platform /></el-icon>
-        </div>
-        <div>
-          <h2>RAG-QA 2.0</h2>
-          <p>统一 QA / 极速上传 / 证据优先</p>
-        </div>
-      </div>
+  <div class="workspace-shell">
+    <a class="skip-link" href="#workspace-main-content">跳到主内容</a>
 
-      <div class="sidebar-menu-container">
-        <el-menu :default-active="$route.path" router class="app-menu">
-          <el-menu-item index="/workspace/chat" class="menu-item-custom">
-            <el-icon><ChatDotRound /></el-icon>
-            <template #title>统一 QA</template>
-          </el-menu-item>
-          <el-menu-item index="/workspace/entry" class="menu-item-custom">
-            <el-icon><Grid /></el-icon>
-            <template #title>概览</template>
-          </el-menu-item>
-          <el-menu-item index="/workspace/kb/upload" class="menu-item-custom">
-            <el-icon><Files /></el-icon>
-            <template #title>企业文档上传</template>
-          </el-menu-item>
-        </el-menu>
-      </div>
-
-      <div class="sidebar-footer">
-        <div class="mode-summary">
-          <span class="mode-label">当前工作区</span>
-          <strong>{{ currentMode }}</strong>
-        </div>
-        <el-dropdown trigger="click" @command="handleCommand" placement="top-start" class="user-dropdown">
-          <div class="user-profile">
-            <el-avatar :size="38" class="user-avatar">{{ userInitial }}</el-avatar>
-            <div class="user-info">
-              <span class="user-name">{{ authStore.user?.email || 'member@local' }}</span>
-              <span class="user-role">{{ authStore.isAdmin() ? '管理员' : '成员' }}</span>
-            </div>
-            <el-icon class="dropdown-icon"><MoreFilled /></el-icon>
+    <aside class="workspace-sidebar">
+      <div class="sidebar-scroll">
+        <div class="brand-block">
+          <div class="brand-mark">
+            <el-icon :size="22"><Platform /></el-icon>
           </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="logout">
-                <el-icon><SwitchButton /></el-icon>
-                退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </el-aside>
+          <div class="brand-copy">
+            <span class="brand-kicker">企业知识中台</span>
+            <h2>RAG-QA 2.0</h2>
+          </div>
+        </div>
 
-    <el-container class="main-content-wrapper">
-      <el-main class="app-main">
-        <router-view v-slot="{ Component }">
-          <transition name="fade-transform" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+        <div class="sidebar-focus">
+          <span class="sidebar-focus-label">当前页</span>
+          <span class="sidebar-focus-title">{{ routeTitle }}</span>
+        </div>
+
+        <nav class="nav-stack" aria-label="主导航">
+          <button
+            v-for="item in navItemsPrimaryFiltered"
+            :key="item.path"
+            type="button"
+            class="nav-item"
+            :class="{ active: activeNavPath === item.path }"
+            :aria-current="activeNavPath === item.path ? 'page' : undefined"
+            @click="navigate(item.path)"
+          >
+            <span class="nav-icon">
+              <el-icon><component :is="item.icon" /></el-icon>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ item.label }}</strong>
+            </span>
+          </button>
+          <div v-if="auditNavItem" class="nav-divider" role="separator" />
+          <button
+            v-if="auditNavItem"
+            type="button"
+            class="nav-item nav-item--secondary"
+            :class="{ active: activeNavPath === auditNavItem.path }"
+            :aria-current="activeNavPath === auditNavItem.path ? 'page' : undefined"
+            @click="navigate(auditNavItem.path)"
+          >
+            <span class="nav-icon">
+              <el-icon><component :is="auditNavItem.icon" /></el-icon>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ auditNavItem.label }}</strong>
+            </span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="profile-card">
+            <el-avatar :size="42" class="profile-avatar">{{ userInitial }}</el-avatar>
+            <div class="profile-copy">
+              <strong>{{ authStore.user?.email || 'member@local' }}</strong>
+              <span>{{ userRole }}</span>
+            </div>
+          </div>
+
+          <el-button plain class="logout-button" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            退出登录
+          </el-button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="workspace-main">
+      <div class="workspace-main-frame">
+        <header class="workspace-topbar">
+          <div class="topbar-leading">
+            <el-button circle class="mobile-nav-button" @click="mobileDrawerVisible = true">
+              <el-icon><Grid /></el-icon>
+            </el-button>
+
+            <div class="topbar-copy">
+              <div class="breadcrumb-row" aria-label="当前位置">
+                <span
+                  v-for="(item, index) in breadcrumbs"
+                  :key="`${item}-${index}`"
+                  class="breadcrumb-item"
+                >
+                  {{ item }}
+                </span>
+              </div>
+              <h1>{{ routeTitle }}</h1>
+            </div>
+          </div>
+          
+          <div class="topbar-actions">
+            <ThemeToggle />
+          </div>
+        </header>
+
+        <main id="workspace-main-content" class="workspace-content">
+          <router-view v-slot="{ Component }">
+            <transition name="page" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
+        </main>
+      </div>
+    </div>
+
+    <el-drawer
+      v-model="mobileDrawerVisible"
+      direction="ltr"
+      size="320px"
+      :with-header="false"
+      append-to-body
+      class="mobile-drawer"
+    >
+      <div class="drawer-content">
+        <div class="brand-block compact">
+          <div class="brand-mark">
+            <el-icon :size="22"><Platform /></el-icon>
+          </div>
+          <div class="brand-copy">
+            <span class="brand-kicker">企业知识中台</span>
+            <h2>RAG-QA 2.0</h2>
+          </div>
+        </div>
+
+        <nav class="nav-stack" aria-label="移动端导航">
+          <button
+            v-for="item in navItemsPrimaryFiltered"
+            :key="`${item.path}-mobile`"
+            type="button"
+            class="nav-item"
+            :class="{ active: activeNavPath === item.path }"
+            :aria-current="activeNavPath === item.path ? 'page' : undefined"
+            @click="navigate(item.path)"
+          >
+            <span class="nav-icon">
+              <el-icon><component :is="item.icon" /></el-icon>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ item.label }}</strong>
+            </span>
+          </button>
+          <div v-if="auditNavItem" class="nav-divider" role="separator" />
+          <button
+            v-if="auditNavItem"
+            type="button"
+            class="nav-item nav-item--secondary"
+            :class="{ active: activeNavPath === auditNavItem.path }"
+            :aria-current="activeNavPath === auditNavItem.path ? 'page' : undefined"
+            @click="navigate(auditNavItem.path)"
+          >
+            <span class="nav-icon">
+              <el-icon><component :is="auditNavItem.icon" /></el-icon>
+            </span>
+            <span class="nav-copy">
+              <strong>{{ auditNavItem.label }}</strong>
+            </span>
+          </button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <div class="profile-card">
+            <el-avatar :size="42" class="profile-avatar">{{ userInitial }}</el-avatar>
+            <div class="profile-copy">
+              <strong>{{ authStore.user?.email || 'member@local' }}</strong>
+              <span>{{ userRole }}</span>
+            </div>
+          </div>
+
+          <el-button plain class="logout-button" @click="handleLogout">
+            <el-icon><SwitchButton /></el-icon>
+            退出登录
+          </el-button>
+        </div>
+      </div>
+    </el-drawer>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import {
   ChatDotRound,
   Files,
   Grid,
-  MoreFilled,
   Platform,
-  SwitchButton
+  SwitchButton,
+  Tickets
 } from '@element-plus/icons-vue';
+import ThemeToggle from '@/components/ThemeToggle.vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+const mobileDrawerVisible = ref(false);
 
-const userInitial = computed(() => {
-  const email = authStore.user?.email || '?';
-  return email.charAt(0).toUpperCase();
+const navItemsPrimary = [
+  {
+    path: '/workspace/entry',
+    label: '业务总览',
+    icon: Grid
+  },
+  {
+    path: '/workspace/chat',
+    label: '统一问答',
+    icon: ChatDotRound
+  },
+  {
+    path: '/workspace/kb/upload',
+    label: '知识库治理',
+    icon: Files
+  }
+];
+
+const navItemsPrimaryFiltered = computed(() =>
+  navItemsPrimary.filter((item) => {
+    if (item.path === '/workspace/chat') return authStore.hasPermission('chat.use');
+    if (item.path === '/workspace/kb/upload') return authStore.hasPermission('kb.read');
+    return true;
+  })
+);
+
+const auditNavItem = computed(() =>
+  authStore.hasPermission('audit.read')
+    ? { path: '/workspace/audit', label: '审计日志', icon: Tickets }
+    : null
+);
+
+const navItemsFiltered = computed(() => {
+  const items = [...navItemsPrimaryFiltered.value];
+  if (auditNavItem.value) items.push(auditNavItem.value);
+  return items;
 });
 
-const currentMode = computed(() => {
-  if (route.path.includes('/workspace/chat')) {
-    return '统一 QA';
-  }
-  if (route.path.includes('/workspace/kb/')) {
-    return '企业文档链路';
-  }
-  return '概览';
+const activeNavPath = computed(() => {
+  const current = navItemsFiltered.value.find((item) => route.path.startsWith(item.path));
+  return current?.path || '/workspace/entry';
 });
 
-const handleCommand = (command: string) => {
-  if (command === 'logout') {
-    authStore.logout();
-    router.push('/login');
+const routeTitle = computed(() => String(route.meta.title || 'RAG-QA 工作台'));
+const breadcrumbs = computed(() => {
+  const raw = (route.meta as { breadcrumb?: unknown }).breadcrumb;
+  return Array.isArray(raw) && raw.length ? raw.map((item) => String(item)) : ['工作台', routeTitle.value];
+});
+const userRole = computed(() => authStore.roleLabel());
+const userInitial = computed(() => (authStore.user?.email || '?').charAt(0).toUpperCase());
+
+watch(
+  () => route.fullPath,
+  () => {
+    mobileDrawerVisible.value = false;
   }
+);
+
+const navigate = (path: string) => {
+  router.push(path);
+};
+
+const handleLogout = () => {
+  authStore.logout();
+  mobileDrawerVisible.value = false;
+  router.push('/login');
 };
 </script>
 
 <style scoped>
-.main-layout {
+.workspace-shell {
+  display: flex;
   height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(15, 118, 110, 0.14), transparent 35%),
-    var(--bg-base);
+  width: 100%;
+  overflow: hidden;
 }
 
-.app-sidebar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  border-right: 1px solid var(--border-color-light);
-  display: flex;
-  flex-direction: column;
-  box-shadow: 8px 0 32px rgba(15, 23, 42, 0.05);
+.workspace-sidebar {
+  position: sticky;
+  top: 0;
+  flex: 0 0 280px;
+  width: 280px;
+  height: 100vh;
+  padding: 16px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-color);
   z-index: 10;
 }
 
-.sidebar-header {
+.sidebar-scroll {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 22px 20px 18px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  overflow: auto;
+  padding-right: 4px;
 }
 
-.logo-circle-mini {
-  width: 42px;
-  height: 42px;
+.brand-block {
   display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.brand-block.compact {
+  margin-bottom: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.brand-mark {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--blue-600);
   color: #fff;
-  background: linear-gradient(135deg, #2563eb, #0f766e);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.28);
+  flex-shrink: 0;
 }
 
-.sidebar-header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
+.brand-copy {
+  min-width: 0;
 }
 
-.sidebar-header p {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--text-secondary);
+.brand-kicker {
+  display: inline-flex;
+  margin-bottom: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-caption, 0.75rem);
+  font-weight: 500;
+  letter-spacing: 0.03em;
 }
 
-.sidebar-menu-container {
-  flex: 1;
-  padding: 18px 14px;
-  overflow-y: auto;
-}
-
-.app-menu {
-  border-right: none;
-  background: transparent;
-}
-
-.menu-item-custom {
-  height: 50px;
-  line-height: 50px;
-  margin-bottom: 8px;
-  border-radius: 14px;
-  color: var(--text-regular);
-  transition: all 0.22s ease;
-}
-
-.menu-item-custom:hover {
-  background: rgba(59, 130, 246, 0.08);
-  color: var(--text-primary);
-  transform: translateX(3px);
-}
-
-.menu-item-custom.is-active {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(15, 118, 110, 0.1));
-  color: #1d4ed8;
+.brand-copy h2 {
+  font-size: var(--text-h2, 1.125rem);
   font-weight: 600;
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08);
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid var(--border-color-light);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.9));
-}
-
-.mode-summary {
-  margin-bottom: 12px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.03);
-}
-
-.mode-label {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 12px;
+.brand-copy p {
+  margin-top: 8px;
   color: var(--text-secondary);
+  line-height: 1.65;
 }
 
-.user-dropdown {
-  width: 100%;
+.sidebar-focus {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  border: 1px solid var(--border-color);
 }
 
-.user-profile {
+.sidebar-focus-label {
+  display: block;
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.sidebar-focus-title {
+  font-size: var(--text-body, 0.9375rem);
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.nav-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.22s ease;
+  width: 100%;
+  padding: 10px 12px 10px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  transition: background var(--transition-base), color var(--transition-base);
+  color: var(--text-primary);
+  position: relative;
 }
 
-.user-profile:hover {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: var(--border-color-light);
+.nav-item:hover {
+  background: var(--bg-panel-muted);
 }
 
-.user-avatar {
-  background: linear-gradient(135deg, #2563eb, #0f766e);
-  color: #fff;
-  font-weight: 700;
+.nav-item.active {
+  background: var(--blue-50);
+  color: var(--blue-700);
 }
 
-.user-info {
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--blue-600);
+  border-radius: 0 2px 2px 0;
+}
+
+.nav-item--secondary .nav-icon {
+  color: var(--text-muted);
+}
+
+.nav-item--secondary.active .nav-icon {
+  color: var(--blue-600);
+}
+
+.nav-divider {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--border-color);
+}
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.nav-item.active .nav-icon {
+  color: var(--blue-600);
+}
+
+.nav-copy {
+  display: flex;
   min-width: 0;
   flex: 1;
-  display: flex;
   flex-direction: column;
 }
 
-.user-name {
+.nav-copy strong {
+  color: inherit;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.mobile-nav-button {
+  display: none;
+}
+
+.workspace-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workspace-main-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  width: min(100%, 1540px);
+  margin: 0 auto;
+  padding: 18px 20px 24px;
+  overflow: hidden;
+}
+
+.workspace-topbar {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px 16px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-color);
+}
+
+
+.topbar-leading {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.topbar-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: visible;
+  padding-right: 12px;
+}
+
+.breadcrumb-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-bottom: 4px;
+}
+
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-caption, 0.75rem);
+  font-weight: 500;
   white-space: nowrap;
+}
+
+.breadcrumb-item:not(:last-child)::after {
+  content: '/';
+  color: var(--border-strong);
+  margin-left: 4px;
+}
+
+.topbar-leading h1 {
+  font-size: var(--text-h2, 1.125rem);
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.workspace-content {
+  flex: 1;
+  min-width: 0;
+  padding: 18px 0 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.drawer-content {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar-bottom {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 8px;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  border: 1px solid var(--border-color);
+}
+
+.profile-avatar {
+  background: var(--blue-600);
+  color: #fff;
+  font-weight: 500;
+}
+
+.profile-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.profile-copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
 }
 
-.user-role {
-  font-size: 12px;
-  color: var(--text-secondary);
+.profile-copy span {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
-.dropdown-icon {
-  color: var(--text-secondary);
+.logout-button {
+  justify-content: center;
+  gap: 8px;
 }
 
-.main-content-wrapper {
-  min-width: 0;
-}
-
-.app-main {
-  height: 100vh;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-.fade-transform-enter-active,
-.fade-transform-leave-active {
-  transition: all 0.2s ease;
-}
-
-.fade-transform-enter-from,
-.fade-transform-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-
-@media (max-width: 960px) {
-  .app-sidebar {
-    width: 240px !important;
+@media (max-width: 1280px) {
+  .workspace-sidebar {
+    flex-basis: 260px;
+    width: 260px;
   }
 
-  .app-main {
-    padding: 18px;
+  .workspace-main-frame {
+    padding-inline: 18px;
   }
 }
 
-@media (max-width: 760px) {
-  .main-layout {
+@media (max-width: 1100px) {
+  .workspace-shell {
+    display: block;
+  }
+
+  .workspace-sidebar {
+    display: none;
+  }
+
+  .workspace-main-frame {
+    width: min(100%, 1024px);
+    padding: 16px;
+  }
+
+  .workspace-topbar {
+    padding: 18px 20px 20px 18px;
+  }
+
+  .mobile-nav-button {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 768px) {
+  .workspace-main-frame {
+    padding: 12px;
+  }
+
+  .workspace-topbar {
     flex-direction: column;
-    height: auto;
-    min-height: 100vh;
-  }
-
-  .app-sidebar {
-    width: 100% !important;
-  }
-
-  .app-main {
-    height: auto;
+    gap: 12px;
+    padding: 12px 16px 12px 12px;
   }
 }
 </style>

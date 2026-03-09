@@ -14,6 +14,10 @@ const routes = [
     path: '/login',
     name: 'Login',
     component: () => import('@/layouts/AuthLayout.vue'),
+    meta: {
+      title: '登录',
+      subtitle: ''
+    },
     children: [
       {
         path: '',
@@ -26,22 +30,44 @@ const routes = [
     path: '/workspace',
     name: 'WorkspaceRoot',
     component: () => import('@/layouts/MainLayout.vue'),
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+      title: 'RAG-QA 工作台',
+      subtitle: '',
+      breadcrumb: ['工作台']
+    },
     children: [
       {
         path: 'entry',
         name: 'EntryView',
-        component: () => import('@/views/EntryView.vue')
+        component: () => import('@/views/EntryView.vue'),
+        meta: {
+          title: '业务总览',
+          subtitle: '',
+          breadcrumb: ['工作台', '业务总览']
+        }
       },
       {
         path: 'chat',
         name: 'UnifiedChatView',
-        component: () => import('@/views/chat/UnifiedChatView.vue')
+        component: () => import('@/views/chat/UnifiedChatView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '统一问答',
+          subtitle: '',
+          breadcrumb: ['工作台', '统一问答']
+        }
       },
       {
         path: 'kb/upload',
         name: 'KBUploadView',
-        component: () => import('@/views/kb/KBUploadView.vue')
+        component: () => import('@/views/kb/KBUploadView.vue'),
+        meta: {
+          requiresPermission: 'kb.read',
+          title: '知识库治理',
+          subtitle: '',
+          breadcrumb: ['工作台', '知识库治理']
+        }
       },
       {
         path: 'kb/chat',
@@ -56,7 +82,24 @@ const routes = [
       {
         path: 'kb/documents/:id',
         name: 'KBDocumentView',
-        component: () => import('@/views/kb/KBDocumentView.vue')
+        component: () => import('@/views/kb/KBDocumentView.vue'),
+        meta: {
+          requiresPermission: 'kb.read',
+          title: '文档详情',
+          subtitle: '',
+          breadcrumb: ['工作台', '知识库治理', '文档详情']
+        }
+      },
+      {
+        path: 'audit',
+        name: 'AuditView',
+        component: () => import('@/views/AuditView.vue'),
+        meta: {
+          requiresPermission: 'audit.read',
+          title: '审计日志',
+          subtitle: '',
+          breadcrumb: ['工作台', '审计日志']
+        }
       }
     ]
   },
@@ -85,6 +128,16 @@ router.beforeEach((to) => {
   if (to.meta.requiresAdmin && !authStore.isAdmin()) {
     return { path: '/workspace/chat' };
   }
+
+  const requiredPermission = String(to.meta.requiresPermission || '');
+  if (requiredPermission && !authStore.hasPermission(requiredPermission)) {
+    return { path: '/workspace/entry' };
+  }
+});
+
+router.afterEach((to) => {
+  const routeTitle = String(to.meta.title || 'RAG-QA 工作台');
+  document.title = `${routeTitle} | RAG-QA 控制台`;
 });
 
 export default router;

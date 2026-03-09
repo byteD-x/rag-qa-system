@@ -1,6 +1,7 @@
 boto3==1.37.10
 fastapi==0.115.8
 httpx==0.28.1
+prometheus-client==0.21.1
 psycopg[binary]==3.2.5
 PyJWT==2.10.1
 pypdf==5.3.1

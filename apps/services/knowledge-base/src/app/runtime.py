@@ -16,7 +16,5 @@ db = KBDatabase(POSTGRES_DSN, MIGRATIONS_DIR)
 storage = ObjectStorageClient()
 
 
-def ensure_runtime() -> None:
+def prepare_runtime() -> None:
     BLOB_ROOT.mkdir(parents=True, exist_ok=True)
-    db.ensure_schema()
-    storage.ensure_bucket()

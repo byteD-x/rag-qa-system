@@ -1,69 +1,113 @@
 <template>
-  <div class="page">
-    <section class="page-header kb-header">
-      <div>
-        <el-tag type="success" effect="dark">企业知识库问答</el-tag>
-        <h1>企业库问答工作台</h1>
-        <p>这条线路专注精确问答、跨文档汇总、制度提取与证据化回答。</p>
+  <div class="page-shell">
+    <section class="page-hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">单库调试模式</span>
+        <h2 class="hero-title">知识库内独立测试与靶向回答</h2>
+        <p class="hero-subtitle">
+          在此模式下，系统不会建立持久化会话记录。仅用于快速核验某个刚上传的知识库或调试特定文档的检索表现。如需保存对话上下文，请使用统一问答。
+        </p>
+
+        <div class="hero-metrics">
+          <div class="hero-metric">
+            <strong>{{ bases.length }}</strong>
+            <span>知识库</span>
+          </div>
+          <div class="hero-metric">
+            <strong>{{ queryableDocuments.length }}</strong>
+            <span>可查询文档</span>
+          </div>
+          <div class="hero-metric">
+            <strong>{{ asking ? '流式生成中' : '就绪' }}</strong>
+            <span>响应状态</span>
+          </div>
+        </div>
       </div>
-      <el-button plain @click="router.push('/workspace/kb/upload')">返回上传线路</el-button>
+
+      <div class="hero-actions">
+        <el-button plain @click="router.push('/workspace/kb/upload')">返回治理面板</el-button>
+        <el-button type="primary" @click="router.push('/workspace/chat')">前往统一问答</el-button>
+      </div>
     </section>
 
-    <section class="grid layout">
-      <el-card shadow="hover" class="panel">
+    <section class="page-grid-two kb-chat-layout">
+      <el-card class="surface-card">
         <template #header>
-          <div class="card-head">
+          <div class="section-head">
             <div>
-              <h2>问答范围</h2>
-              <p>限定知识库与文档范围后再提问。</p>
+              <h3>靶向测试范围</h3>
+              <p>选取要调试的特定知识库与文档切片子集。</p>
             </div>
           </div>
         </template>
 
-        <el-form label-position="top">
-          <el-form-item label="知识库">
-            <el-select v-model="selectedBaseId" placeholder="请选择知识库">
-              <el-option v-for="base in bases" :key="base.id" :label="base.name" :value="base.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="文档范围">
-            <el-select v-model="selectedDocumentIds" multiple collapse-tags collapse-tags-tooltip placeholder="默认检索全部可查文档">
-              <el-option
-                v-for="document in queryableDocuments"
-                :key="document.id"
-                :label="`${document.file_name} (${statusMeta(document.status).label})`"
-                :value="document.id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="问题">
-            <el-input
-              v-model="question"
-              type="textarea"
-              :rows="5"
-              placeholder="例如：请总结员工报销制度中的审批要求。"
-            />
-          </el-form-item>
-          <div class="shortcut-group">
-            <span>快捷提问</span>
-            <div class="shortcut-list">
-              <el-button v-for="item in shortcuts" :key="item" plain size="small" @click="question = item">{{ item }}</el-button>
+        <div class="card-stack">
+          <div class="metric-grid">
+            <div class="metric-card">
+              <span>调试目标库</span>
+              <strong>{{ selectedBase?.name || '未选择' }}</strong>
+            </div>
+            <div class="metric-card">
+              <span>缩小检索圈</span>
+              <strong>{{ selectedDocumentIds.length ? `${selectedDocumentIds.length} 份` : '全部' }}</strong>
             </div>
           </div>
-          <div class="actions">
-            <el-button type="primary" :loading="asking" @click="ask">提交问题</el-button>
-            <el-button plain @click="router.push('/workspace/kb/upload')">继续上传</el-button>
+
+          <el-form label-position="top">
+            <el-form-item label="知识库">
+              <el-select v-model="selectedBaseId" placeholder="请选择知识库">
+                <el-option v-for="base in bases" :key="base.id" :label="base.name" :value="base.id" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="文档范围 (可选)">
+              <el-select
+                v-model="selectedDocumentIds"
+                multiple
+                collapse-tags
+                collapse-tags-tooltip
+                placeholder="默认检索选定库的全部可查文档"
+              >
+                <el-option
+                  v-for="document in queryableDocuments"
+                  :key="document.id"
+                  :label="`${document.file_name} (${statusMeta(document.status).label})`"
+                  :value="document.id"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="探测问题">
+              <el-input
+                v-model="question"
+                type="textarea"
+                :rows="6"
+                class="tech-input-glow"
+                placeholder="例如：请抽取出文档中的异常报警处理机制。"
+              />
+            </el-form-item>
+          </el-form>
+
+          <div class="shortcut-list">
+            <el-button v-for="item in shortcuts" :key="item" plain size="small" class="pill-btn" @click="question = item">
+              {{ item }}
+            </el-button>
           </div>
-        </el-form>
+
+          <div class="kb-chat-actions">
+            <el-button v-if="asking" plain @click="stopStreaming">停止生成</el-button>
+            <el-button type="primary" :loading="asking" @click="ask">提交探测请求</el-button>
+          </div>
+        </div>
       </el-card>
 
-      <div class="result-column">
-        <el-card shadow="hover" class="panel result-panel">
+      <div class="aside-stack">
+        <el-card class="surface-card">
           <template #header>
-            <div class="card-head">
+            <div class="section-head">
               <div>
-                <h2>回答结果</h2>
-                <p>企业库线路按事实、总结、制度提取三类策略返回。</p>
+                <h3>探测响应</h3>
+                <p>该视图仅展示最近一次请求的结果。支持流式打印。</p>
               </div>
               <el-tag v-if="result" :type="result.evidence_status === 'grounded' ? 'success' : 'warning'" effect="plain">
                 {{ result?.evidence_status || '等待提问' }}
@@ -71,25 +115,44 @@
             </div>
           </template>
 
-          <el-empty v-if="!result" description="选择知识库后开始提问" />
-          <div v-else class="answer-panel">
-            <div class="meta-row">
-              <el-tag v-if="asking" type="warning" effect="plain">流式接收中</el-tag>
-              <el-tag type="info" effect="plain">{{ result.strategy_used }}</el-tag>
-              <el-tag effect="plain">grounding {{ Number(result.grounding_score || 0).toFixed(2) }}</el-tag>
+          <el-empty v-if="!result && !asking" description="设置探测参数后发起请求" />
+          
+          <!-- RAG Waiting Animation -->
+          <div v-else-if="asking && !result?.answer" class="rag-thinking-pipeline">
+            <div class="rag-step active">
+              <el-icon class="is-loading"><Connection /></el-icon>
+              <span>建立调试连接...</span>
             </div>
-            <p class="answer-text">{{ result.answer || '正在接收问答结果...' }}</p>
+            <div class="rag-step pulse">
+              <el-icon><Search /></el-icon>
+              <span>跨库执行全双工检索...</span>
+            </div>
+            <div class="rag-step pending">
+              <el-icon><EditPen /></el-icon>
+              <span>等待 LLM 首次 token 返回...</span>
+            </div>
+          </div>
+
+          <div v-if="result" class="result-panel">
+            <div class="pill-row">
+              <el-tag v-if="asking" type="warning" effect="plain">接收数据流中</el-tag>
+              <el-tag type="info" effect="plain">{{ result.strategy_used || 'Standard' }}</el-tag>
+              <el-tag effect="plain">证据综合分 {{ Number(result.grounding_score || 0).toFixed(2) }}</el-tag>
+            </div>
+
+            <div class="answer-box markdown-body" v-html="renderMarkdown(result.answer)"></div>
+
             <el-alert
               v-if="result.refusal_reason"
-              :title="`拒答原因：${result.refusal_reason}`"
-              type="warning"
+              :title="`触发安全或策略拦截：${result.refusal_reason}`"
+              type="error"
               :closable="false"
             />
           </div>
         </el-card>
 
-        <el-card shadow="hover" class="panel">
-          <CitationList :citations="result?.citations || []" title="证据引用" mode="kb" />
+        <el-card class="surface-card">
+          <CitationList :citations="result?.citations || []" title="追溯向量空间记录" mode="kb" />
         </el-card>
       </div>
     </section>
@@ -100,11 +163,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { Connection, Search, EditPen } from '@element-plus/icons-vue';
 import CitationList from '@/components/CitationList.vue';
 import { listKBDocuments, listKnowledgeBases, queryKB, streamKBQuery } from '@/api/kb';
 import { isAbortRequestError } from '@/api/request';
 import { applyQueryStreamEvent, createEmptyQueryResult, resolveQueryStreamPayload, type QueryResult } from '@/utils/queryStream';
 import { statusMeta } from '@/utils/status';
+import { marked } from 'marked';
 
 const router = useRouter();
 const route = useRoute();
@@ -119,6 +184,26 @@ const result = ref<QueryResult | null>(null);
 
 let currentController: AbortController | null = null;
 
+const renderMarkdown = (text: string) => {
+  if (!text) return '';
+  const renderer = new marked.Renderer();
+  renderer.code = (options: any) => {
+    const code = options.text;
+    const language = options.lang || 'text';
+    return `
+      <div class="code-block-wrapper">
+        <div class="code-block-header">
+          <div class="mac-btns"><span class="mac-close"></span><span class="mac-min"></span><span class="mac-max"></span></div>
+          <span class="lang-label">${language}</span>
+        </div>
+        <pre><code class="language-${language}">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
+      </div>
+    `;
+  };
+  marked.setOptions({ renderer });
+  return marked.parse(text) as string;
+};
+
 const shortcuts = [
   '这份制度的审批要求是什么？',
   '请总结该知识库内与绩效考核相关的核心规则。',
@@ -126,9 +211,11 @@ const shortcuts = [
   '请抽取该政策中的禁止项与例外项。'
 ];
 
-const queryableDocuments = computed(() => {
-  return documents.value.filter((document) => ['fast_index_ready', 'enhancing', 'ready'].includes(document.status));
-});
+const selectedBase = computed(() => bases.value.find((base) => String(base.id) === String(selectedBaseId.value)) || null);
+
+const queryableDocuments = computed(() =>
+  documents.value.filter((document) => ['fast_index_ready', 'enhancing', 'ready', 'hybrid_ready'].includes(document.status))
+);
 
 const buildPayload = () => ({
   base_id: selectedBaseId.value,
@@ -170,11 +257,7 @@ const askOnce = async () => {
   }
   asking.value = true;
   try {
-    result.value = await queryKB({
-      base_id: selectedBaseId.value,
-      question: question.value.trim(),
-      document_ids: selectedDocumentIds.value
-    }) as unknown as QueryResult;
+    result.value = (await queryKB(buildPayload())) as unknown as QueryResult;
   } finally {
     asking.value = false;
   }
@@ -249,78 +332,26 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.page {
+.kb-chat-layout {
+  align-items: start;
+}
+
+.kb-chat-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.result-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
   gap: 16px;
-  align-items: flex-start;
-  padding: 30px;
-  border-radius: 28px;
 }
 
-.kb-header {
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.2), transparent 30%),
-    linear-gradient(135deg, #ffffff, #ecfdf5);
-}
-
-.page-header h1 {
-  margin: 12px 0 8px;
-  font-size: 34px;
-}
-
-.page-header p {
-  margin: 0;
-  line-height: 1.7;
-  color: var(--text-regular);
-}
-
-.grid.layout {
-  display: grid;
-  grid-template-columns: 420px minmax(0, 1fr);
-  gap: 20px;
-}
-
-.panel {
-  border-radius: 24px;
-  border: none;
-}
-
-.panel :deep(.el-card__body) {
+.answer-box {
   padding: 24px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.card-head h2 {
-  margin: 0;
-}
-
-.card-head p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-}
-
-.shortcut-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 18px;
-}
-
-.shortcut-group span {
-  font-size: 13px;
-  color: var(--text-secondary);
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  min-height: 120px;
 }
 
 .shortcut-list {
@@ -329,41 +360,101 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-.actions {
-  display: flex;
-  gap: 12px;
+.pill-btn {
+  border-radius: 999px;
 }
 
-.result-column {
-  display: grid;
-  gap: 20px;
-}
-
-.result-panel {
-  min-height: 280px;
-}
-
-.answer-panel {
+/* RAG Thinking Pipeline Animation */
+.rag-thinking-pipeline {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding: 32px 16px;
+  border-radius: 16px;
+  background: var(--bg-panel-muted);
+  border: 1px dashed var(--border-color);
 }
 
-.meta-row {
+.rag-step {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
 }
 
-.answer-text {
+.rag-step.active {
+  color: var(--blue-600);
+  font-weight: 600;
+}
+
+.rag-step.pulse {
+  animation: text-pulse 2s infinite ease-in-out;
+  color: var(--blue-600);
+}
+
+.rag-step.pending {
+  opacity: 0.4;
+}
+
+@keyframes text-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; filter: drop-shadow(0 0 8px rgba(37,99,235,0.4)); }
+}
+
+/* Markdown overrides for single chat */
+:deep(.markdown-body p) {
+  margin-bottom: 0.8em;
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+:deep(.markdown-body p:last-child) {
+  margin-bottom: 0;
+}
+:deep(.code-block-wrapper) {
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1em;
+  border: 1px solid var(--border-color);
+  background: var(--bg-page);
+}
+:deep(.code-block-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-panel-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+:deep(.mac-btns) {
+  display: flex;
+  gap: 6px;
+}
+:deep(.mac-btns span) {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+:deep(.mac-close) { background: #ff5f56; }
+:deep(.mac-min) { background: #ffbd2e; }
+:deep(.mac-max) { background: #27c93f; }
+:deep(.lang-label) {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+:deep(.markdown-body pre) {
+  padding: 12px;
   margin: 0;
-  line-height: 1.85;
-  font-size: 15px;
+  overflow-x: auto;
+  font-size: 0.9em;
 }
 
-@media (max-width: 1080px) {
-  .grid.layout {
-    grid-template-columns: 1fr;
+@media (max-width: 768px) {
+  .kb-chat-actions {
+    flex-direction: column;
   }
 }
 </style>

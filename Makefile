@@ -1,7 +1,7 @@
 POWERSHELL ?= powershell
 PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
 
-.PHONY: help up down logs logs-follow export-logs ci test build encoding
+.PHONY: help init up down logs logs-follow export-logs ci test build encoding
 
 help:
 	@echo Available targets:
@@ -14,6 +14,9 @@ help:
 	@echo   make test         - 执行前端构建和 Python 语法检查
 	@echo   make build        - 构建 Docker 镜像
 	@echo   make encoding     - 检查文本文件编码
+
+init:
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/init.ps1
 
 up:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/up.ps1

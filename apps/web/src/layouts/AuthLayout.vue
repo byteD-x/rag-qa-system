@@ -1,27 +1,38 @@
 <template>
-  <div class="auth-layout">
-    <div class="auth-banner">
-      <div class="banner-content animate-slide-up">
-        <div class="logo-circle">
-          <el-icon :size="36" color="#ffffff"><Platform /></el-icon>
+  <div class="auth-shell">
+    <section class="auth-showcase" aria-hidden="true">
+      <div class="showcase-content">
+        <div class="showcase-brand">
+          <div class="brand-mark">
+            <el-icon :size="28"><Platform /></el-icon>
+          </div>
+          <div class="brand-copy">
+            <h1>RAG-QA 2.0</h1>
+            <p>企业知识库问答与治理工作台</p>
+          </div>
         </div>
-        <h1>RAG-QA 2.0</h1>
-        <p>企业文档优先的 RAG 问答工作台，围绕上传、索引、检索、证据化回答与评测闭环构建。</p>
+        <div class="showcase-features">
+          <div class="feature-item">
+            <span class="feature-dot" />
+            <span>知识库生命周期管理</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-dot" />
+            <span>检索增强问答（RAG）</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-dot" />
+            <span>审计与可观测性</span>
+          </div>
+        </div>
       </div>
-      <div class="bg-shape shape-1"></div>
-      <div class="bg-shape shape-2"></div>
-      <div class="glass-overlay"></div>
-    </div>
+    </section>
 
-    <div class="auth-content">
-      <div class="auth-wrapper animate-fade-in">
-        <div class="auth-header">
-          <h2>登录工作台</h2>
-          <p>进入企业知识库上传与问答界面。</p>
-        </div>
+    <section class="auth-panel">
+      <div class="auth-panel-card">
         <router-view />
       </div>
-    </div>
+    </section>
   </div>
 </template>
 
@@ -30,131 +41,124 @@ import { Platform } from '@element-plus/icons-vue';
 </script>
 
 <style scoped>
-.auth-layout {
-  height: 100vh;
-  width: 100vw;
+.auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 480px);
+  min-height: 100vh;
+}
+
+.auth-showcase {
   display: flex;
-  background-color: var(--bg-surface);
-  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 48px;
+  background: linear-gradient(160deg, #0f172a 0%, #1e3a5f 35%, #1e293b 60%, #0c1222 100%);
+  color: #fff;
 }
 
-.auth-banner {
-  flex: 1;
-  position: relative;
-  background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #0f766e 100%);
-  display: none;
-  overflow: hidden;
-  color: #ffffff;
+.showcase-content {
+  max-width: 440px;
 }
 
-@media (min-width: 900px) {
-  .auth-banner {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 60px;
+.showcase-brand {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+}
+
+.brand-copy h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.brand-copy p {
+  margin-top: 10px;
+  font-size: var(--text-body, 0.9375rem);
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.55;
+}
+
+.showcase-features {
+  margin-top: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: var(--text-body, 0.9375rem);
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 500;
+}
+
+.feature-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.9);
+  flex-shrink: 0;
+}
+
+.auth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 36px;
+  background: var(--bg-page);
+}
+
+.auth-panel-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 36px 32px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+.auth-panel-card:hover {
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-strong);
+}
+
+@media (max-width: 900px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-showcase {
+    display: none;
+  }
+
+  .auth-panel {
+    padding: 24px 20px;
+    background: var(--bg-page);
   }
 }
 
-.banner-content {
-  position: relative;
-  z-index: 10;
-  max-width: 520px;
-}
-
-.logo-circle {
-  width: 72px;
-  height: 72px;
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 32px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-}
-
-.banner-content h1 {
-  font-size: 42px;
-  font-weight: 800;
-  line-height: 1.2;
-  margin: 0 0 16px;
-  letter-spacing: -1px;
-}
-
-.banner-content p {
-  font-size: 18px;
-  line-height: 1.7;
-  opacity: 0.92;
-  margin: 0;
-  font-weight: 300;
-}
-
-.bg-shape {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  z-index: 1;
-}
-
-.shape-1 {
-  width: 400px;
-  height: 400px;
-  background: rgba(96, 165, 250, 0.4);
-  top: -100px;
-  left: -100px;
-}
-
-.shape-2 {
-  width: 500px;
-  height: 500px;
-  background: rgba(20, 184, 166, 0.3);
-  bottom: -150px;
-  right: -100px;
-}
-
-.glass-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(transparent 50%, rgba(0, 0, 0, 0.1));
-  z-index: 2;
-  pointer-events: none;
-}
-
-.auth-content {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-  position: relative;
-  max-width: 600px;
-  width: 100%;
-  margin: 0 auto;
-}
-
-.auth-wrapper {
-  width: 100%;
-  max-width: 420px;
-}
-
-.auth-header {
-  margin-bottom: 40px;
-}
-
-.auth-header h2 {
-  margin: 0 0 8px;
-  color: var(--text-primary);
-  font-size: 32px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-}
-
-.auth-header p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 16px;
+@media (max-width: 480px) {
+  .auth-panel-card {
+    padding: 24px 20px;
+  }
 }
 </style>

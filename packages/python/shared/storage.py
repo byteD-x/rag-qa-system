@@ -56,6 +56,23 @@ class ObjectStorageClient:
             self._internal.create_bucket(Bucket=self.settings.bucket)
         self._ensure_cors()
 
+    def check_bucket_access(self) -> None:
+        """Verify that the configured bucket exists and is readable.
+
+        Failure:
+        - Raises RuntimeError when the bucket is missing or the storage backend
+          is not reachable with the current credentials.
+        """
+        try:
+            self._internal.head_bucket(Bucket=self.settings.bucket)
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code in {"404", "NoSuchBucket", "NotFound"}:
+                raise RuntimeError(f"object storage bucket does not exist: {self.settings.bucket}") from exc
+            raise RuntimeError(
+                f"object storage bucket is not accessible: {error_code or 'client_error'}"
+            ) from exc
+
     def create_multipart_upload(self, storage_key: str, *, metadata: dict[str, str] | None = None) -> str:
         result = self._internal.create_multipart_upload(
             Bucket=self.settings.bucket,
@@ -100,11 +117,17 @@ class ObjectStorageClient:
         )
 
     def abort_multipart_upload(self, storage_key: str, upload_id: str) -> None:
-        self._internal.abort_multipart_upload(
-            Bucket=self.settings.bucket,
-            Key=storage_key,
-            UploadId=upload_id,
-        )
+        try:
+            self._internal.abort_multipart_upload(
+                Bucket=self.settings.bucket,
+                Key=storage_key,
+                UploadId=upload_id,
+            )
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code in {"NoSuchUpload", "404", "NotFound"}:
+                return
+            raise
 
     def stat_object(self, storage_key: str) -> dict[str, Any]:
         return dict(
@@ -113,6 +136,18 @@ class ObjectStorageClient:
                 Key=storage_key,
             )
         )
+
+    def delete_object(self, storage_key: str) -> None:
+        try:
+            self._internal.delete_object(
+                Bucket=self.settings.bucket,
+                Key=storage_key,
+            )
+        except ClientError as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code") or "")
+            if error_code in {"NoSuchKey", "404", "NotFound"}:
+                return
+            raise
 
     def put_bytes(self, storage_key: str, body: bytes, *, metadata: dict[str, str] | None = None) -> None:
         self._internal.put_object(

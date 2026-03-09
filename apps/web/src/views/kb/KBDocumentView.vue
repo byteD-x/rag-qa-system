@@ -1,232 +1,287 @@
 <template>
-  <div class="page">
-    <section class="page-header kb-header">
-      <div>
-        <el-tag type="success" effect="dark">企业文档详情</el-tag>
-        <h1>{{ document?.file_name || '加载中...' }}</h1>
-        <p>这里展示企业库专用分段结果，包括 section 与 chunk 统计。</p>
-      </div>
-      <div class="header-actions">
-        <el-button plain @click="router.push('/workspace/kb/upload')">返回上传</el-button>
-        <el-button type="primary" @click="goChat">围绕该文档提问</el-button>
-      </div>
-    </section>
+  <div class="page-shell doc-page">
+    <PageHeaderCompact :title="document?.file_name || '加载中'">
+      <template #actions>
+        <el-button plain @click="router.push('/workspace/kb/upload')">返回</el-button>
+        <el-button plain :disabled="!document || !canWrite" @click="openEditDrawer">编辑</el-button>
+        <el-button plain type="danger" :disabled="!document || !canWrite" @click="handleDeleteDocument">删除</el-button>
+        <el-button
+          v-if="document?.latest_job?.retryable && canManage"
+          plain
+          type="warning"
+          :loading="retryingJob"
+          @click="handleRetryIngest"
+        >
+          重试
+        </el-button>
+        <el-button type="primary" @click="goChat">提问</el-button>
+      </template>
+    </PageHeaderCompact>
 
-    <section class="grid layout">
-      <el-card shadow="hover" class="panel">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h2>基础信息</h2>
-              <p>企业库线路保留 section 与 chunk 统计。</p>
-            </div>
-            <el-tag :type="statusMeta(document?.status).type" effect="plain">{{ statusMeta(document?.status).label }}</el-tag>
-          </div>
-        </template>
+    <div class="doc-content">
+      <div v-if="!document" class="doc-loading">
+        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+        <span>加载中</span>
+      </div>
 
-        <el-empty v-if="!document" description="正在加载文档信息" />
-        <div v-else class="detail-grid">
-          <div class="metric">
-            <span>文件类型</span>
-            <strong>{{ document.file_type || '-' }}</strong>
-          </div>
-          <div class="metric">
-            <span>Section 数</span>
-            <strong>{{ document.section_count || 0 }}</strong>
-          </div>
-          <div class="metric">
-            <span>Chunk 数</span>
-            <strong>{{ document.chunk_count || 0 }}</strong>
-          </div>
-          <div class="metric">
-            <span>文件大小</span>
-            <strong>{{ document.size_bytes || 0 }} bytes</strong>
-          </div>
-          <div class="metric">
-            <span>分类</span>
-            <strong>{{ document.stats_json?.category || '未填写' }}</strong>
-          </div>
-          <div class="metric">
-            <span>哈希</span>
-            <strong class="hash">{{ document.content_hash || '-' }}</strong>
-          </div>
+      <template v-else>
+        <div class="doc-info-row">
+          <span class="info-item">{{ formatBytes(document.size_bytes) }}</span>
+          <span class="info-item">{{ document.stats_json?.category || '-' }}</span>
+          <el-tag :type="statusMeta(document.status).type" size="small" effect="plain">
+            {{ statusMeta(document.status).label }}
+          </el-tag>
         </div>
-      </el-card>
 
-      <el-card shadow="hover" class="panel">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h2>Section 预览</h2>
-              <p>来自快速索引阶段的标题样本。</p>
+        <el-collapse v-model="activeCollapse">
+          <el-collapse-item name="chunks" title="知识切片概览">
+            <template #title>
+              <span>知识切片概览</span>
+              <el-tag size="small" type="info" style="margin-left: 8px">{{ sectionPreview.length }} 个</el-tag>
+            </template>
+            <EnhancedEmpty
+              v-if="!sectionPreview.length"
+              variant="document"
+              title="无切片"
+              description="文档切片将在此展示"
+              class="chunk-empty"
+            />
+            <div v-else class="chunk-grid">
+              <div
+                v-for="(item, index) in sectionPreview"
+                :key="index"
+                class="chunk-node"
+              >
+                <span class="chunk-index">#{{ Number(index) + 1 }}</span>
+                <span class="chunk-text">{{ String(item).slice(0, 120) }}{{ String(item).length > 120 ? '…' : '' }}</span>
+                <span class="chunk-meta">{{ String(item).length }} 字符</span>
+              </div>
             </div>
-          </div>
-        </template>
+          </el-collapse-item>
 
-        <el-empty v-if="!sectionPreview.length" description="当前没有 section 预览" />
-        <ul v-else class="preview-list">
-          <li v-for="item in sectionPreview" :key="item">{{ item }}</li>
-        </ul>
-      </el-card>
-    </section>
+          <el-collapse-item name="events" title="处理事件">
+            <DocumentEvents :items="events" title="处理事件" description="" />
+          </el-collapse-item>
+        </el-collapse>
+      </template>
+    </div>
 
-    <el-card shadow="hover" class="panel">
-      <DocumentEvents
-        :items="events"
-        title="处理事件"
-        description="事件由企业库索引链路独立产生，用于排查解析与增强阶段状态。"
-      />
-    </el-card>
+    <el-drawer
+      v-model="editDrawerVisible"
+      title="编辑文档"
+      size="380px"
+      destroy-on-close
+      @close="cancelEditDocument"
+    >
+      <el-form label-position="top" style="padding: 0 16px">
+        <el-form-item label="文件名">
+          <el-input v-model="documentForm.file_name" placeholder="文件名" />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-input v-model="documentForm.category" placeholder="分类" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :disabled="!canWrite" @click="saveDocument">保存</el-button>
+          <el-button @click="cancelEditDocument">取消</el-button>
+        </el-form-item>
+      </el-form>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { Loading } from '@element-plus/icons-vue';
 import DocumentEvents from '@/components/DocumentEvents.vue';
-import { getKBDocument, getKBDocumentEvents } from '@/api/kb';
+import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
+import { useAuthStore } from '@/store/auth';
+import {
+  deleteKBDocument,
+  getKBDocument,
+  getKBDocumentEvents,
+  retryKBIngestJob,
+  updateKBDocument
+} from '@/api/kb';
+import { formatBytes } from '@/utils/format';
 import { statusMeta } from '@/utils/status';
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
+
 const document = ref<any | null>(null);
 const events = ref<any[]>([]);
+const retryingJob = ref(false);
+const editDrawerVisible = ref(false);
+const activeCollapse = ref<string[]>([]);
+
+const documentForm = reactive({
+  file_name: '',
+  category: ''
+});
 
 const sectionPreview = computed(() => document.value?.stats_json?.section_preview || []);
+const canWrite = computed(() => authStore.hasPermission('kb.write'));
+const canManage = computed(() => authStore.hasPermission('kb.manage'));
+
+const syncDocumentForm = () => {
+  documentForm.file_name = String(document.value?.file_name || '');
+  documentForm.category = String(document.value?.stats_json?.category || '');
+};
 
 const load = async () => {
-  const documentId = String(route.params.id);
-  document.value = await getKBDocument(documentId);
-  const result: any = await getKBDocumentEvents(documentId);
+  const id = String(route.params.id);
+  document.value = await getKBDocument(id);
+  const result: any = await getKBDocumentEvents(id);
   events.value = result.items || [];
+  syncDocumentForm();
 };
 
 const goChat = () => {
-  if (!document.value) {
-    return;
-  }
+  if (!document.value) return;
   router.push({
-    path: '/workspace/kb/chat',
+    path: '/workspace/chat',
     query: {
+      preset: 'kb',
       baseId: document.value.base_id,
       documentId: document.value.id
     }
   });
 };
 
-onMounted(() => {
-  void load();
-});
+const openEditDrawer = () => {
+  if (!canWrite.value || !document.value) return;
+  syncDocumentForm();
+  editDrawerVisible.value = true;
+};
+
+const cancelEditDocument = () => {
+  syncDocumentForm();
+  editDrawerVisible.value = false;
+};
+
+const saveDocument = async () => {
+  if (!canWrite.value || !document.value) return;
+  if (!documentForm.file_name.trim()) {
+    ElMessage.warning('请填写文件名');
+    return;
+  }
+  document.value = await updateKBDocument(String(document.value.id), {
+    file_name: documentForm.file_name.trim(),
+    category: documentForm.category.trim()
+  });
+  editDrawerVisible.value = false;
+  ElMessage.success('已更新');
+};
+
+const handleRetryIngest = async () => {
+  if (!canManage.value || !document.value?.latest_job?.job_id) return;
+  retryingJob.value = true;
+  try {
+    await retryKBIngestJob(String(document.value.latest_job.job_id));
+    await load();
+    ElMessage.success('已重新入队');
+  } finally {
+    retryingJob.value = false;
+  }
+};
+
+const handleDeleteDocument = async () => {
+  if (!canWrite.value || !document.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `删除文档「${document.value.file_name}」？此操作不可恢复。`,
+      '删除',
+      { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }
+    );
+  } catch {
+    return;
+  }
+  const baseId = String(document.value.base_id || '');
+  await deleteKBDocument(String(document.value.id));
+  ElMessage.success('已删除');
+  router.push({ path: '/workspace/kb/upload', query: baseId ? { baseId } : {} });
+};
+
+onMounted(() => void load());
 </script>
 
 <style scoped>
-.page {
+.doc-page {
+  gap: var(--content-gap, 16px);
+  overflow: hidden;
+}
+
+.doc-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.doc-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px;
+  color: var(--text-muted);
+}
+
+.doc-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  margin-bottom: 12px;
+}
+
+.info-item {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.chunk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.chunk-node {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 30px;
-  border-radius: 28px;
-}
-
-.kb-header {
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.2), transparent 30%),
-    linear-gradient(135deg, #ffffff, #ecfdf5);
-}
-
-.page-header h1 {
-  margin: 12px 0 8px;
-  font-size: 34px;
-}
-
-.page-header p {
-  margin: 0;
-  line-height: 1.7;
-  color: var(--text-regular);
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.grid.layout {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.panel {
-  border-radius: 24px;
-  border: none;
-}
-
-.panel :deep(.el-card__body) {
-  padding: 24px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.card-head h2 {
-  margin: 0;
-}
-
-.card-head p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.metric {
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(248, 250, 252, 0.95);
-}
-
-.metric span {
-  display: block;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel-muted);
   font-size: 13px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
 }
 
-.metric strong {
-  word-break: break-all;
+.chunk-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
-.hash {
-  font-size: 12px;
+.chunk-text {
+  color: var(--text-primary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.preview-list {
-  margin: 0;
-  padding-left: 20px;
-  line-height: 1.9;
+.chunk-meta {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
-@media (max-width: 960px) {
-  .grid.layout {
-    grid-template-columns: 1fr;
-  }
-
-  .header-actions {
-    flex-direction: column;
-  }
+.chunk-empty {
+  padding: 32px 20px !important;
 }
 </style>

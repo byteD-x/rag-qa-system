@@ -138,7 +138,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Compare embedding backends with an embedding-only retrieval ranking benchmark.")
-    parser.add_argument("--fixture", default="tests/fixtures/evals/retrieval-ablation-fixture.json")
+    parser.add_argument("--fixture", required=True)
     parser.add_argument("--output", default="artifacts/reports/embedding_retrieval_benchmark.json")
     parser.add_argument("--summary-output", default="artifacts/reports/embedding_retrieval_benchmark.md")
     parser.add_argument("--skip-local-hash", action="store_true")

@@ -44,6 +44,8 @@ class RetrievalStats:
     focus_query: str = ""
     rewrite_tags: list[str] = field(default_factory=list)
     expansion_terms: list[str] = field(default_factory=list)
+    degraded_signals: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     structure_candidates: int = 0
     fts_candidates: int = 0
     vector_candidates: int = 0

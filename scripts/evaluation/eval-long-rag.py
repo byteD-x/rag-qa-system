@@ -290,7 +290,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://localhost:8080/api/v1")
     parser.add_argument("--email", default="admin@local")
     parser.add_argument("--password", required=True)
-    parser.add_argument("--eval-file", default="tests/fixtures/evals/kb-smoke-eval.json")
+    parser.add_argument("--eval-file", required=True)
     parser.add_argument("--scope-mode", choices=["single", "multi", "all"], default="single")
     parser.add_argument("--corpus-id", action="append", default=[], help="repeatable; format kb:<uuid>")
     parser.add_argument("--document-id", action="append", default=[])

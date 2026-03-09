@@ -1,146 +1,211 @@
 <template>
-  <div class="page">
-    <section class="page-header kb-header">
-      <div>
-        <el-tag type="success" effect="dark">企业文档上传</el-tag>
-        <h1>分块直传与异步索引</h1>
-        <p>文件按 5MB 分块直传对象存储，上传完成立即返回，解析与增强在后台继续推进。</p>
-      </div>
-      <el-button plain @click="router.push('/workspace/chat')">前往统一 QA</el-button>
-    </section>
+  <div class="page-shell upload-page">
+    <PageHeaderCompact :title="selectedBase?.name || '知识库治理'">
+      <template #actions>
+        <el-button type="primary" @click="router.push('/workspace/chat')">问答</el-button>
+        <el-button plain :disabled="!canWrite" @click="pickFiles">上传</el-button>
+        <el-button plain :disabled="!canWrite" @click="openBaseDrawer('create')">新建</el-button>
+      </template>
+    </PageHeaderCompact>
 
-    <section class="grid two-columns">
-      <el-card shadow="hover" class="panel">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h2>知识库</h2>
-              <p>先选择或创建知识库，再开始上传。</p>
-            </div>
-            <el-tag effect="plain">{{ bases.length }} 个知识库</el-tag>
-          </div>
-        </template>
-
-        <el-form label-position="top">
-          <el-form-item label="选择知识库">
-            <el-select v-model="selectedBaseId" placeholder="请选择或先创建知识库">
-              <el-option v-for="base in bases" :key="base.id" :label="base.name" :value="base.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="新建知识库名称">
-            <el-input v-model="baseForm.name" placeholder="例如：运营制度库" />
-          </el-form-item>
-          <el-form-item label="分类">
-            <el-input v-model="baseForm.category" placeholder="例如：制度 / FAQ / 合同" />
-          </el-form-item>
-          <el-form-item label="说明">
-            <el-input v-model="baseForm.description" type="textarea" :rows="3" placeholder="描述该知识库的用途" />
-          </el-form-item>
-          <el-button type="primary" :loading="creatingBase" @click="handleCreateBase">创建知识库</el-button>
-        </el-form>
-      </el-card>
-
-      <el-card shadow="hover" class="panel">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h2>上传任务</h2>
-              <p>浏览器直传 MinIO，支持断点续传与后台索引。</p>
-            </div>
-            <el-tag type="success" effect="plain">TXT / PDF / DOCX</el-tag>
-          </div>
-        </template>
-
-        <el-form label-position="top">
-          <el-form-item label="文档分类">
-            <el-input v-model="uploadForm.category" placeholder="例如：人事制度 / 客服 FAQ" />
-          </el-form-item>
-          <el-form-item label="选择文件">
-            <div class="file-picker">
-              <el-button type="primary" plain @click="pickFiles">选择文件</el-button>
-              <span class="file-name">{{ selectedFiles.length ? `${selectedFiles.length} 个文件待上传` : '尚未选择文件' }}</span>
-            </div>
-            <input ref="fileInputRef" class="hidden-input" type="file" accept=".txt,.pdf,.docx" multiple @change="handleFileChange" />
-          </el-form-item>
-
-          <div class="selected-files">
-            <el-empty v-if="!selectedFiles.length" description="选择文件后会显示上传进度" />
-            <div v-else class="file-progress-list">
-              <div v-for="file in selectedFiles" :key="fileFingerprint(file)" class="file-progress-item">
-                <div class="status-row">
-                  <strong>{{ file.name }}</strong>
-                  <span>{{ formatBytes(file.size) }}</span>
-                </div>
-                <el-progress :percentage="Math.round((uploadProgress[fileFingerprint(file)] || 0) * 100)" />
-              </div>
-            </div>
-          </div>
-
-          <el-button type="primary" :loading="uploading" @click="handleUpload">开始上传并索引</el-button>
-        </el-form>
-      </el-card>
-    </section>
-
-    <section class="grid two-columns">
-      <el-card shadow="hover" class="panel">
-        <template #header>
-          <div class="card-head">
-            <div>
-              <h2>最近文档</h2>
-              <p>上传完成后会立即出现，索引状态持续刷新。</p>
-            </div>
-          </div>
-        </template>
-
-        <el-empty v-if="!latestDocuments.length" description="当前没有文档记录" />
-        <div v-else class="document-list">
-          <el-card v-for="document in latestDocuments" :key="document.id" shadow="hover" class="document-card">
-            <div class="status-row">
-              <strong>{{ document.file_name }}</strong>
-              <el-tag :type="statusMeta(document.status).type" effect="plain">{{ statusMeta(document.status).label }}</el-tag>
-            </div>
-            <p>类型：{{ document.file_type }}</p>
-            <p>分段：{{ document.section_count || 0 }} 节，{{ document.chunk_count || 0 }} chunk</p>
-            <div class="action-row">
-              <el-button text @click="openDocument(document.id)">详情</el-button>
-              <el-button text type="primary" @click="openInChat(document.id)">问答</el-button>
-            </div>
-          </el-card>
+    <div class="upload-layout">
+      <div class="upload-left">
+        <div class="kb-select-row">
+          <el-select
+            v-model="selectedBaseId"
+            placeholder="选择知识库"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="base in bases"
+              :key="base.id"
+              :label="base.name"
+              :value="base.id"
+            />
+          </el-select>
+          <el-button
+            v-if="selectedBase && canWrite"
+            plain
+            size="small"
+            @click="openBaseDrawer('edit')"
+          >
+            编辑
+          </el-button>
         </div>
-      </el-card>
 
-      <el-card shadow="hover" class="panel">
-        <DocumentEvents
-          :items="events"
-          title="处理事件"
-          description="记录上传、解析、快速可查、混合检索就绪与增强阶段。"
-        />
-      </el-card>
-    </section>
+        <div class="upload-section">
+          <el-form label-position="top" label-width="auto">
+            <el-form-item label="文档分类">
+              <el-input
+                v-model="uploadForm.category"
+                placeholder="例如：客服 FAQ"
+                size="small"
+              />
+            </el-form-item>
+          </el-form>
+
+          <div
+            class="dropzone"
+            @click="canWrite && pickFiles()"
+            @dragover.prevent
+            @drop.prevent="handleDrop"
+          >
+            <el-icon :size="32"><UploadFilled /></el-icon>
+            <span>点击或拖拽文件</span>
+            <span class="dropzone-hint">TXT / PDF / DOCX</span>
+          </div>
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept=".txt,.pdf,.docx"
+            multiple
+            class="hidden-input"
+            @change="handleFileChange"
+          />
+
+          <div v-if="selectedFiles.length" class="file-list">
+            <div
+              v-for="file in selectedFiles"
+              :key="fileFingerprint(file)"
+              class="file-row"
+            >
+              <span class="file-name">{{ file.name }}</span>
+              <el-progress
+                :percentage="Math.round((uploadProgress[fileFingerprint(file)] || 0) * 100)"
+                :status="(uploadProgress[fileFingerprint(file)] || 0) === 1 ? 'success' : ''"
+                style="flex: 1; min-width: 0"
+              />
+            </div>
+          </div>
+
+          <el-button
+            type="primary"
+            :loading="uploading"
+            :disabled="!canWrite || !selectedBaseId || !selectedFiles.length"
+            class="upload-btn"
+            @click="handleUpload"
+          >
+            <el-icon><VideoPlay /></el-icon> 开始上传
+          </el-button>
+        </div>
+      </div>
+
+      <div class="upload-right">
+        <div class="doc-list-header">
+          <span>文档列表</span>
+          <span class="doc-count">{{ latestDocuments.length }} 份</span>
+        </div>
+        <div class="doc-list-scroll">
+          <EnhancedEmpty
+            v-if="!latestDocuments.length"
+            variant="document"
+            title="暂无文档"
+            description="上传文档后将在此展示"
+            class="doc-empty"
+          />
+          <div v-else class="doc-list">
+            <button
+              v-for="doc in latestDocuments"
+              :key="doc.id"
+              type="button"
+              class="doc-item"
+              @click="openDocument(doc.id)"
+            >
+              <span class="doc-name">{{ doc.file_name }}</span>
+              <el-tag :type="statusMeta(doc.status).type" size="small" effect="plain">
+                {{ statusMeta(doc.status).label }}
+              </el-tag>
+              <div class="doc-actions">
+                <el-button text type="primary" size="small" @click.stop="openInChat(doc.id)">提问</el-button>
+                <el-button text type="danger" size="small" :disabled="!canWrite" @click.stop="handleDeleteDocument(doc)">删除</el-button>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <el-collapse v-model="eventsCollapse">
+          <el-collapse-item name="events">
+            <template #title>
+              <span class="collapse-title">处理事件</span>
+            </template>
+            <DocumentEvents :items="events" title="" description="" />
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </div>
+
+    <el-drawer
+      v-model="baseDrawerVisible"
+      :title="baseFormMode === 'edit' ? '编辑知识库' : '新建知识库'"
+      size="400px"
+      destroy-on-close
+      @close="cancelEditBase"
+    >
+      <el-form label-position="top" style="padding: 0 16px">
+        <el-form-item label="名称">
+          <el-input v-model="baseForm.name" placeholder="例如：运营制度库" />
+        </el-form-item>
+        <el-form-item label="分类">
+          <el-input v-model="baseForm.category" placeholder="例如：制度 / FAQ" />
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input
+            v-model="baseForm.description"
+            type="textarea"
+            :rows="3"
+            placeholder="选填"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="creatingBase" :disabled="!canWrite" @click="handleSubmitBase">
+            {{ baseFormMode === 'edit' ? '保存' : '创建' }}
+          </el-button>
+          <el-button v-if="baseFormMode === 'edit'" @click="cancelEditBase">取消</el-button>
+          <el-button
+            v-if="baseFormMode === 'edit' && selectedBase && canWrite"
+            type="danger"
+            plain
+            @click="handleDeleteBase"
+          >
+            删除知识库
+          </el-button>
+        </el-form-item>
+      </el-form>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { UploadFilled, VideoPlay } from '@element-plus/icons-vue';
 import DocumentEvents from '@/components/DocumentEvents.vue';
+import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
+import { useAuthStore } from '@/store/auth';
 import {
   completeKBUpload,
   createKBUpload,
   createKnowledgeBase,
+  deleteKBDocument,
+  deleteKnowledgeBase,
   getKBDocumentEvents,
   getKBIngestJob,
   getKBUpload,
   listKBDocuments,
   listKnowledgeBases,
-  presignKBUploadParts
+  presignKBUploadParts,
+  updateKnowledgeBase
 } from '@/api/kb';
+import { createIdempotencyKey } from '@/api/request';
 import { uploadMultipartFile } from '@/utils/multipartUpload';
 import { statusMeta } from '@/utils/status';
 
 const router = useRouter();
 const route = useRoute();
+const authStore = useAuthStore();
 
 const bases = ref<any[]>([]);
 const selectedBaseId = ref('');
@@ -152,6 +217,9 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const creatingBase = ref(false);
 const uploading = ref(false);
+const baseFormMode = ref<'create' | 'edit'>('create');
+const eventsCollapse = ref<string[]>([]);
+const baseDrawerVisible = ref(false);
 let pollTimer: number | null = null;
 
 const baseForm = reactive({
@@ -165,16 +233,8 @@ const uploadForm = reactive({
 });
 
 const fileFingerprint = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
-
-const formatBytes = (value: number) => {
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-};
+const canWrite = computed(() => authStore.hasPermission('kb.write'));
+const selectedBase = computed(() => bases.value.find((b) => String(b.id) === String(selectedBaseId.value)) || null);
 
 const clearPoller = () => {
   if (pollTimer !== null) {
@@ -186,9 +246,13 @@ const clearPoller = () => {
 const loadBases = async () => {
   const res: any = await listKnowledgeBases();
   bases.value = res.items || [];
-  if (!selectedBaseId.value && bases.value.length) {
-    selectedBaseId.value = String(route.query.baseId || bases.value[0].id);
-  }
+  const preferredBaseId = String(route.query.baseId || '');
+  const nextSelected =
+    bases.value.find((b) => String(b.id) === String(selectedBaseId.value))?.id
+    || bases.value.find((b) => String(b.id) === preferredBaseId)?.id
+    || bases.value[0]?.id
+    || '';
+  selectedBaseId.value = String(nextSelected || '');
 };
 
 const loadDocuments = async (baseId: string) => {
@@ -207,93 +271,165 @@ const refreshEventFocus = async () => {
 };
 
 const pickFiles = () => {
+  if (!canWrite.value) return;
   fileInputRef.value?.click();
 };
 
-const handleFileChange = (event: Event) => {
-  const input = event.target as HTMLInputElement;
-  selectedFiles.value = Array.from(input.files || []);
+const handleFileChange = (e: Event) => {
+  addFiles(Array.from((e.target as HTMLInputElement).files || []));
 };
 
-const handleCreateBase = async () => {
-  if (!baseForm.name.trim()) {
-    ElMessage.warning('请先填写知识库名称');
+const handleDrop = (e: DragEvent) => {
+  const files = Array.from(e.dataTransfer?.files || []);
+  if (files.length) addFiles(files);
+};
+
+const addFiles = (files: File[]) => {
+  const valid = files.filter((f) => {
+    const ext = f.name.split('.').pop()?.toLowerCase();
+    return ext === 'txt' || ext === 'pdf' || ext === 'docx';
+  });
+  if (valid.length < files.length) ElMessage.warning('已过滤不支持格式');
+  selectedFiles.value = [...selectedFiles.value, ...valid];
+};
+
+const resetBaseForm = () => {
+  baseForm.name = '';
+  baseForm.description = '';
+  baseForm.category = '';
+};
+
+const fillBaseForm = (base: any) => {
+  baseForm.name = String(base?.name || '');
+  baseForm.description = String(base?.description || '');
+  baseForm.category = String(base?.category || '');
+};
+
+const openBaseDrawer = (mode: 'create' | 'edit') => {
+  baseFormMode.value = mode;
+  if (mode === 'edit' && selectedBase.value) {
+    fillBaseForm(selectedBase.value);
+  } else {
+    resetBaseForm();
+  }
+  baseDrawerVisible.value = true;
+};
+
+const cancelEditBase = () => {
+  baseFormMode.value = 'create';
+  resetBaseForm();
+  baseDrawerVisible.value = false;
+};
+
+const handleSubmitBase = async () => {
+  if (!canWrite.value || !baseForm.name.trim()) {
+    ElMessage.warning('请填写名称');
     return;
   }
   creatingBase.value = true;
   try {
-    const base: any = await createKnowledgeBase({
-      name: baseForm.name.trim(),
-      description: baseForm.description.trim(),
-      category: baseForm.category.trim()
-    });
-    baseForm.name = '';
-    baseForm.description = '';
-    baseForm.category = '';
-    await loadBases();
-    selectedBaseId.value = base.id;
-    ElMessage.success('知识库已创建');
+    if (baseFormMode.value === 'edit' && selectedBaseId.value) {
+      await updateKnowledgeBase(selectedBaseId.value, {
+        name: baseForm.name.trim(),
+        description: baseForm.description.trim(),
+        category: baseForm.category.trim()
+      });
+      await loadBases();
+      ElMessage.success('已更新');
+    } else {
+      const base: any = await createKnowledgeBase({
+        name: baseForm.name.trim(),
+        description: baseForm.description.trim(),
+        category: baseForm.category.trim()
+      });
+      resetBaseForm();
+      await loadBases();
+      selectedBaseId.value = String(base.id || '');
+      ElMessage.success('已创建');
+    }
+    baseDrawerVisible.value = false;
   } finally {
     creatingBase.value = false;
   }
 };
 
-const pollJobs = async (jobIds: string[]) => {
-  const snapshots = await Promise.all(jobIds.map((jobId) => getKBIngestJob(jobId)));
-  const completed = snapshots.every((job: any) => ['ready', 'failed'].includes(String(job.document_status || job.status)));
+const handleDeleteBase = async () => {
+  if (!canWrite.value || !selectedBase.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `将删除知识库「${selectedBase.value.name}」及其全部文档，此操作不可恢复。`,
+      '删除知识库',
+      { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' }
+    );
+  } catch {
+    return;
+  }
+  const id = String(selectedBaseId.value);
+  await deleteKnowledgeBase(id);
+  cancelEditBase();
+  if (String(route.query.baseId || '') === id) {
+    router.replace({ path: route.path, query: { ...route.query, baseId: undefined } });
+  }
+  await loadBases();
   if (selectedBaseId.value) {
     await loadDocuments(selectedBaseId.value);
+    await refreshEventFocus();
+  } else {
+    latestDocuments.value = [];
+    events.value = [];
   }
+  ElMessage.success('已删除');
+};
+
+const pollJobs = async (jobIds: string[]) => {
+  const snapshots = await Promise.all(jobIds.map((id) => getKBIngestJob(id)));
+  const done = snapshots.every((j: any) =>
+    ['ready', 'failed', 'dead_letter', 'done'].includes(String(j.document_status || j.status))
+  );
+  if (selectedBaseId.value) await loadDocuments(selectedBaseId.value);
   await refreshEventFocus();
-  if (completed) {
+  if (done) {
     clearPoller();
     return;
   }
-  pollTimer = window.setTimeout(() => {
-    void pollJobs(jobIds);
-  }, 2000);
+  pollTimer = window.setTimeout(() => void pollJobs(jobIds), 2000);
 };
 
 const uploadSingleFile = async (file: File) => {
-  const fingerprint = fileFingerprint(file);
+  const fp = fileFingerprint(file);
+  const createKey = createIdempotencyKey(`kb-upload-create:${selectedBaseId.value}:${fp}`);
+  const completeKey = createIdempotencyKey(`kb-upload-complete:${selectedBaseId.value}:${fp}`);
   const result = await uploadMultipartFile({
     file,
-    resumeKey: `kb-upload:${selectedBaseId.value}:${fingerprint}`,
+    resumeKey: `kb-upload:${selectedBaseId.value}:${fp}`,
     controller: {
-      createUpload: () => createKBUpload({
-        base_id: selectedBaseId.value,
-        file_name: file.name,
-        file_type: file.name.split('.').pop()?.toLowerCase() || 'txt',
-        size_bytes: file.size,
-        category: uploadForm.category.trim()
-      }) as Promise<any>,
+      createUpload: () =>
+        createKBUpload(
+          {
+            base_id: selectedBaseId.value,
+            file_name: file.name,
+            file_type: file.name.split('.').pop()?.toLowerCase() || 'txt',
+            size_bytes: file.size,
+            category: uploadForm.category.trim()
+          },
+          { idempotencyKey: createKey }
+        ) as Promise<any>,
       getUpload: (uploadId: string) => getKBUpload(uploadId) as Promise<any>,
-      presignParts: (uploadId: string, partNumbers: number[]) => presignKBUploadParts(uploadId, partNumbers) as Promise<any>,
-      completeUpload: (uploadId: string, parts) => completeKBUpload(uploadId, parts) as Promise<any>
+      presignParts: (uploadId: string, partNumbers: number[]) =>
+        presignKBUploadParts(uploadId, partNumbers) as Promise<any>,
+      completeUpload: (uploadId: string, parts: any) =>
+        completeKBUpload(uploadId, parts, '', { idempotencyKey: completeKey }) as Promise<any>
     },
     onProgress: ({ ratio }) => {
-      uploadProgress.value = {
-        ...uploadProgress.value,
-        [fingerprint]: ratio
-      };
+      uploadProgress.value = { ...uploadProgress.value, [fp]: ratio };
     }
   });
-  uploadProgress.value = {
-    ...uploadProgress.value,
-    [fingerprint]: 1
-  };
+  uploadProgress.value = { ...uploadProgress.value, [fp]: 1 };
   return result.result;
 };
 
 const handleUpload = async () => {
-  if (!selectedBaseId.value) {
-    ElMessage.warning('请先选择知识库');
-    return;
-  }
-  if (!selectedFiles.value.length) {
-    ElMessage.warning('请先选择文件');
-    return;
-  }
+  if (!canWrite.value || !selectedBaseId.value || !selectedFiles.value.length) return;
   uploading.value = true;
   try {
     const completed = [];
@@ -302,145 +438,247 @@ const handleUpload = async () => {
     }
     await loadDocuments(selectedBaseId.value);
     await refreshEventFocus();
-    await pollJobs(completed.map((item: any) => String(item.job_id)));
-    ElMessage.success('文件已接收，后台正在分阶段索引');
+    await pollJobs(completed.map((r: any) => String(r.job_id)));
+    selectedFiles.value = [];
+    uploadProgress.value = {};
+    fileInputRef.value && (fileInputRef.value.value = '');
+    ElMessage.success('上传完成，后台正在索引');
   } finally {
     uploading.value = false;
   }
 };
 
-const openDocument = (documentId: string) => {
-  router.push(`/workspace/kb/documents/${documentId}`);
-};
+const openDocument = (id: string) => router.push(`/workspace/kb/documents/${id}`);
 
 const openInChat = (documentId: string) => {
   router.push({
     path: '/workspace/chat',
-    query: {
-      preset: 'kb',
-      baseId: selectedBaseId.value,
-      documentId
-    }
+    query: { preset: 'kb', baseId: selectedBaseId.value, documentId }
   });
 };
 
-watch(selectedBaseId, (baseId) => {
-  if (!baseId) {
-    latestDocuments.value = [];
+const handleDeleteDocument = async (doc: any) => {
+  if (!canWrite.value) return;
+  try {
+    await ElMessageBox.confirm(`删除文档「${doc.file_name}」？`, '删除', {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    });
+  } catch {
     return;
   }
-  void loadDocuments(baseId);
+  await deleteKBDocument(String(doc.id));
+  if (selectedBaseId.value) {
+    await loadDocuments(selectedBaseId.value);
+    await refreshEventFocus();
+  }
+  ElMessage.success('已删除');
+};
+
+watch(selectedBaseId, (id) => {
+  if (!id) {
+    latestDocuments.value = [];
+    events.value = [];
+    return;
+  }
+  void loadDocuments(id).then(() => refreshEventFocus());
 });
 
 onMounted(async () => {
   await loadBases();
+  if (selectedBaseId.value) {
+    await loadDocuments(selectedBaseId.value);
+    await refreshEventFocus();
+  }
 });
 
-onBeforeUnmount(() => {
-  clearPoller();
-});
+onBeforeUnmount(clearPoller);
 </script>
 
 <style scoped>
-.page {
+.upload-page {
+  gap: var(--content-gap, 20px);
+  overflow: hidden;
+}
+
+.upload-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: var(--section-gap, 24px);
+}
+
+.upload-left {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
+  min-height: 0;
 }
 
-.page-header {
+.kb-select-row {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 30px;
-  border-radius: 28px;
-}
-
-.kb-header {
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.2), transparent 30%),
-    linear-gradient(135deg, #ffffff, #ecfdf5);
-}
-
-.page-header h1 {
-  margin: 12px 0 8px;
-  font-size: 34px;
-}
-
-.page-header p {
-  margin: 0;
-  color: var(--text-regular);
-  line-height: 1.7;
-}
-
-.grid.two-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.panel {
-  border-radius: 24px;
-  border: none;
-}
-
-.panel :deep(.el-card__body) {
-  padding: 24px;
-}
-
-.card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.card-head h2 {
-  margin: 0;
-}
-
-.card-head p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-}
-
-.file-picker {
-  display: flex;
+  gap: 10px;
   align-items: center;
-  gap: 12px;
 }
 
-.file-name {
-  color: var(--text-secondary);
+.kb-select-row .el-select {
+  flex: 1;
+}
+
+.upload-section {
+  padding: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 24px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel-muted);
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base);
+}
+
+.dropzone:hover {
+  border-color: var(--blue-600);
+  background: var(--blue-50);
+}
+
+.dropzone .el-icon {
+  color: var(--text-muted);
+}
+
+.dropzone:hover .el-icon {
+  color: var(--blue-600);
+}
+
+.dropzone-hint {
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
 }
 
 .hidden-input {
   display: none;
 }
 
-.selected-files,
-.file-progress-list,
-.document-list {
+.file-list {
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
   gap: 14px;
 }
 
-.file-progress-item,
-.document-card {
-  border-radius: 18px;
+.file-name {
+  flex-shrink: 0;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-body, 0.9375rem);
 }
 
-.status-row,
-.action-row {
+.upload-btn {
+  margin-top: 14px;
+  width: 100%;
+}
+
+.upload-right {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.doc-list-header {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
   align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: var(--text-body, 0.9375rem);
+  font-weight: 600;
 }
 
-@media (max-width: 1200px) {
-  .grid.two-columns {
+.doc-count {
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.doc-list-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.doc-empty {
+  padding: 40px 20px !important;
+}
+
+.doc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-base), background var(--transition-base);
+}
+
+.doc-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+}
+
+.doc-name {
+  font-size: var(--text-body, 0.9375rem);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.doc-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.collapse-title {
+  font-size: var(--text-body, 0.9375rem);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .upload-layout {
     grid-template-columns: 1fr;
   }
 }

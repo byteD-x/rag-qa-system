@@ -12,14 +12,6 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KB_SERVICE_SRC_DIR = REPO_ROOT / "apps/services/knowledge-base/src"
-DEFAULT_KB_PATTERNS = [
-    "datasets/demo/documents/doc_*.txt",
-    "README.md",
-    "docs/reference/api-specification.md",
-    "docs/operations/runbook.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-]
 
 KB_INLINE = """
 import json, sys, time
@@ -85,13 +77,18 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark local KB parsing throughput without running the full stack.")
-    parser.add_argument("--kb-path", action="append", default=[], help="repeatable glob or file path; defaults cover demo docs plus repo docs")
+    parser.add_argument("--kb-path", action="append", default=[], help="repeatable glob or file path; required")
     parser.add_argument("--output", default="artifacts/reports/local_ingest_benchmark.json")
     parser.add_argument("--summary-output", default="artifacts/reports/local_ingest_benchmark.md")
     args = parser.parse_args()
 
-    kb_patterns = args.kb_path or list(DEFAULT_KB_PATTERNS)
+    if not args.kb_path:
+        raise SystemExit("at least one --kb-path is required for the zero-data baseline")
+
+    kb_patterns = list(args.kb_path)
     kb_files = resolve_kb_files(kb_patterns)
+    if not kb_files:
+        raise SystemExit("no files matched the provided --kb-path values")
     kb_raw = run_inline(
         [sys.executable, "-c", KB_INLINE, *[str(path.resolve()) for path in kb_files]],
         cwd=KB_SERVICE_SRC_DIR,

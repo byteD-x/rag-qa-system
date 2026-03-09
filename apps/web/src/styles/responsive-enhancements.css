@@ -1,0 +1,835 @@
+/**
+ * 移动端和响应式优化增强样式
+ * 针对产品级体验的补充样式
+ */
+
+/* iPhone X+ 安全区域适配 */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-area-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* 移动端底部安全区域（用于固定底部元素） */
+.mobile-safe-bottom {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 触摸优化 */
+@media (hover: none) and (pointer: coarse) {
+  /* 增大触摸目标 */
+  .el-button,
+  .el-menu-item,
+  .el-select,
+  .el-input__wrapper {
+    min-height: 44px !important;
+  }
+  
+  /* 移除 hover 效果，改用 active 状态 */
+  .surface-card:hover,
+  .session-item:hover,
+  .nav-item:hover {
+    transform: none;
+  }
+  
+  .surface-card:active,
+  .session-item:active,
+  .nav-item:active {
+    transform: scale(0.98);
+  }
+}
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  /* 优化字体大小 */
+  .hero-title {
+    font-size: 1.75rem !important;
+    line-height: 1.2 !important;
+  }
+  
+  .section-head h3 {
+    font-size: 1rem !important;
+  }
+  
+  /* 优化卡片间距 */
+  .surface-card .el-card__header {
+    padding: 16px 18px !important;
+  }
+  
+  .surface-card .el-card__body {
+    padding: 18px !important;
+  }
+  
+  /* 优化按钮布局 */
+  .hero-actions,
+  .section-head .el-button,
+  .base-actions,
+  .upload-actions {
+    flex-wrap: wrap;
+  }
+  
+  .hero-actions .el-button,
+  .section-head .el-button {
+    flex: 1;
+    min-width: 120px;
+  }
+  
+  /* 优化指标卡片 */
+  .hero-metrics {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+  }
+  
+  .hero-metric {
+    padding: 10px 12px !important;
+  }
+  
+  .hero-metric strong {
+    font-size: 1.1rem !important;
+  }
+  
+  .hero-metric span {
+    font-size: 0.8rem !important;
+  }
+  
+  /* 优化聊天界面 */
+  .chat-workspace {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .session-panel {
+    order: 2;
+  }
+  
+  .conversation-panel {
+    order: 1;
+  }
+  
+  .aside-stack {
+    order: 3;
+  }
+  
+  /* 优化消息气泡 */
+  .message-bubble {
+    max-width: 90% !important;
+    padding: 14px 16px !important;
+  }
+  
+  .message-meta {
+    font-size: 11px !important;
+  }
+  
+  /* 优化输入框 */
+  .composer-panel {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-panel);
+    padding: 16px;
+    border-top: 1px solid var(--border-color);
+  }
+  
+  /* 优化上传区域 */
+  .upload-dropzone {
+    padding: 18px !important;
+  }
+  
+  /* 优化文档网格 */
+  .document-grid {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* 优化洞察卡片 */
+  .insight-strip {
+    grid-template-columns: 1fr !important;
+  }
+  
+  /* 优化快速切换 */
+  .quick-base-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  /* 优化时间线 */
+  .el-timeline-item__content {
+    font-size: 0.9rem;
+  }
+  
+  /* 优化表格 */
+  .el-table {
+    font-size: 0.85rem;
+  }
+  
+  .el-table th,
+  .el-table td {
+    padding: 10px 8px !important;
+  }
+  
+  /* 优化弹窗 */
+  .el-dialog {
+    width: 90% !important;
+    max-width: 500px !important;
+    margin: 20px auto !important;
+  }
+  
+  .el-dialog__header,
+  .el-dialog__body,
+  .el-dialog__footer {
+    padding: 16px 18px !important;
+  }
+  
+  /* 优化抽屉 */
+  .el-drawer {
+    width: 85% !important;
+  }
+}
+
+/* 平板优化 */
+@media (min-width: 769px) and (max-width: 1280px) {
+  .chat-workspace {
+    grid-template-columns: 280px minmax(0, 1fr) 320px !important;
+  }
+  
+  .page-grid-three {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  
+  .dashboard-metrics {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* 大屏幕优化 */
+@media (min-width: 1920px) {
+  .page-shell {
+    max-width: 1920px;
+    margin: 0 auto;
+  }
+  
+  .workspace-main-frame {
+    max-width: 1800px !important;
+  }
+  
+  .chat-workspace {
+    grid-template-columns: 360px minmax(0, 1fr) 420px !important;
+  }
+}
+
+/* 打印样式 */
+@media print {
+  .workspace-sidebar,
+  .workspace-topbar,
+  .hero-actions,
+  .session-panel,
+  .aside-stack,
+  .composer-panel {
+    display: none !important;
+  }
+  
+  .conversation-panel {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+  
+  .message-row {
+    break-inside: avoid;
+  }
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  :root {
+    --border-color: rgba(0, 0, 0, 0.5);
+    --border-strong: rgba(0, 0, 0, 0.6);
+  }
+  
+  .surface-card {
+    border-width: 2px !important;
+  }
+  
+  .el-button {
+    border-width: 2px !important;
+  }
+}
+
+/* 深色模式支持（未来扩展） */
+@media (prefers-color-scheme: dark) {
+  /* 这里可以添加深色模式变量 */
+  /* 当前由主题切换功能统一管理 */
+}
+
+/* 焦点可见性增强 */
+.el-button:focus-visible,
+.el-menu-item:focus-visible,
+.el-select:focus-visible,
+.el-input__wrapper:focus-visible {
+  outline: 2px solid var(--blue-600) !important;
+  outline-offset: 2px !important;
+}
+
+/* 加载状态优化 */
+.el-loading-mask {
+  backdrop-filter: blur(2px);
+}
+
+.el-loading-spinner {
+  transform: scale(1.2);
+}
+
+/* 滚动条优化 */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(126, 142, 161, 0.58) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(126, 142, 161, 0.58);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(95, 112, 132, 0.72);
+}
+
+/* 触摸滚动优化 */
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 防止 iOS 缩放 */
+@media screen and (max-width: 767px) {
+  * {
+    touch-action: manipulation;
+  }
+}
+
+/* 优化文本选择 */
+::selection {
+  background-color: rgba(37, 99, 235, 0.2);
+  color: inherit;
+}
+
+/* 优化拖拽 */
+[draggable="true"] {
+  cursor: grab;
+}
+
+[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* 优化表单元素 */
+.el-form-item--large .el-form-item__label {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.el-form-item__error {
+  font-size: 0.85rem;
+  padding-top: 6px;
+}
+
+/* 优化标签页 */
+.el-tabs__item {
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.el-tabs__item:hover {
+  color: var(--el-color-primary);
+}
+
+/* 优化徽章 */
+.el-badge__content {
+  border: 2px solid var(--bg-page);
+}
+
+/* 优化通知 */
+.el-notification {
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+/* 优化消息提示 */
+.el-message {
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+/* 优化加载条 */
+.el-progress-bar__inner {
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 优化折叠面板 */
+.el-collapse-item__header {
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.el-collapse-item__header:hover {
+  color: var(--el-color-primary);
+}
+
+/* 优化链接 */
+.el-link {
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.el-link:hover {
+  color: var(--el-color-primary);
+}
+
+/* 优化头像 */
+.el-avatar {
+  border: 2px solid var(--border-color);
+}
+
+/* 优化面包屑 */
+.el-breadcrumb__inner {
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.el-breadcrumb__inner:hover {
+  color: var(--el-color-primary);
+}
+
+/* 优化步骤条 */
+.el-step__title {
+  font-weight: 600;
+}
+
+.el-step__description {
+  font-size: 0.9rem;
+}
+
+/* 优化卡片组 */
+.el-card__actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+/* 优化描述列表 */
+.el-descriptions__label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.el-descriptions__content {
+  font-weight: 500;
+}
+
+/* 优化分页器 */
+.el-pagination {
+  font-weight: 500;
+}
+
+.el-pager li {
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.el-pager li:hover {
+  color: var(--el-color-primary);
+}
+
+/* 优化日期选择器 */
+.el-date-picker__header {
+  font-weight: 600;
+}
+
+.el-date-table td.selected {
+  font-weight: 600;
+}
+
+/* 优化树形控件 */
+.el-tree-node__label {
+  font-weight: 500;
+}
+
+.el-tree-node__content:hover {
+  background-color: rgba(37, 99, 235, 0.05);
+}
+
+/* 优化级联选择器 */
+.el-cascader-menu__item {
+  font-weight: 500;
+}
+
+.el-cascader-menu__item.in-active-path,
+.el-cascader-menu__item.is-active {
+  font-weight: 600;
+  color: var(--el-color-primary);
+}
+
+/* 优化传输穿梭框 */
+.el-transfer-panel__header {
+  font-weight: 600;
+  padding: 14px 16px;
+}
+
+/* 优化时间选择器 */
+.el-time-spinner__item.active {
+  font-weight: 600;
+}
+
+/* 优化颜色选择器 */
+.el-color-picker__trigger {
+  border: 2px solid var(--border-color);
+}
+
+/* 优化滑块 */
+.el-slider__bar {
+  transition: height 0.2s ease;
+}
+
+.el-slider__button {
+  border: 2px solid var(--border-color);
+}
+
+/* 优化开关 */
+.el-switch__core {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 优化输入框组 */
+.el-input-group__prepend,
+.el-input-group__append {
+  font-weight: 500;
+  background: rgba(247, 250, 253, 0.8);
+}
+
+/* 优化自动完成 */
+.el-autocomplete-suggestion__highlight {
+  font-weight: 600;
+}
+
+/* 优化远程搜索 */
+.el-select .el-input.is-loading .el-input__suffix {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 优化图片加载 */
+.el-image__wrapper {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.el-image__error {
+  font-weight: 500;
+}
+
+/* 优化视频播放器 */
+.el-video-player {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* 优化音频播放器 */
+.el-audio-player {
+  border-radius: 8px;
+}
+
+/* 优化文件上传列表 */
+.el-upload-list__item {
+  transition: all 0.3s ease;
+}
+
+.el-upload-list__item:hover {
+  transform: translateX(4px);
+}
+
+/* 优化上传进度条 */
+.el-upload-list__item .el-progress {
+  margin-top: 8px;
+}
+
+/* 优化上传成功状态 */
+.el-upload-list__item.is-success .el-upload-list__item-name {
+  color: var(--el-color-success);
+  font-weight: 600;
+}
+
+/* 优化上传错误状态 */
+.el-upload-list__item.is-exception .el-upload-list__item-name {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+
+/* 优化上传拖拽区域 */
+.el-upload-dragger {
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.el-upload-dragger:hover {
+  border-color: var(--el-color-primary);
+}
+
+/* 优化上传提示 */
+.el-upload__tip {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* 优化上传按钮 */
+.el-upload .el-button {
+  font-weight: 600;
+}
+
+/* 优化上传进度动画 */
+.el-progress__text {
+  font-weight: 600;
+}
+
+.el-progress-bar__inner--anim {
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 优化上传完成提示 */
+.el-upload-list__item.is-finish .el-upload-list__item-name {
+  color: var(--el-color-success);
+  font-weight: 600;
+}
+
+/* 优化上传失败重试 */
+.el-upload-list__item.is-exception .el-icon-close {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.el-upload-list__item.is-exception .el-icon-close:hover {
+  color: var(--el-color-danger);
+  transform: scale(1.1);
+}
+
+/* 优化上传队列管理 */
+.el-upload-list {
+  padding: 8px 0;
+}
+
+.el-upload-list__item + .el-upload-list__item {
+  margin-top: 8px;
+}
+
+/* 优化上传文件大小显示 */
+.el-upload-list__item .el-icon-document {
+  font-size: 20px;
+  color: var(--el-color-primary);
+}
+
+/* 优化上传文件类型图标 */
+.el-upload-list__item .el-icon-picture-outline {
+  color: var(--el-color-success);
+}
+
+.el-upload-list__item .el-icon-video-camera {
+  color: var(--el-color-warning);
+}
+
+.el-upload-list__item .el-icon-headset {
+  color: var(--el-color-info);
+}
+
+/* 优化上传文件预览 */
+.el-upload-list__item-thumbnail {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* 优化上传文件删除按钮 */
+.el-upload-list__item-delete {
+  transition: all 0.2s ease;
+  opacity: 0;
+}
+
+.el-upload-list__item:hover .el-upload-list__item-delete {
+  opacity: 1;
+}
+
+.el-upload-list__item-delete:hover {
+  color: var(--el-color-danger);
+  transform: scale(1.1);
+}
+
+/* 优化上传文件名称截断 */
+.el-upload-list__item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 60px);
+}
+
+/* 优化上传文件状态图标 */
+.el-upload-list__item-status-label {
+  font-size: 16px;
+}
+
+.el-upload-list__item-status-label.is-success {
+  color: var(--el-color-success);
+}
+
+.el-upload-list__item-status-label.is-exception {
+  color: var(--el-color-danger);
+}
+
+/* 优化上传文件进度条位置 */
+.el-upload-list__item .el-progress {
+  position: absolute;
+  bottom: -18px;
+  left: 0;
+  width: 100%;
+}
+
+/* 优化上传文件进度条颜色 */
+.el-progress__text {
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* 优化上传文件进度条背景 */
+.el-progress-bar__outer {
+  background-color: rgba(226, 232, 240, 0.5);
+  border-radius: 2px;
+}
+
+/* 优化上传文件进度条填充 */
+.el-progress-bar__inner {
+  border-radius: 2px;
+}
+
+/* 优化上传文件进度条动画 */
+.el-progress-bar__inner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: progress-shimmer 1.5s infinite;
+}
+
+@keyframes progress-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* 优化上传文件列表滚动 */
+.el-upload-list {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+/* 优化上传文件列表滚动条 */
+.el-upload-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.el-upload-list::-webkit-scrollbar-thumb {
+  background: rgba(126, 142, 161, 0.5);
+  border-radius: 2px;
+}
+
+/* 优化上传文件列表空状态 */
+.el-upload-list:empty::before {
+  content: '暂无上传文件';
+  display: block;
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 24px;
+  font-size: 0.9rem;
+}
+
+/* 优化上传文件拖拽排序 */
+.el-upload-list__item.ui-sortable-handle {
+  cursor: move;
+}
+
+.el-upload-list__item.ui-sortable-handle:active {
+  cursor: grabbing;
+}
+
+/* 优化上传文件拖拽占位符 */
+.el-upload-list__item.ui-sortable-placeholder {
+  visibility: visible !important;
+  background: rgba(64, 158, 255, 0.1);
+  border: 2px dashed rgba(64, 158, 255, 0.3);
+  border-radius: 8px;
+}
+
+/* 优化上传文件拖拽动画 */
+.el-upload-list__item.ui-sortable-helper {
+  box-shadow: var(--shadow-lg);
+  transform: scale(1.02);
+}
+
+/* 优化上传文件拖拽完成 */
+.el-upload-list__item.ui-sortable-update {
+  animation: drop-bounce 0.3s ease;
+}
+
+@keyframes drop-bounce {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.98);
+  }
+}

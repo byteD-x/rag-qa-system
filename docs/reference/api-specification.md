@@ -1,12 +1,45 @@
-# API Specification
+# API 规范
 
-本文档描述当前默认启用的企业知识库 RAG API。
+当前仓库默认以零数据基线运行，不预置任何知识库文档、评测 fixture 或演示报告。所有上传、检索和问答数据都需要显式提供。
 
-## 1. Auth
+## 1. 错误模型
+
+统一错误响应：
+
+```json
+{
+  "detail": "request validation failed",
+  "code": "validation_error",
+  "trace_id": "gateway-xxxx",
+  "errors": []
+}
+```
+
+- `detail`: 人类可读错误信息
+- `code`: 稳定错误码
+- `trace_id`: 链路追踪 ID
+- `errors`: 仅在校验错误时出现
+
+## 2. 健康检查与指标
+
+### `GET /healthz`
+
+仅用于进程存活探针。
+
+### `GET /readyz`
+
+- `gateway` 检查自身数据库、`kb-service` readiness 和 LLM 配置状态
+- `kb-service` 检查数据库和对象存储
+- 依赖未就绪时返回 `503`
+
+### `GET /metrics`
+
+- `gateway` 与 `kb-service` 都暴露 Prometheus 文本指标
+- `kb-worker` 可通过 `KB_WORKER_METRICS_PORT` 暴露独立 metrics 端口
+
+## 3. 认证
 
 ### `POST /api/v1/auth/login`
-
-请求体：
 
 ```json
 {
@@ -15,7 +48,7 @@
 }
 ```
 
-返回：
+响应：
 
 ```json
 {
@@ -24,36 +57,40 @@
   "user": {
     "id": "uuid",
     "email": "admin@local",
-    "role": "admin"
+    "role": "platform_admin",
+    "permissions": ["kb.read", "kb.write", "kb.manage", "chat.use", "audit.read"],
+    "role_version": 1
   }
 }
 ```
 
-## 2. Unified Chat
+### `GET /api/v1/auth/me`
 
-### `GET /api/v1/chat/corpora`
+返回当前登录用户及其 `permissions`。
 
-返回当前可选知识库列表，`corpus_id` 统一使用 `kb:<uuid>`。
+默认角色映射：
 
-### `GET /api/v1/chat/corpora/{corpus_id}/documents`
+- `admin -> platform_admin`
+- `member -> kb_editor`
 
-返回指定知识库下的文档列表。
+## 4. 统一聊天
 
 ### `POST /api/v1/chat/sessions`
 
-```json
-{
-  "title": "费用制度问答",
-  "scope": {
-    "mode": "single",
-    "corpus_ids": ["kb:uuid-1"],
-    "document_ids": [],
-    "allow_common_knowledge": false
-  }
-}
-```
+创建会话并持久化 scope。
+
+### `GET /api/v1/chat/sessions/{id}/messages`
+
+按创建时间升序返回消息。
 
 ### `POST /api/v1/chat/sessions/{id}/messages`
+
+请求头：
+
+- `Authorization: Bearer <token>`
+- `Idempotency-Key: <optional>`
+
+请求体：
 
 ```json
 {
@@ -67,22 +104,109 @@
 }
 ```
 
-关键返回字段：
+- `allow_common_knowledge`: 默认为 `false`。开启后，当知识库未检索到足够证据时，网关允许回退到通用大模型问答，并在答案中附带风险提示。
+- 常识兜底链路可通过环境变量 `LLM_COMMON_KNOWLEDGE_MODEL`、`LLM_COMMON_KNOWLEDGE_MAX_TOKENS`、`LLM_COMMON_KNOWLEDGE_HISTORY_MESSAGES`、`LLM_COMMON_KNOWLEDGE_HISTORY_CHARS` 单独压缩上下文或切到更快模型。
+- `answer_mode`: 可能返回 `grounded`、`weak_grounded`、`common_knowledge` 或 `refusal`。
+
+关键响应字段：
 
 - `answer`
 - `answer_mode`
 - `evidence_status`
 - `grounding_score`
+- `refusal_reason`
 - `citations`
 - `evidence_path`
 - `trace_id`
 - `retrieval`
 - `latency`
 - `cost`
+- `message`
 
-## 3. KB Upload and Retrieval
+`retrieval.aggregate` 重点字段：
+
+- `empty_scope`
+- `document_scope_cache_hit`
+- `successful_service_count`
+- `failed_service_count`
+- `partial_failure`
+- `retrieval_ms`
+- `sum_service_retrieval_ms`
+- `max_service_retrieval_ms`
+
+幂等约束：
+
+- 同 `Idempotency-Key` + 同 payload：返回首次成功结果
+- 同 `Idempotency-Key` + 不同 payload：返回 `409 idempotency_conflict`
+
+### `POST /api/v1/chat/sessions/{id}/messages/stream`
+
+- 支持与非流式一致的 `Idempotency-Key`
+- SSE 事件顺序：`metadata -> citation -> answer -> message -> done`
+- `answer` 为增量期间的累计答案快照；`message` 为最终持久化后的聊天消息对象
+- 流式路径会在网关拿到上游 LLM chunk 后立刻向前端转发，不再等待完整回答生成完毕后再切片返回
+
+### `GET /api/v1/audit/events`
+
+由 `gateway` 聚合自身与 `kb-service` 审计事件。
+
+查询参数：
+
+- `service`
+- `actor_user_id`
+- `resource_type`
+- `resource_id`
+- `action`
+- `outcome`
+- `created_from`
+- `created_to`
+- `limit`
+- `offset`
+
+权限要求：
+
+- `audit.read`
+
+## 5. 知识库
+
+### `GET /api/v1/kb/bases`
+
+默认仅返回当前用户创建的知识库；具备 `kb.manage` 的角色可跨用户查看。
+
+### `GET /api/v1/kb/documents/{document_id}`
+
+返回文档详情，并附带：
+
+- `latest_job`
+  - `job_id`
+  - `status`
+  - `attempt_count`
+  - `max_attempts`
+  - `next_retry_at`
+  - `dead_lettered_at`
+  - `retryable`
+
+### `GET /api/v1/kb/documents/{document_id}/events`
+
+返回文档处理事件流。
+
+## 6. 分片上传
+
+推荐上传链路：
+
+- `POST /api/v1/kb/uploads`
+- `POST /api/v1/kb/uploads/{upload_id}/parts/presign`
+- `POST /api/v1/kb/uploads/{upload_id}/complete`
+- `GET /api/v1/kb/ingest-jobs/{job_id}`
+- `POST /api/v1/kb/ingest-jobs/{job_id}/retry`
 
 ### `POST /api/v1/kb/uploads`
+
+请求头：
+
+- `Idempotency-Key: <optional>`
+
+请求体：
 
 ```json
 {
@@ -94,67 +218,94 @@
 }
 ```
 
-### `GET /api/v1/kb/uploads/{upload_id}`
-
-返回上传 session 与已上传 part 信息。
-
-### `POST /api/v1/kb/uploads/{upload_id}/parts/presign`
-
-```json
-{
-  "part_numbers": [1, 2, 3]
-}
-```
-
 ### `POST /api/v1/kb/uploads/{upload_id}/complete`
 
-```json
-{
-  "parts": [
-    {"part_number": 1, "etag": "\"etag-1\"", "size_bytes": 5242880}
-  ],
-  "content_hash": ""
-}
-```
+请求头：
+
+- `Idempotency-Key: <optional>`
+
+响应包含：
+
+- `upload_id`
+- `document_id`
+- `job_id`
+- `document`
+- `job`
 
 ### `GET /api/v1/kb/ingest-jobs/{job_id}`
 
+关键字段：
+
+- `job_id`
+- `status`
+- `phase`
+- `query_ready`
+- `enhancement_status`
+- `document_status`
+- `query_ready_at`
+- `hybrid_ready_at`
+- `ready_at`
+- `attempt_count`
+- `max_attempts`
+- `next_retry_at`
+- `last_error_code`
+- `lease_expires_at`
+- `dead_lettered_at`
+- `retryable`
+
 常见状态：
 
-- `uploaded`
-- `fast_index_ready`
-- `hybrid_ready`
-- `ready`
+- `queued`
+- `retry`
+- `processing`
+- `done`
 - `failed`
+- `dead_letter`
+
+### `POST /api/v1/kb/ingest-jobs/{job_id}/retry`
+
+权限要求：
+
+- `kb.manage`
+
+行为：
+
+- 仅允许 `failed` 或 `dead_letter` 作业重试
+- 会清空 lease、dead-letter 与错误字段并重新入队
+
+### 已弃用：`POST /api/v1/kb/documents/upload`
+
+保留兼容，不再作为默认前端入口。
+
+## 7. 检索与查询
 
 ### `POST /api/v1/kb/retrieve`
 
-```json
-{
-  "base_id": "uuid",
-  "question": "试用期请假怎么走流程？",
-  "document_ids": [],
-  "limit": 8
-}
+返回：
+
+- `items`
+- `retrieval`
+- `trace_id`
+
+当向量检索降级时，`retrieval` 中会包含：
+
+- `degraded_signals`
+- `warnings`
+
+### `POST /api/v1/kb/query`
+
+返回字段与统一聊天的证据化结果保持一致。
+
+### `POST /api/v1/kb/query/stream`
+
+流式返回单库问答结果。
+
+## 8. 运行时说明
+
+- 数据库 migration 与对象存储初始化已从服务启动中剥离
+- 推荐顺序：
+
+```powershell
+make init
+make up
 ```
-
-## 4. LLM 配置
-
-统一问答链路的答案生成默认读取 `LLM_*` 环境变量：
-
-- `LLM_ENABLED`
-- `LLM_PROVIDER`
-- `LLM_BASE_URL`
-- `LLM_API_KEY`
-- `LLM_MODEL`
-- `LLM_TIMEOUT_SECONDS`
-- `LLM_TEMPERATURE`
-- `LLM_MAX_TOKENS`
-- `LLM_SYSTEM_PROMPT`
-- `LLM_EXTRA_BODY_JSON`
-- `LLM_PRICE_CURRENCY`
-- `LLM_PRICE_TIERS_JSON`
-- `LLM_INPUT_PRICE_PER_1K_TOKENS`
-- `LLM_OUTPUT_PRICE_PER_1K_TOKENS`
-
-历史 `AI_*` 变量仍可作为兼容别名读取，但不再建议用于新配置。

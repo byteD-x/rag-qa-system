@@ -3,7 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from shared.embeddings import embed_texts, vector_literal
+from shared.embeddings import embed_query_text, vector_literal
+from shared.logging import setup_logging
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalResult, RetrievalStats, weighted_rrf
@@ -13,6 +14,7 @@ from .query import compact_quote
 from .runtime import db
 
 
+logger = setup_logging("kb-retrieve")
 FUSION_WEIGHTS = {
     "structure": 1.3,
     "fts": 1.0,
@@ -62,7 +64,7 @@ def retrieve_kb_result(
     results: dict[str, EvidenceBlock] = {}
     signal_lists: dict[str, list[str]] = {}
     tsquery = build_simple_tsquery(rewrite.retrieval_query)
-    query_vector_literal = vector_literal(embed_texts([rewrite.retrieval_query])[0]) if rewrite.retrieval_query else ""
+    query_vector_literal, degraded_signals, warnings = _build_query_vector_literal(rewrite.retrieval_query)
 
     with db.connect() as conn:
         with conn.cursor() as cur:
@@ -245,6 +247,8 @@ def retrieve_kb_result(
         focus_query=rewrite.focus_query,
         rewrite_tags=list(rewrite.strategy_tags),
         expansion_terms=list(rewrite.expansion_terms),
+        degraded_signals=degraded_signals,
+        warnings=warnings,
         structure_candidates=len(dict.fromkeys(signal_lists.get("structure", []))),
         fts_candidates=len(dict.fromkeys(signal_lists.get("fts", []))),
         vector_candidates=len(dict.fromkeys(signal_lists.get("vector", []))),
@@ -255,6 +259,17 @@ def retrieve_kb_result(
         rerank_applied=bool(rerank_pool),
     )
     return RetrievalResult(items=evidence, stats=stats)
+
+
+def _build_query_vector_literal(query: str) -> tuple[str, list[str], list[str]]:
+    cleaned = query.strip()
+    if not cleaned:
+        return "", [], []
+    try:
+        return vector_literal(embed_query_text(cleaned)), [], []
+    except Exception:
+        logger.warning("vector retrieval degraded because query embedding generation failed", exc_info=True)
+        return "", ["vector"], ["vector retrieval disabled because query embedding generation failed"]
 
 
 def _resolve_document_ids(*, base_id: str, document_ids: list[str]) -> list[str]:

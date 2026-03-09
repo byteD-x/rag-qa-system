@@ -4,6 +4,7 @@ import hashlib
 import math
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable
 
 import httpx
@@ -79,6 +80,17 @@ def stable_content_key(*parts: str) -> str:
     return hasher.hexdigest()
 
 
+def _settings_cache_key(settings: EmbeddingSettings) -> tuple[str, str, str, str, float, int]:
+    return (
+        settings.provider,
+        settings.api_url,
+        settings.model,
+        settings.local_backend,
+        float(settings.timeout_seconds),
+        int(settings.batch_size),
+    )
+
+
 def embed_texts(texts: list[str], *, settings: EmbeddingSettings | None = None) -> list[list[float]]:
     """Embed a batch of texts using local or external providers.
 
@@ -96,6 +108,33 @@ def embed_texts(texts: list[str], *, settings: EmbeddingSettings | None = None) 
     if config.provider == "external":
         return _embed_external(texts, config)
     return [_embed_local(text, config) for text in texts]
+
+
+def embed_query_text(text: str, *, settings: EmbeddingSettings | None = None) -> list[float]:
+    config = settings or load_embedding_settings()
+    if not text.strip():
+        return [0.0] * EMBEDDING_DIM
+    cached = _embed_query_text_cached(_settings_cache_key(config), text)
+    return list(cached)
+
+
+def clear_query_embedding_cache() -> None:
+    _embed_query_text_cached.cache_clear()
+
+
+@lru_cache(maxsize=512)
+def _embed_query_text_cached(settings_key: tuple[str, str, str, str, float, int], text: str) -> tuple[float, ...]:
+    provider, api_url, model, local_backend, timeout_seconds, batch_size = settings_key
+    settings = EmbeddingSettings(
+        provider=provider,
+        api_url=api_url,
+        api_key=os.getenv("EMBEDDING_API_KEY", "").strip(),
+        model=model,
+        timeout_seconds=timeout_seconds,
+        batch_size=batch_size,
+        local_backend=local_backend,
+    )
+    return tuple(embed_texts([text], settings=settings)[0])
 
 
 def _embed_external(texts: list[str], settings: EmbeddingSettings) -> list[list[float]]:

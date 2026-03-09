@@ -1,175 +1,106 @@
 # RAG-QA 2.0
 
-面向企业知识库场景的本地化 RAG 问答系统。
+[![CI](https://img.shields.io/github/actions/workflow/status/icefunicu/rag-qa-system/ci.yml?branch=main&label=CI)](https://github.com/icefunicu/rag-qa-system/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/icefunicu/rag-qa-system)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/icefunicu/rag-qa-system?style=social)](https://github.com/icefunicu/rag-qa-system/stargazers)
 
-当前仓库只保留一条业务主线：企业文档接入、异步 ingest、混合检索、证据化问答、评测与观测。项目不再维护独立的“纯大模型聊天”分支，也不再包含小说或泛内容检索逻辑。
+![RAG-QA 2.0 Hero](docs/assets/readme-hero.svg)
 
-## 项目定位
+面向企业知识库场景的本地化 RAG 问答系统，提供 `gateway`、`kb-service`、`kb-worker` 和 `Vue 3` 管理端，覆盖知识库管理、分片上传、异步 ingest、检索、证据化回答、审计与可观测性。
 
-系统围绕企业 RAG-QA 的四段式业务边界组织：
+仓库默认采用“零数据基线”交付：不预置 demo 知识库、评测样例或 benchmark 快照。系统可以直接启动，但数据和评测输入需要你自行提供。
 
-1. 接入层：认证、会话管理、统一问答入口、成本与时延回传。
-2. 知识处理层：上传、对象存储、文档解析、切段、索引构建、异步任务推进。
-3. 检索编排层：结构检索、全文检索、向量检索、重写、融合、轻量 rerank、证据筛选。
-4. 运维评测层：本地启动脚本、质量门禁、离线 benchmark、在线 eval、日志汇总。
+[快速开始](#快速开始) · [适用场景](#适用场景) · [技术栈](#技术栈) · [架构概览](#架构概览) · [api-快速示例](#api-快速示例) · [开发与验证](#开发与验证) · [文档索引](#文档索引)
 
-默认最小运行闭环如下：
+## 为什么选择本仓库
 
-- `gateway`：统一登录、统一会话、证据化回答、跨库检索编排、成本估算。
-- `kb-service`：知识库、文档上传、解析、索引、检索、ingest 状态管理。
-- `kb-worker`：异步向量化、增强处理、任务收尾。
-- `web`：统一控制台，承载登录、上传、问答和文档详情。
-- `postgres + minio`：结构化数据、检索索引与对象存储基础设施。
+- 不是单文件 demo，而是可落地的多服务 RAG 工程骨架
+- 上传、ingest、检索、问答、审计、观测链路完整可验证
+- 默认本地开发可直接跑通，同时保留清晰的服务边界和扩展空间
+- 强调证据化回答、幂等控制、可回放排障，而不是只返回一段模型文本
 
-`docker-compose.yml` 当前只保留企业 RAG-QA 所需的 5 个长期运行服务：
+## 功能亮点
 
-- `postgres`
-- `minio`
-- `kb-service`
-- `kb-worker`
-- `gateway`
+- 知识库与文档生命周期管理：创建、更新、删除知识库与文档，支持详情与事件流查询
+- 分片直传上传链路：创建上传会话、分片预签名、断点续传、完成上传、查询 ingest 状态
+- 异步 ingest：文档状态按 `uploaded -> parsing_fast -> fast_index_ready -> hybrid_ready -> ready` 推进
+- 检索与问答：支持 `/api/v1/kb/retrieve`、`/api/v1/kb/query` 和统一聊天 `/api/v1/chat/...`
+- 流式返回：KB 单库问答和统一聊天都支持 SSE
+- 证据化回答：返回 `citations`、`grounding_score`、`retrieval`、`latency`、`cost`、`trace_id`
+- 可观测性：提供 `/healthz`、`/readyz`、`/metrics` 和 trace 透传
+- 权限与审计：本地默认角色包含 `platform_admin` 和 `kb_editor`，网关可聚合审计事件
+- 幂等控制：聊天消息、上传创建与完成接口支持 `Idempotency-Key`，冲突时返回 `409 idempotency_conflict`
 
-## 仓库结构
+## 适用场景
 
-| 路径 | 作用 |
+| 场景 | 你可以做什么 | 项目中对应的能力 |
+| --- | --- | --- |
+| 企业制度问答 | 让员工围绕制度、手册、规范进行可追溯问答 | 证据化回答、引文返回、拒答机制 |
+| 内部知识库接入 | 将 PDF / DOCX / TXT 接入并异步索引 | Multipart 上传、异步 ingest、文档事件流 |
+| 工程化 RAG 原型 | 搭建有服务边界、有审计、有 metrics 的本地原型 | Gateway / KB Service / Worker 架构 |
+| 评测与排障 | 对检索质量、响应延迟、失败链路做验证 | trace_id、metrics、评测脚本、runbook |
+
+## 端到端工作流
+
+1. 创建知识库并上传文档，前端通过预签名 URL 直接上传到对象存储。
+2. `kb-service` 创建上传会话和 ingest 作业，`kb-worker` 异步执行解析、切段、索引和 embedding。
+3. 文档状态从 `uploaded` 逐步推进到 `ready`，在中间阶段也可以按能力开放查询。
+4. 用户通过 KB 问答或统一聊天接口发起问题，网关协调 scope、检索、证据筛选和答案生成。
+5. 响应返回答案本身以及 `citations`、`retrieval`、`latency`、`cost`、`trace_id`，便于前端展示和运维排障。
+
+## 技术栈
+
+![Vue](https://img.shields.io/badge/Vue%203-4FC08D?logo=vuedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+![Element Plus](https://img.shields.io/badge/Element%20Plus-409EFF?logo=element&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white)
+![MinIO](https://img.shields.io/badge/MinIO-C72E49?logo=minio&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?logo=githubactions&logoColor=white)
+![Pytest](https://img.shields.io/badge/pytest-0A9EDC?logo=pytest&logoColor=white)
+
+| 层 | 技术 |
 | --- | --- |
-| `apps/services/api-gateway/` | 网关服务；`src/app` 放 Python 源码，`database/migrations` 放迁移 |
-| `apps/services/knowledge-base/` | 企业知识库服务；`src/app` 放 API / 解析 / 检索 / worker |
-| `apps/web/` | Vue 3 企业 RAG 控制台 |
-| `packages/python/shared/` | 跨服务共享 Python 包，如 `auth`、`storage`、`embeddings`、`eval_metrics` |
-| `ops/docker/postgres/` | PostgreSQL 镜像与初始化脚本 |
-| `ops/logging/` | 日志查看与导出辅助资源 |
-| `scripts/dev/` | 一键启动、一键停止、前端托管与本地开发辅助脚本 |
-| `scripts/evaluation/` | 在线评测、离线 ablation、embedding 对照、ingest benchmark |
-| `scripts/observability/` | 日报与日志汇总 |
-| `scripts/quality/` | 编码检查、CI 聚合校验 |
-| `tests/fixtures/evals/` | 统一问答、拒答、检索 fixture |
-| `datasets/demo/` | Demo 语料、评测样例与对抗样例 |
-| `docs/reference/` | API 参考文档 |
-| `docs/development/` | 开发脚本与本地工作流说明 |
-| `docs/operations/` | Runbook 与排障说明 |
-| `docs/reports/` | 需要长期留档的报告快照 |
-| `artifacts/reports/` | 本地运行、测试与 CI 生成物 |
-| `artifacts/evals/` | 评测动态配置与资产清单 |
-| `data/` | 本地运行态数据 |
-| `logs/` | 本地日志与前端托管状态 |
+| Frontend | Vue 3, TypeScript, Vite, Element Plus, Pinia |
+| Gateway | FastAPI, Uvicorn, httpx, PyJWT, Prometheus client |
+| KB Service | FastAPI, boto3, pypdf, python-docx, PostgreSQL |
+| Worker / Shared | Python, shared retrieval/auth/storage modules |
+| Storage / Infra | PostgreSQL, MinIO, Docker Compose |
+| Quality | pytest, compileall, GitHub Actions, encoding check |
 
-前端源码位于 `apps/web/src/`：
+## 快速开始
 
-- `api/`：HTTP 请求封装
-- `components/`：复用组件
-- `layouts/`：页面壳层
-- `router/`：前端路由
-- `store/`：Pinia 状态
-- `utils/`：纯工具函数
-- `views/`：页面级视图
+### 前置条件
 
-## 业务主线
+- 已安装并启动 `Docker Desktop`
+- 已安装 `Python`
+- 已安装 `Node.js` 与 `npm`
+- 已安装 `make`，如果本机没有 `make`，可直接执行对应的 PowerShell 脚本
 
-### 1. 企业文档接入
+说明：当前仓库提供的一键开发脚本以 PowerShell 为主，Windows 环境体验最佳；其他环境可参考 `docker-compose.yml`、`apps/web/package.json` 和 `scripts/quality/ci-check.ps1` 手动执行。
 
-- 浏览器按 `5 MiB / part` 直传对象存储。
-- 服务端维护 `upload_sessions / upload_parts`，支持缺失 part 补传。
-- 上传完成后立即返回 `document_id + job_id`。
-
-### 2. 异步 ingest
-
-- `kb-worker` 负责解析文档、抽取 section/chunk、向量化与增强处理。
-- 文档状态按 `uploaded -> fast_index_ready -> hybrid_ready -> ready` 推进。
-- `fast_index_ready` 后即可参与基础问答，`ready` 表示混合检索链完整可用。
-
-### 3. 统一问答
-
-- 前端主入口：`/workspace/chat`
-- 问答接口入口：`/api/v1/chat/*`
-- scope 支持：`single / multi / all`
-- 统一 corpus 编码：`kb:<uuid>`
-
-### 4. 混合检索与证据化回答
-
-- 检索信号：结构检索、全文检索、向量检索。
-- 重写策略：实体聚焦、问句裁剪、检索增强词扩展。
-- 融合策略：加权 RRF + 轻量 lexical rerank。
-- 回答约束：必须附带引文，证据不足时拒答或保守回答。
-
-### 5. 观测与评测
-
-- 网关透传 `X-Trace-Id`。
-- 聊天响应返回 `trace_id`、`retrieval`、`latency`、`cost`。
-- 仓库内保留离线检索对照、本地 ingest benchmark、在线 eval suite。
-
-## 服务边界
-
-### Gateway
-
-`apps/services/api-gateway/` 负责：
-
-- JWT 登录与本地账号鉴权
-- 会话与消息持久化
-- 调用 `kb-service` 检索并组织证据化回答
-- LLM 答案生成、token 用量与成本估算
-
-关键环境变量：
-
-- `GATEWAY_DATABASE_DSN`
-- `KB_SERVICE_URL`
-- `LLM_ENABLED`
-- `LLM_PROVIDER`
-- `LLM_BASE_URL`
-- `LLM_API_KEY`
-- `LLM_MODEL`
-- `LLM_PRICE_CURRENCY`
-- `LLM_PRICE_TIERS_JSON`
-
-兼容说明：
-
-- 历史 `AI_*` 变量仍可读取，但已降级为兼容别名。
-- 新增配置请统一使用 `LLM_*` 命名。
-
-### Knowledge Base
-
-`apps/services/knowledge-base/` 负责：
-
-- 上传会话创建、分片直传预签名、完成确认
-- 文档解析、切段、索引、检索
-- ingest 状态推进与文档详情查询
-
-核心代码分层：
-
-- `src/app/main.py`：服务入口
-- `src/app/parsing.py`：文档解析
-- `src/app/retrieve.py`：检索与引文构造
-- `src/app/query.py`：查询协议
-- `src/app/worker.py`：异步 ingest worker
-- `database/migrations/`：知识库迁移
-
-### Web
-
-`apps/web/` 负责：
-
-- 登录与权限展示
-- 企业知识库上传、统一问答、文档详情
-
-主要路由：
-
-| 路由 | 说明 |
-| --- | --- |
-| `/login` | 登录页 |
-| `/workspace/entry` | 业务入口页 |
-| `/workspace/chat` | 统一企业问答 |
-| `/workspace/kb/upload` | 文档上传 |
-| `/workspace/kb/chat` | 知识库问答入口 |
-| `/workspace/kb/documents/:id` | 文档详情 |
-
-## 运行
-
-### 1. 初始化
+### 1. 复制环境变量模板
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-### 2. 一键启动
+### 2. 初始化数据库与对象存储
+
+```powershell
+make init
+```
+
+等价命令：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/init.ps1
+```
+
+### 3. 启动本地环境
 
 ```powershell
 make up
@@ -181,7 +112,15 @@ make up
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/up.ps1
 ```
 
-### 3. 一键停止
+`make up` 会执行以下动作：
+
+- 拉取或构建镜像
+- 启动 `postgres` 与 `minio`
+- 显式运行 `stack-init`
+- 启动 `kb-service`、`kb-worker`、`gateway`
+- 在本地启动并托管前端开发服务器
+
+### 4. 停止环境
 
 ```powershell
 make down
@@ -190,83 +129,233 @@ make down
 等价命令：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/down.ps1 -Force
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/down.ps1
 ```
 
-### 4. 访问地址
+### 5. 启动后建议先做的事
 
-- Web：`http://localhost:5173`
-- Gateway：`http://localhost:8080`
-- KB Service：`http://localhost:8300`
-- MinIO API：`http://localhost:9000`
-- MinIO Console：`http://localhost:9001`
+1. 使用本地账号登录前端或调用 `/api/v1/auth/login`。
+2. 创建一个知识库。
+3. 上传 `txt`、`pdf` 或 `docx` 文档并等待 ingest 状态进入 `fast_index_ready` 或 `ready`。
+4. 进入 KB 问答页或统一聊天页验证回答和引文。
 
-默认本地账号：
+## 默认访问地址
 
-- `admin@local / ChangeMe123!`
-- `member@local / ChangeMe123!`
+- Web: `http://localhost:5173`
+- Gateway: `http://localhost:8080`
+- KB Service: `http://localhost:8300`
+- MinIO API: `http://localhost:9000`
+- MinIO Console: `http://localhost:9001`
+- Gateway Health: `http://localhost:8080/healthz`
+- Gateway Readiness: `http://localhost:8080/readyz`
+- Gateway Metrics: `http://localhost:8080/metrics`
+- KB Health: `http://localhost:8300/healthz`
+- KB Readiness: `http://localhost:8300/readyz`
+- KB Metrics: `http://localhost:8300/metrics`
 
-## 常用命令
+## 本地认证与权限
+
+本地开发默认账号来自 [`.env.example`](.env.example)：
+
+- `admin@local`：映射到 `platform_admin`
+- `member@local`：映射到 `kb_editor`
+
+默认密码仅用于本地开发占位。非本地环境必须至少覆盖以下变量，否则服务会在启动阶段拒绝运行：
+
+- `JWT_SECRET`
+- `ADMIN_PASSWORD`
+- `MEMBER_PASSWORD`
+
+`/api/v1/auth/login` 与 `/api/v1/auth/me` 会返回 `permissions` 和 `role_version`，前端可按能力而不是按角色名做权限控制。
+
+## 架构概览
+
+```mermaid
+flowchart LR
+    User["Browser / API Client"] --> Web["Vue 3 Web"]
+    User --> Gateway["FastAPI Gateway"]
+    Web --> Gateway
+    Gateway --> KB["KB Service"]
+    Gateway --> Audit["Audit / Metrics / Trace"]
+    KB --> Worker["KB Worker"]
+    KB --> Postgres["PostgreSQL"]
+    KB --> MinIO["MinIO / S3 Compatible"]
+    Worker --> Postgres
+    Worker --> MinIO
+```
+
+### 服务职责
+
+- `gateway`：认证、会话管理、统一聊天入口、跨知识库编排、审计聚合
+- `kb-service`：知识库、文档、上传会话、ingest 作业、检索与单库问答
+- `kb-worker`：异步解析、索引、embedding 和重试处理
+- `apps/web`：Vue 3 管理端，负责登录、上传、检索、问答、审计查看
+
+## API 快速示例
+
+下面的示例更适合作为“本地已经启动并完成登录后的最小验证”，也是高赞产品 README 常见的写法。
+
+### 1. 健康检查
+
+```bash
+curl http://localhost:8080/healthz
+```
+
+期望返回：
+
+```json
+{"status":"ok"}
+```
+
+### 2. 登录获取 Token
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@local","password":"ChangeMe123!"}'
+```
+
+### 3. 对单个知识库发起问答
+
+将 `<ACCESS_TOKEN>` 和 `<KB_ID>` 替换为你的真实值：
+
+```bash
+curl -X POST http://localhost:8300/api/v1/kb/query \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "base_id": "<KB_ID>",
+    "question": "报销审批需要哪些角色签字？",
+    "document_ids": []
+  }'
+```
+
+典型响应字段：
+
+```json
+{
+  "answer": "...",
+  "answer_mode": "grounded",
+  "evidence_status": "grounded",
+  "grounding_score": 0.82,
+  "citations": [],
+  "retrieval": {},
+  "trace_id": "kb-xxxx"
+}
+```
+
+如果你更偏向统一聊天入口，可以使用 `/api/v1/chat/sessions` 和 `/api/v1/chat/sessions/{id}/messages` 组合调用。
+
+## 仓库结构
+
+- `apps/services/api-gateway/`：网关服务
+- `apps/services/knowledge-base/`：知识库服务与 worker
+- `apps/web/`：前端管理台
+- `packages/python/shared/`：共享鉴权、SSE、检索、向量、存储、错误模型等基础能力
+- `scripts/dev/`：本地初始化、启动、停止脚本
+- `scripts/evaluation/`：评测与 benchmark 脚本
+- `scripts/quality/`：编码检查与 CI 检查脚本
+- `docs/`：API、开发脚本、运维 runbook、后端设计说明
+
+## 推荐 API 路径
+
+### 上传与 ingest
+
+- `POST /api/v1/kb/uploads`
+- `POST /api/v1/kb/uploads/{upload_id}/parts/presign`
+- `POST /api/v1/kb/uploads/{upload_id}/complete`
+- `GET /api/v1/kb/ingest-jobs/{job_id}`
+- `POST /api/v1/kb/ingest-jobs/{job_id}/retry`
+
+兼容接口 `POST /api/v1/kb/documents/upload` 仍保留，但不再是推荐入口。
+
+### 检索与问答
+
+- `POST /api/v1/kb/retrieve`
+- `POST /api/v1/kb/query`
+- `POST /api/v1/kb/query/stream`
+- `POST /api/v1/chat/sessions`
+- `POST /api/v1/chat/sessions/{id}/messages`
+- `POST /api/v1/chat/sessions/{id}/messages/stream`
+
+### 审计与系统接口
+
+- `GET /api/v1/audit/events`
+- `GET /healthz`
+- `GET /readyz`
+- `GET /metrics`
+
+完整接口说明见 [`docs/reference/api-specification.md`](docs/reference/api-specification.md)。
+
+## 项目边界
+
+- 仓库默认不携带 demo 语料、历史 benchmark 报告或固定评测结论。
+- 本地默认账号和密码仅用于开发环境占位，不能视为生产配置。
+- README 展示的是当前仓库已实现的主链路能力，不承诺生产 SLA。
+- 历史兼容接口仍保留，但 README 只推荐当前主入口。
+
+## 支持的文档格式
+
+当前知识库上传接口明确支持：
+
+- `txt`
+- `pdf`
+- `docx`
+
+## 开发与验证
+
+文档改动的最小基线验证：
 
 ```powershell
-.\logs.bat -s gateway kb-service
-.\logs.bat -l ERROR -s gateway kb-service
-python -m pytest tests -q
-python scripts/evaluation/run-retrieval-ablation.py
-python scripts/evaluation/benchmark-local-ingest.py
-python scripts/evaluation/compare-embedding-providers.py
-python scripts/evaluation/run-demo-eval-suite.py --password <pwd>
+python scripts/quality/check-encoding.py
+docker compose config --quiet
 ```
 
-## 测试、语料与报告
-
-### 测试
-
-`tests/` 当前覆盖：
-
-- shared 基础能力
-- 统一评测指标
-- 网关成本估算
-- 评测脚本 smoke
-
-### 评测资产
-
-`tests/fixtures/evals/` 当前包含：
-
-- `kb-smoke-eval.json`
-- `adversarial-refusal-eval.json`
-- `retrieval-ablation-fixture.json`
-- `suite.sample.json`
-
-### Demo 数据
-
-`datasets/demo/` 当前包含：
-
-- `documents/`：demo 企业文档
-- `evaluation/`：在线 eval 问题集
-- `adversarial/`：拒答与异常输入样例
-
-### 报告目录约定
-
-- `artifacts/reports/`：脚本、测试和 CI 默认输出位置
-- `artifacts/evals/`：临时 config 与 asset manifest
-- `docs/reports/`：筛选后需要留档的快照
-
-## 验证
+完整基线验证：
 
 ```powershell
 python scripts/quality/check-encoding.py
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 python -m pytest tests -q
-python scripts/evaluation/run-retrieval-ablation.py
-python scripts/evaluation/benchmark-local-ingest.py
-python scripts/evaluation/compare-embedding-providers.py
 docker compose config --quiet
 ```
 
-## 进一步文档
+也可以直接运行聚合脚本：
 
-- [docs/reference/api-specification.md](docs/reference/api-specification.md)
-- [docs/development/dev-scripts.md](docs/development/dev-scripts.md)
-- [docs/operations/runbook.md](docs/operations/runbook.md)
+```powershell
+powershell -File scripts/quality/ci-check.ps1
+```
+
+## 评测与 Benchmark
+
+仓库保留了评测脚本入口，但所有输入都需要显式提供；不会再隐式消费仓库内 demo 数据。
+
+```powershell
+python scripts/evaluation/benchmark-local-ingest.py --kb-path <glob-or-file> --kb-path <glob-or-file>
+python scripts/evaluation/run-retrieval-ablation.py --fixture <fixture.json>
+python scripts/evaluation/compare-embedding-providers.py --fixture <fixture.json>
+python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.json> --corpus-id kb:<uuid>
+python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
+```
+
+## 文档索引
+
+- [API 规范](docs/reference/api-specification.md)
+- [开发脚本](docs/development/dev-scripts.md)
+- [运维手册](docs/operations/runbook.md)
+- [后端工程深入](docs/backend/engineering-deep-dive.md)
+- [贡献指南](CONTRIBUTING.md)
+- [安全政策](SECURITY.md)
+
+## 协作约定
+
+- Commit message 使用 Conventional Commits
+- 提交说明建议包含 `What / Why / How to verify / Risk`
+- 接口、配置或启动方式发生变化时，需要同步更新 README 或对应文档
+
+更多协作细则见 [AGENTS.md](AGENTS.md)。
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 发布。

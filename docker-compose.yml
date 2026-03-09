@@ -100,6 +100,27 @@ services:
       retries: 20
     logging: *default-logging
 
+  stack-init:
+    profiles: ["init"]
+    build:
+      context: .
+      dockerfile: apps/services/knowledge-base/Dockerfile
+    command: ["python", "-m", "shared.stack_init"]
+    environment:
+      <<: [*common-auth-env, *object-storage-env, *embedding-env]
+      GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/gateway_app}
+      KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
+      KB_BLOB_ROOT: /data/kb
+    volumes:
+      - ./data/kb:/data/kb
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
   kb-service:
     build:
       context: .

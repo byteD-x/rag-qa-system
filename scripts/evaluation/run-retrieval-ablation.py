@@ -139,7 +139,7 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run offline retrieval ablation against a deterministic fixture dataset.")
-    parser.add_argument("--fixture", default="tests/fixtures/evals/retrieval-ablation-fixture.json")
+    parser.add_argument("--fixture", required=True)
     parser.add_argument("--output", default="artifacts/reports/retrieval_ablation_report.json")
     parser.add_argument("--summary-output", default="artifacts/reports/retrieval_ablation_report.md")
     args = parser.parse_args()

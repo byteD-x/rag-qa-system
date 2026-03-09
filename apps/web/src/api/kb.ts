@@ -1,4 +1,4 @@
-import request, { streamRequest, type StreamRequestOptions } from './request';
+import request, { createIdempotencyKey, streamRequest, type StreamRequestOptions } from './request';
 
 export interface UploadPartPayload {
   part_number: number;
@@ -10,8 +10,20 @@ export function listKnowledgeBases() {
   return request.get('/kb/bases');
 }
 
+export function getKnowledgeBase(baseId: string) {
+  return request.get(`/kb/bases/${baseId}`);
+}
+
 export function createKnowledgeBase(data: { name: string; description?: string; category?: string }) {
   return request.post('/kb/bases', data);
+}
+
+export function updateKnowledgeBase(baseId: string, data: { name?: string; description?: string; category?: string }) {
+  return request.patch(`/kb/bases/${baseId}`, data);
+}
+
+export function deleteKnowledgeBase(baseId: string) {
+  return request.delete(`/kb/bases/${baseId}`);
 }
 
 export function listKBDocuments(baseId: string) {
@@ -20,6 +32,14 @@ export function listKBDocuments(baseId: string) {
 
 export function getKBDocument(documentId: string) {
   return request.get(`/kb/documents/${documentId}`);
+}
+
+export function updateKBDocument(documentId: string, data: { file_name?: string; category?: string }) {
+  return request.patch(`/kb/documents/${documentId}`, data);
+}
+
+export function deleteKBDocument(documentId: string) {
+  return request.delete(`/kb/documents/${documentId}`);
 }
 
 export function getKBDocumentEvents(documentId: string) {
@@ -32,8 +52,12 @@ export function createKBUpload(data: {
   file_type: string;
   size_bytes: number;
   category?: string;
-}) {
-  return request.post('/kb/uploads', data);
+}, options: { idempotencyKey?: string } = {}) {
+  return request.post('/kb/uploads', data, {
+    headers: {
+      'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('kb-upload-create')
+    }
+  });
 }
 
 export function getKBUpload(uploadId: string) {
@@ -46,10 +70,19 @@ export function presignKBUploadParts(uploadId: string, partNumbers: number[]) {
   });
 }
 
-export function completeKBUpload(uploadId: string, parts: UploadPartPayload[], contentHash = '') {
+export function completeKBUpload(
+  uploadId: string,
+  parts: UploadPartPayload[],
+  contentHash = '',
+  options: { idempotencyKey?: string } = {}
+) {
   return request.post(`/kb/uploads/${uploadId}/complete`, {
     parts,
     content_hash: contentHash
+  }, {
+    headers: {
+      'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('kb-upload-complete')
+    }
   });
 }
 
@@ -57,20 +90,8 @@ export function getKBIngestJob(jobId: string) {
   return request.get(`/kb/ingest-jobs/${jobId}`);
 }
 
-export async function uploadKBDocuments(payload: {
-  baseId: string;
-  category?: string;
-  files: File[];
-}) {
-  const form = new FormData();
-  form.append('base_id', payload.baseId);
-  form.append('category', payload.category || '');
-  for (const file of payload.files) {
-    form.append('files', file);
-  }
-  return request.post('/kb/documents/upload', form, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  });
+export function retryKBIngestJob(jobId: string) {
+  return request.post(`/kb/ingest-jobs/${jobId}/retry`);
 }
 
 export function queryKB(data: {

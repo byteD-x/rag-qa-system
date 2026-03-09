@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://localhost:8080/api/v1")
     parser.add_argument("--email", default="admin@local")
     parser.add_argument("--password", required=True)
-    parser.add_argument("--config", default="tests/fixtures/evals/suite.sample.json")
+    parser.add_argument("--config", required=True)
     parser.add_argument("--output", default="artifacts/reports/eval_suite_report.json")
     parser.add_argument("--summary-output", default="artifacts/reports/eval_suite_report.md")
     args = parser.parse_args()
