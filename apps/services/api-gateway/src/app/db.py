@@ -33,4 +33,9 @@ class GatewayDatabase:
 
 
 def to_json(data: dict[str, Any] | list[Any] | None) -> str:
-    return json.dumps(data or {}, ensure_ascii=False)
+    payload: dict[str, Any] | list[Any]
+    if data is None:
+        payload = {}
+    else:
+        payload = data
+    return json.dumps(payload, ensure_ascii=False)

@@ -6,8 +6,6 @@ from fastapi import HTTPException
 
 from shared.grounded_answering import (
     COMMON_KNOWLEDGE_DISCLAIMER,
-    build_common_knowledge_prompt,
-    build_grounded_prompt,
     classify_evidence,
     compact_history_messages,
     compact_text,
@@ -20,12 +18,23 @@ from shared.grounded_answering import (
     langchain_messages_to_dicts,
     low_signal_common_knowledge_answer,
 )
+from shared.model_routing import settings_with_model_route
+from shared.prompt_registry import get_prompt_definition
 from shared.prompt_safety import augment_settings_prompt, blocked_prompt_answer
 
 from .ai_client import load_llm_settings
 from .gateway_config import SHORT_QUESTION_RE
 from .gateway_runtime import logger
 from .langchain_client import create_llm_completion, create_llm_completion_stream
+
+
+def _attach_route_trace(completion: dict[str, Any], route_key: str) -> dict[str, Any]:
+    llm_trace = dict(completion.get("llm_trace") or {})
+    if route_key:
+        llm_trace["route_key"] = route_key
+    payload = dict(completion)
+    payload["llm_trace"] = llm_trace
+    return payload
 
 
 def contextualize_question(question: str, history: list[dict[str, Any]]) -> str:
@@ -49,7 +58,7 @@ def common_knowledge_prompt_messages(
     history_limit: int = 4,
     history_chars: int = 400,
 ) -> list[dict[str, str]]:
-    prompt = build_common_knowledge_prompt()
+    prompt = get_prompt_definition("chat_common_knowledge").build_prompt()
     formatted = prompt.format_messages(
         settings_prompt=augment_settings_prompt(settings_prompt or ""),
         history=dicts_to_langchain_messages(
@@ -68,7 +77,7 @@ def chat_prompt_messages(
     evidence: list[dict[str, Any]],
     answer_mode: str,
 ) -> list[dict[str, str]]:
-    prompt = build_grounded_prompt()
+    prompt = get_prompt_definition("chat_grounded_answer").build_prompt()
     formatted = prompt.format_messages(
         settings_prompt=augment_settings_prompt(settings_prompt or ""),
         history=dicts_to_langchain_messages(history[-8:]),
@@ -98,53 +107,72 @@ async def generate_grounded_answer(
             "provider": "",
             "model": "",
             "usage": {},
+            "llm_trace": {},
         }
     if answer_mode == "refusal":
-        return {"answer": fallback_answer(question, evidence, "refusal"), "provider": "", "model": "", "usage": {}}
+        return {"answer": fallback_answer(question, evidence, "refusal"), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
     settings = load_llm_settings()
     if answer_mode == "common_knowledge":
-        if not settings.configured:
-            return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}}
+        prompt_definition = get_prompt_definition("chat_common_knowledge")
+        routed_settings, route = settings_with_model_route(
+            settings,
+            prompt_definition.route_key,
+            default_model=settings.common_knowledge_model or settings.model,
+            default_temperature=0.4,
+            default_max_tokens=settings.common_knowledge_max_tokens,
+        )
+        if not routed_settings.configured:
+            return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
         if is_low_signal_common_knowledge_question(question):
-            return {"answer": low_signal_common_knowledge_answer(question), "provider": "", "model": "", "usage": {}}
-        prompt = build_common_knowledge_prompt()
+            return {"answer": low_signal_common_knowledge_answer(question), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+        prompt = prompt_definition.build_prompt()
         inputs = {
-            "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+            "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
             "history": dicts_to_langchain_messages(
                 compact_history_messages(
                     history,
-                    limit=settings.common_knowledge_history_messages,
-                    content_limit=settings.common_knowledge_history_chars,
+                    limit=routed_settings.common_knowledge_history_messages,
+                    content_limit=routed_settings.common_knowledge_history_chars,
                 )
             ),
             "question": question.strip(),
         }
         try:
             completion = await create_llm_completion(
-                settings=settings,
+                settings=routed_settings,
                 prompt=prompt,
                 inputs=inputs,
-                model=settings.common_knowledge_model or settings.model,
-                temperature=0.4,
-                max_tokens=settings.common_knowledge_max_tokens,
+                prompt_key=prompt_definition.key,
+                prompt_version=prompt_definition.version,
+                model=route["model"],
+                temperature=route["temperature"],
+                max_tokens=route["max_tokens"],
             )
+            completion = _attach_route_trace(completion, route.route_key)
             return {
                 "answer": ensure_common_knowledge_disclaimer(str(completion["answer"])),
                 "provider": completion["provider"],
                 "model": completion["model"],
                 "usage": completion["usage"],
+                "llm_trace": completion.get("llm_trace") or {},
             }
         except HTTPException:
             logger.warning("llm common knowledge fallback engaged")
-            return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}}
+            return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
-    if not settings.configured:
-        return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}}
-
-    prompt = build_grounded_prompt()
+    prompt_definition = get_prompt_definition("chat_grounded_answer")
+    routed_settings, route = settings_with_model_route(
+        settings,
+        prompt_definition.route_key,
+        default_temperature=0.2,
+        default_max_tokens=min(settings.default_max_tokens, 1200),
+    )
+    if not routed_settings.configured:
+        return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+    prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
         "history": dicts_to_langchain_messages(history[-8:]),
         "question": question.strip(),
         "answer_mode": answer_mode,
@@ -152,21 +180,26 @@ async def generate_grounded_answer(
     }
     try:
         completion = await create_llm_completion(
-            settings=settings,
+            settings=routed_settings,
             prompt=prompt,
             inputs=inputs,
-            temperature=0.2,
-            max_tokens=min(settings.default_max_tokens, 1200),
+            prompt_key=prompt_definition.key,
+            prompt_version=prompt_definition.version,
+            model=route["model"],
+            temperature=route["temperature"],
+            max_tokens=route["max_tokens"],
         )
+        completion = _attach_route_trace(completion, route.route_key)
         return {
             "answer": ensure_citation_markers(str(completion["answer"]), evidence),
             "provider": completion["provider"],
             "model": completion["model"],
             "usage": completion["usage"],
+            "llm_trace": completion.get("llm_trace") or {},
         }
     except HTTPException:
         logger.warning("llm grounded answer fallback engaged")
-        return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}}
+        return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
 
 async def stream_grounded_answer(
@@ -191,45 +224,56 @@ async def stream_grounded_answer(
             fallback_answer_fn=fallback_answer,
         )
         await emit_answer(answer)
-        return {"answer": answer, "provider": "", "model": "", "usage": {}}
+        return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
     if answer_mode == "refusal":
         answer = fallback_answer(question, evidence, "refusal")
         await emit_answer(answer)
-        return {"answer": answer, "provider": "", "model": "", "usage": {}}
+        return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
     settings = load_llm_settings()
     if answer_mode == "common_knowledge":
-        if not settings.configured:
+        prompt_definition = get_prompt_definition("chat_common_knowledge")
+        routed_settings, route = settings_with_model_route(
+            settings,
+            prompt_definition.route_key,
+            default_model=settings.common_knowledge_model or settings.model,
+            default_temperature=0.4,
+            default_max_tokens=settings.common_knowledge_max_tokens,
+        )
+        if not routed_settings.configured:
             answer = fallback_answer(question, evidence, answer_mode)
             await emit_answer(answer)
-            return {"answer": answer, "provider": "", "model": "", "usage": {}}
+            return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
         if is_low_signal_common_knowledge_question(question):
             answer = low_signal_common_knowledge_answer(question)
             await emit_answer(answer)
-            return {"answer": answer, "provider": "", "model": "", "usage": {}}
-        prompt = build_common_knowledge_prompt()
+            return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+        prompt = prompt_definition.build_prompt()
         inputs = {
-            "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+            "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
             "history": dicts_to_langchain_messages(
                 compact_history_messages(
                     history,
-                    limit=settings.common_knowledge_history_messages,
-                    content_limit=settings.common_knowledge_history_chars,
+                    limit=routed_settings.common_knowledge_history_messages,
+                    content_limit=routed_settings.common_knowledge_history_chars,
                 )
             ),
             "question": question.strip(),
         }
         try:
             completion = await create_llm_completion_stream(
-                settings=settings,
+                settings=routed_settings,
                 prompt=prompt,
                 inputs=inputs,
                 on_text_delta=lambda _delta, answer_text: emit_answer(answer_text),
-                model=settings.common_knowledge_model or settings.model,
-                temperature=0.4,
-                max_tokens=settings.common_knowledge_max_tokens,
+                prompt_key=prompt_definition.key,
+                prompt_version=prompt_definition.version,
+                model=route["model"],
+                temperature=route["temperature"],
+                max_tokens=route["max_tokens"],
             )
+            completion = _attach_route_trace(completion, route.route_key)
             finalized_answer = ensure_common_knowledge_disclaimer(str(completion["answer"]))
             if finalized_answer != str(completion["answer"]):
                 await emit_answer(finalized_answer)
@@ -238,21 +282,28 @@ async def stream_grounded_answer(
                 "provider": completion["provider"],
                 "model": completion["model"],
                 "usage": completion["usage"],
+                "llm_trace": completion.get("llm_trace") or {},
             }
         except HTTPException:
             logger.warning("llm common knowledge fallback engaged")
             answer = fallback_answer(question, evidence, answer_mode)
             await emit_answer(answer)
-            return {"answer": answer, "provider": "", "model": "", "usage": {}}
+            return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
-    if not settings.configured:
+    prompt_definition = get_prompt_definition("chat_grounded_answer")
+    routed_settings, route = settings_with_model_route(
+        settings,
+        prompt_definition.route_key,
+        default_temperature=0.2,
+        default_max_tokens=min(settings.default_max_tokens, 1200),
+    )
+    if not routed_settings.configured:
         answer = fallback_answer(question, evidence, answer_mode)
         await emit_answer(answer)
-        return {"answer": answer, "provider": "", "model": "", "usage": {}}
-
-    prompt = build_grounded_prompt()
+        return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+    prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
         "history": dicts_to_langchain_messages(history[-8:]),
         "question": question.strip(),
         "answer_mode": answer_mode,
@@ -260,13 +311,17 @@ async def stream_grounded_answer(
     }
     try:
         completion = await create_llm_completion_stream(
-            settings=settings,
+            settings=routed_settings,
             prompt=prompt,
             inputs=inputs,
             on_text_delta=lambda _delta, answer_text: emit_answer(answer_text),
-            temperature=0.2,
-            max_tokens=min(settings.default_max_tokens, 1200),
+            prompt_key=prompt_definition.key,
+            prompt_version=prompt_definition.version,
+            model=route["model"],
+            temperature=route["temperature"],
+            max_tokens=route["max_tokens"],
         )
+        completion = _attach_route_trace(completion, route.route_key)
         finalized_answer = ensure_citation_markers(str(completion["answer"]), evidence)
         if finalized_answer != str(completion["answer"]):
             await emit_answer(finalized_answer)
@@ -275,12 +330,13 @@ async def stream_grounded_answer(
             "provider": completion["provider"],
             "model": completion["model"],
             "usage": completion["usage"],
+            "llm_trace": completion.get("llm_trace") or {},
         }
     except HTTPException:
         logger.warning("llm grounded answer fallback engaged")
         answer = fallback_answer(question, evidence, answer_mode)
         await emit_answer(answer)
-        return {"answer": answer, "provider": "", "model": "", "usage": {}}
+        return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
 
 
 __all__ = [

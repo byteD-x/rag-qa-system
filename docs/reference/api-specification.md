@@ -96,13 +96,66 @@
 - `latency`
 - `cost`
 - `trace_id`
+- `llm_trace`
 - `message`
+- `workflow_run`
 
 ### `POST /api/v1/chat/sessions/{id}/messages/stream`
 
 - SSE 主顺序固定为 `metadata -> citation -> answer -> message -> done`
 - `metadata` 中会返回 `execution_mode`
+- `metadata` 中会返回 `workflow_run`
 - `agent` 模式下 `strategy_used` 为 `agent_grounded_qa`
+
+### `GET /api/v1/chat/sessions/{id}/workflow-runs`
+
+列出当前会话下的工作流运行记录，按创建时间升序返回。适用于排查单次聊天的检索、生成与持久化阶段快照。
+
+返回字段包括：
+
+- `id`
+- `session_id`
+- `execution_mode`
+- `workflow_kind`
+- `status`
+- `stage`
+- `trace_id`
+- `message_id`
+- `workflow_state`
+- `workflow_events`
+- `tool_calls`
+
+`llm_trace` 关键字段包括：
+
+- `llm_call_id`
+- `request_trace_id`
+- `provider`
+- `model_requested`
+- `model_resolved`
+- `route_key`
+- `prompt_key`
+- `prompt_version`
+- `streaming`
+- `duration_ms`
+
+### `POST /api/v1/chat/workflow-runs/{run_id}/retry`
+
+对一次失败的工作流运行发起重试。当前约束：
+
+- 请求头可选：`Idempotency-Key: <optional>`
+- 仅允许重试 `status=failed` 的运行记录
+- 默认复用原 `scope_snapshot`
+- 默认复用原 `execution_mode`
+- 会创建新的聊天消息和新的 `workflow_run`
+- 成功后会写入 `chat.workflow_run.retry` 审计事件
+
+响应会额外返回：
+
+- `retried_from_run_id`
+
+### `GET /api/v1/chat/workflow-runs/{run_id}`
+
+按 `run_id` 获取单次聊天工作流的完整快照。可从普通聊天响应或流式 `metadata.workflow_run.id` 反查执行详情。
 
 ## 4. `execution_mode` 说明
 
@@ -148,6 +201,11 @@
 - `citations`
 - `retrieval`
 - `trace_id`
+
+补充：
+
+- `retrieval.rerank_provider` 用于说明当前使用的是 `heuristic` 还是外部 cross-encoder rerank
+- `citations[*].source_kind` 现在可能出现 `visual_ocr` 或 `visual_region`
 
 ### `POST /api/v1/kb/query/stream`
 

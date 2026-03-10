@@ -335,13 +335,23 @@ def _replace_document_units(document_id: str, parsed: ParsedKB) -> None:
 def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dict[str, Any]:
     visual_assets = extract_visual_assets(path, file_type, max_assets=VISION_SETTINGS.max_assets_per_document)
     if not visual_assets:
-        return {"visual_asset_count": 0, "visual_ocr_chunk_count": 0, "visual_ocr_section_count": 0, "visual_provider": "", "section_preview": _fetch_section_preview(document_id)}
+        return {
+            "visual_asset_count": 0,
+            "visual_ocr_chunk_count": 0,
+            "visual_ocr_section_count": 0,
+            "visual_layout_chunk_count": 0,
+            "visual_layout_section_count": 0,
+            "visual_provider": "",
+            "section_preview": _fetch_section_preview(document_id),
+        }
 
     asset_rows: list[dict[str, Any]] = []
     section_rows: list[KBSection] = []
     chunk_rows: list[KBChunk] = []
     section_index = _next_section_index(document_id)
     visual_provider = ""
+    layout_section_count = 0
+    layout_chunk_count = 0
 
     for asset in visual_assets:
         asset_id = asset.id
@@ -394,12 +404,37 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
 
         if not ocr_result or not ocr_result.text.strip():
             continue
+        layout_prefix = _layout_prefix(ocr_result.layout_hints)
         section, chunks = _build_section_and_chunks(section_index=section_index, title=f"Page {asset.page_number} screenshot {asset.asset_index}", raw_text=ocr_result.text, char_start=0, source_kind="visual_ocr", page_number=asset.page_number, asset_id=asset_id)
         if section is None:
             continue
+        if layout_prefix:
+            section = KBSection(
+                id=section.id,
+                section_index=section.section_index,
+                title=f"{section.title} [{layout_prefix}]",
+                summary=f"{layout_prefix} | {section.summary}".strip(" |"),
+                search_text=f"{layout_prefix} {section.search_text}".strip(),
+                text=section.text,
+                char_start=section.char_start,
+                char_end=section.char_end,
+                source_kind=section.source_kind,
+                page_number=section.page_number,
+                asset_id=section.asset_id,
+            )
         section_rows.append(section)
         chunk_rows.extend(chunks)
         section_index += 1
+        region_sections, region_chunks = _build_visual_region_units(
+            asset=asset,
+            ocr_result=ocr_result,
+            start_section_index=section_index,
+        )
+        section_rows.extend(region_sections)
+        chunk_rows.extend(region_chunks)
+        layout_section_count += len(region_sections)
+        layout_chunk_count += len(region_chunks)
+        section_index += len(region_sections)
 
     with db.connect() as conn:
         with conn.cursor() as cur:
@@ -444,7 +479,64 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
             _insert_chunks(cur, document_id, chunk_rows)
         conn.commit()
 
-    return {"visual_asset_count": len(asset_rows), "visual_ocr_chunk_count": len(chunk_rows), "visual_ocr_section_count": len(section_rows), "visual_provider": visual_provider, "section_preview": _fetch_section_preview(document_id)}
+    return {
+        "visual_asset_count": len(asset_rows),
+        "visual_ocr_chunk_count": len([item for item in chunk_rows if item.source_kind == "visual_ocr"]),
+        "visual_ocr_section_count": len([item for item in section_rows if item.source_kind == "visual_ocr"]),
+        "visual_layout_chunk_count": layout_chunk_count,
+        "visual_layout_section_count": layout_section_count,
+        "visual_provider": visual_provider,
+        "section_preview": _fetch_section_preview(document_id),
+    }
+
+
+def _layout_prefix(layout_hints: list[str]) -> str:
+    cleaned = [str(item).strip() for item in layout_hints if str(item).strip()]
+    return ", ".join(cleaned[:4])
+
+
+def _build_visual_region_units(
+    *,
+    asset: Any,
+    ocr_result: Any,
+    start_section_index: int,
+) -> tuple[list[KBSection], list[KBChunk]]:
+    regions = list(getattr(ocr_result, "regions", []) or [])
+    if not regions:
+        return [], []
+    layout_prefix = _layout_prefix(list(getattr(ocr_result, "layout_hints", []) or []))
+    section_rows: list[KBSection] = []
+    chunk_rows: list[KBChunk] = []
+    next_index = start_section_index
+    for region_index, region in enumerate(regions, start=1):
+        label = str(region.get("label") or f"region-{region_index}").strip() or f"region-{region_index}"
+        text = str(region.get("text") or "").strip()
+        if not text:
+            continue
+        region_text = "\n".join(
+            part
+            for part in (
+                f"layout: {layout_prefix}" if layout_prefix else "",
+                f"region: {label}",
+                text,
+            )
+            if part
+        )
+        section, chunks = _build_section_and_chunks(
+            section_index=next_index,
+            title=f"Page {asset.page_number} {label}",
+            raw_text=region_text,
+            char_start=0,
+            source_kind="visual_region",
+            page_number=asset.page_number,
+            asset_id=asset.id,
+        )
+        if section is None:
+            continue
+        section_rows.append(section)
+        chunk_rows.extend(chunks)
+        next_index += 1
+    return section_rows, chunk_rows
 
 
 def _cleanup_visual_assets(document_id: str) -> None:
@@ -716,11 +808,21 @@ def _handle_job_failure(job: dict[str, Any], exc: Exception) -> None:
 
 def _merge_ingest_stats(text_stats: dict[str, Any], visual_stats: dict[str, Any]) -> dict[str, Any]:
     merged = dict(text_stats)
-    merged["section_count"] = int(text_stats.get("section_count") or 0) + int(visual_stats.get("visual_ocr_section_count") or 0)
-    merged["chunk_count"] = int(text_stats.get("chunk_count") or 0) + int(visual_stats.get("visual_ocr_chunk_count") or 0)
+    merged["section_count"] = (
+        int(text_stats.get("section_count") or 0)
+        + int(visual_stats.get("visual_ocr_section_count") or 0)
+        + int(visual_stats.get("visual_layout_section_count") or 0)
+    )
+    merged["chunk_count"] = (
+        int(text_stats.get("chunk_count") or 0)
+        + int(visual_stats.get("visual_ocr_chunk_count") or 0)
+        + int(visual_stats.get("visual_layout_chunk_count") or 0)
+    )
     merged["section_preview"] = list(visual_stats.get("section_preview") or text_stats.get("section_preview") or [])
     merged["visual_asset_count"] = int(visual_stats.get("visual_asset_count") or 0)
     merged["visual_ocr_chunk_count"] = int(visual_stats.get("visual_ocr_chunk_count") or 0)
+    merged["visual_layout_chunk_count"] = int(visual_stats.get("visual_layout_chunk_count") or 0)
+    merged["visual_layout_section_count"] = int(visual_stats.get("visual_layout_section_count") or 0)
     merged["visual_provider"] = str(visual_stats.get("visual_provider") or "")
     if visual_stats.get("visual_ms") is not None:
         merged["visual_ms"] = float(visual_stats.get("visual_ms") or 0.0)

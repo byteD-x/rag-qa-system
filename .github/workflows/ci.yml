@@ -66,3 +66,50 @@ jobs:
 
       - name: Build frontend
         run: npm run build
+
+  backend-smoke:
+    runs-on: ubuntu-latest
+    needs:
+      - python-quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -r apps/services/api-gateway/requirements.runtime.txt \
+            -r apps/services/knowledge-base/requirements.runtime.txt \
+            pytest
+
+      - name: Start backend dependencies
+        run: docker compose up -d postgres minio qdrant
+
+      - name: Run explicit stack initialization
+        run: docker compose --profile init run --rm stack-init
+
+      - name: Start backend services
+        run: docker compose up -d kb-service kb-worker gateway
+
+      - name: Run online smoke eval
+        run: python scripts/dev/smoke_eval.py --password ChangeMe123! --wait-for-ready --wait-timeout-seconds 240
+
+      - name: Upload smoke reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-smoke-reports
+          path: artifacts/reports/agent_smoke_report.*
+          if-no-files-found: ignore
+
+      - name: Dump backend logs on failure
+        if: failure()
+        run: docker compose logs --no-color gateway kb-service kb-worker
+
+      - name: Shutdown backend stack
+        if: always()
+        run: docker compose down -v

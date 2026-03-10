@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipUpload,
+    [switch]$WaitForReady,
     [int]$RetryCount = 90,
     [int]$RetryIntervalSeconds = 2
 )
@@ -24,6 +25,9 @@ try {
     $args = @("scripts/dev/smoke_eval.py")
     if ($SkipUpload) {
         $args += "--skip-upload"
+    }
+    if ($WaitForReady) {
+        $args += "--wait-for-ready"
     }
 
     Write-Info "Running smoke eval..."

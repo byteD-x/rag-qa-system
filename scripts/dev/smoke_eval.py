@@ -42,6 +42,24 @@ def login(base_url: str, email: str, password: str) -> str:
         return str(response.json()["access_token"])
 
 
+def wait_for_service(url: str, *, timeout_seconds: int, poll_seconds: float = 2.0) -> None:
+    deadline = time.time() + timeout_seconds
+    last_error = ""
+    last_status_code = 0
+    while time.time() < deadline:
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(url)
+                last_status_code = response.status_code
+                if 200 <= response.status_code < 300:
+                    return
+        except httpx.HTTPError as exc:
+            last_error = exc.__class__.__name__
+        time.sleep(poll_seconds)
+    detail = last_error or (f"last status was {last_status_code}" if last_status_code else "last response was not ready")
+    raise RuntimeError(f"service did not become ready before timeout: {url} ({detail})")
+
+
 def create_base(client: httpx.Client, api_base: str, token: str, name: str, description: str) -> str:
     response = client.post(
         f"{api_base}/kb/bases",
@@ -94,10 +112,13 @@ def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     runtime_suite_path = REPORT_DIR / "agent_smoke_suite.runtime.json"
     runtime_suite = {
+        "suite_version": "smoke-eval-2026-03-10",
+        "dataset_version": "agent-smoke-fixtures-2026-03-10",
         "jobs": [
             {
                 "name": "grounded_single",
                 "eval_file": str((FIXTURE_DIR / "agent_smoke_grounded.json").resolve()),
+                "dataset_version": "agent-smoke-grounded-2026-03-10",
                 "scope_mode": "single",
                 "corpus_ids": [policy_corpus_id],
                 "document_ids": [],
@@ -106,6 +127,7 @@ def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
             {
                 "name": "agent_multi",
                 "eval_file": str((FIXTURE_DIR / "agent_smoke_agent.json").resolve()),
+                "dataset_version": "agent-smoke-agent-2026-03-10",
                 "scope_mode": "multi",
                 "corpus_ids": [policy_corpus_id, travel_corpus_id],
                 "document_ids": [],
@@ -114,6 +136,7 @@ def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
             {
                 "name": "strict_refusal",
                 "eval_file": str((FIXTURE_DIR / "agent_smoke_refusal.json").resolve()),
+                "dataset_version": "agent-smoke-refusal-2026-03-10",
                 "scope_mode": "single",
                 "corpus_ids": [policy_corpus_id],
                 "document_ids": [],
@@ -155,14 +178,22 @@ def main() -> int:
     parser.add_argument("--email", default="")
     parser.add_argument("--password", default="")
     parser.add_argument("--skip-upload", action="store_true")
+    parser.add_argument("--wait-for-ready", action="store_true")
+    parser.add_argument("--wait-timeout-seconds", type=int, default=180)
+    parser.add_argument("--gateway-health-url", default="")
+    parser.add_argument("--kb-health-url", default="")
     args = parser.parse_args()
 
     env_values = load_env_file()
     base_url = args.base_url.rstrip("/")
+    gateway_root = base_url[:-7] if base_url.endswith("/api/v1") else base_url
     email = args.email or env_values.get("ADMIN_EMAIL", "admin@local")
     password = args.password or env_values.get("ADMIN_PASSWORD", "")
     if not password:
         raise RuntimeError("ADMIN_PASSWORD is missing. Set it in .env or pass --password.")
+    if args.wait_for_ready:
+        wait_for_service(args.gateway_health_url or f"{gateway_root}/readyz", timeout_seconds=args.wait_timeout_seconds)
+        wait_for_service(args.kb_health_url or env_values.get("KB_HEALTH_URL", "http://localhost:8300/readyz"), timeout_seconds=args.wait_timeout_seconds)
 
     token = login(base_url, email, password)
     client = httpx.Client(timeout=60.0)

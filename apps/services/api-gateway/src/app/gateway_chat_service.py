@@ -23,6 +23,90 @@ from .gateway_runtime import (
 )
 from .gateway_schemas import ChatScopePayload
 from .gateway_scope import normalize_execution_mode
+from .gateway_workflows import workflow_kind_for_turn
+
+
+def _workflow_tool_calls(prepared: dict[str, Any]) -> list[dict[str, Any]]:
+    return list((((prepared.get("retrieval_meta") or {}).get("agent") or {}).get("tool_calls") or []))
+
+
+def _workflow_agent_events(prepared: dict[str, Any]) -> list[dict[str, Any]]:
+    return list((((prepared.get("retrieval_meta") or {}).get("agent") or {}).get("events") or []))
+
+
+def build_workflow_event(
+    *,
+    prepared: dict[str, Any],
+    stage: str,
+    status: str,
+    response_payload: dict[str, Any] | None = None,
+    error: Exception | None = None,
+) -> dict[str, Any]:
+    event = {
+        "stage": stage,
+        "status": status,
+        "trace_id": prepared["trace_id"],
+        "execution_mode": prepared["execution_mode"],
+        "answer_mode": prepared["answer_mode"],
+        "evidence_count": len(prepared["evidence"]),
+        "retrieval_ms": float(prepared["timing"].get("retrieval_ms") or 0.0),
+    }
+    if response_payload is not None:
+        event["llm_trace"] = dict(response_payload.get("llm_trace") or {})
+        event["latency"] = dict(response_payload.get("latency") or {})
+    if error is not None:
+        detail = str(getattr(error, "detail", "") or str(error) or "")
+        event["error"] = {
+            "type": error.__class__.__name__,
+            "detail": detail,
+            "class": "http" if hasattr(error, "status_code") else "runtime",
+        }
+    return event
+
+
+def build_chat_workflow_state(
+    *,
+    prepared: dict[str, Any],
+    stage: str,
+    response_payload: dict[str, Any] | None = None,
+    error: Exception | None = None,
+    message_id: str = "",
+) -> dict[str, Any]:
+    aggregate = dict(((prepared.get("retrieval_meta") or {}).get("aggregate") or {}))
+    state = {
+        "stage": stage,
+        "execution_mode": prepared["execution_mode"],
+        "answer_mode": prepared["answer_mode"],
+        "question": prepared["payload"].question,
+        "contextualized_question": prepared["contextualized_question"],
+        "scope_snapshot": dict(prepared["scope_snapshot"]),
+        "evidence_count": len(prepared["evidence"]),
+        "selected_candidates": int(aggregate.get("selected_candidates") or len(prepared["evidence"])),
+        "partial_failure": bool(aggregate.get("partial_failure")),
+        "retrieval_aggregate": aggregate,
+        "agent_events": _workflow_agent_events(prepared),
+        "safety": dict(prepared["safety"]),
+        "timing": dict(prepared["timing"]),
+    }
+    if response_payload is not None:
+        state["response"] = {
+            "strategy_used": str(response_payload.get("strategy_used") or ""),
+            "provider": str(response_payload.get("provider") or ""),
+            "model": str(response_payload.get("model") or ""),
+            "citation_count": len(list(response_payload.get("citations") or [])),
+            "answer_preview": compact_text(str(response_payload.get("answer") or ""), 320),
+            "latency": dict(response_payload.get("latency") or {}),
+            "usage": dict(response_payload.get("usage") or {}),
+            "cost": dict(response_payload.get("cost") or {}),
+            "llm_trace": dict(response_payload.get("llm_trace") or {}),
+            "message_id": message_id.strip(),
+        }
+    if error is not None:
+        state["error"] = {
+            "type": error.__class__.__name__,
+            "detail": str(getattr(error, "detail", "") or str(error) or ""),
+        }
+    return state
 
 
 async def prepare_chat_message(
@@ -148,6 +232,7 @@ def build_chat_response_payload(
         "provider": answer_payload["provider"],
         "model": answer_payload["model"],
         "usage": answer_payload["usage"],
+        "llm_trace": dict(answer_payload.get("llm_trace") or {}),
         "scope_snapshot": prepared["scope_snapshot"],
         "trace_id": prepared["trace_id"],
         "retrieval": prepared["retrieval_meta"],
@@ -237,7 +322,11 @@ async def handle_chat_message(
     retrieve_scope_evidence_fn: Any,
     fetch_corpus_documents_fn: Any,
     persist_chat_turn_fn: Any,
+    start_workflow_run_fn: Any,
+    update_workflow_run_fn: Any,
 ) -> dict[str, Any]:
+    workflow_run: dict[str, Any] | None = None
+    workflow_events: list[dict[str, Any]] = []
     prepared = await prepare_chat_message(
         session_id=session_id,
         payload=payload,
@@ -249,24 +338,117 @@ async def handle_chat_message(
         retrieve_scope_evidence_fn=retrieve_scope_evidence_fn,
         fetch_corpus_documents_fn=fetch_corpus_documents_fn,
     )
-    generation_started = time.perf_counter()
-    answer_payload = await generate_grounded_answer(
-        question=prepared["contextualized_question"],
-        history=prepared["history"],
-        evidence=prepared["evidence"],
-        answer_mode=prepared["answer_mode"],
-        safety=prepared["safety"],
-    )
-    generation_ms = round((time.perf_counter() - generation_started) * 1000.0, 3)
-    response_payload = build_chat_response_payload(
-        prepared=prepared,
-        answer_payload=answer_payload,
-        generation_ms=generation_ms,
-    )
-    return finalize_chat_message(
-        prepared=prepared,
-        request=request,
+    workflow_run = start_workflow_run_fn(
+        session_id=session_id,
         user=user,
-        response_payload=response_payload,
-        persist_chat_turn_fn=persist_chat_turn_fn,
+        execution_mode=prepared["execution_mode"],
+        workflow_kind=workflow_kind_for_turn(
+            execution_mode=prepared["execution_mode"],
+            answer_mode=prepared["answer_mode"],
+        ),
+        question=prepared["payload"].question,
+        trace_id=prepared["trace_id"],
+        scope_snapshot=prepared["scope_snapshot"],
+        workflow_state=build_chat_workflow_state(
+            prepared=prepared,
+            stage="retrieval_completed",
+        ),
+        workflow_events=[build_workflow_event(prepared=prepared, stage="retrieval_completed", status="running")],
+        tool_calls=_workflow_tool_calls(prepared),
     )
+    workflow_events = list(workflow_run.get("workflow_events") or [build_workflow_event(prepared=prepared, stage="retrieval_completed", status="running")])
+    generation_started = time.perf_counter()
+    try:
+        answer_payload = await generate_grounded_answer(
+            question=prepared["contextualized_question"],
+            history=prepared["history"],
+            evidence=prepared["evidence"],
+            answer_mode=prepared["answer_mode"],
+            safety=prepared["safety"],
+        )
+        generation_ms = round((time.perf_counter() - generation_started) * 1000.0, 3)
+        response_payload = build_chat_response_payload(
+            prepared=prepared,
+            answer_payload=answer_payload,
+            generation_ms=generation_ms,
+        )
+        update_workflow_run_fn(
+            run_id=str(workflow_run.get("id") or ""),
+            user=user,
+            status="running",
+            workflow_state=build_chat_workflow_state(
+                prepared=prepared,
+                stage="generation_completed",
+                response_payload=response_payload,
+            ),
+            workflow_events=workflow_events + [
+                build_workflow_event(
+                    prepared=prepared,
+                    stage="generation_completed",
+                    status="running",
+                    response_payload=response_payload,
+                )
+            ],
+            tool_calls=_workflow_tool_calls(prepared),
+        )
+        workflow_events = workflow_events + [
+            build_workflow_event(
+                prepared=prepared,
+                stage="generation_completed",
+                status="running",
+                response_payload=response_payload,
+            )
+        ]
+        result = finalize_chat_message(
+            prepared=prepared,
+            request=request,
+            user=user,
+            response_payload=response_payload,
+            persist_chat_turn_fn=persist_chat_turn_fn,
+        )
+        persisted_message = dict(result.get("message") or {})
+        workflow_run = update_workflow_run_fn(
+            run_id=str(workflow_run.get("id") or ""),
+            user=user,
+            status="completed",
+            workflow_state=build_chat_workflow_state(
+                prepared=prepared,
+                stage="persisted",
+                response_payload=result,
+                message_id=str(persisted_message.get("id") or ""),
+            ),
+            workflow_events=workflow_events + [
+                build_workflow_event(
+                    prepared=prepared,
+                    stage="persisted",
+                    status="completed",
+                    response_payload=result,
+                )
+            ],
+            tool_calls=_workflow_tool_calls(prepared),
+            message_id=str(persisted_message.get("id") or ""),
+        )
+        result["workflow_run"] = workflow_run
+        return result
+    except Exception as exc:
+        if workflow_run is not None:
+            update_workflow_run_fn(
+                run_id=str(workflow_run.get("id") or ""),
+                user=user,
+                status="failed",
+                workflow_state=build_chat_workflow_state(
+                    prepared=prepared,
+                    stage="failed",
+                    error=exc,
+                ),
+                workflow_events=workflow_events + [
+                    build_workflow_event(
+                        prepared=prepared,
+                        stage="failed",
+                        status="failed",
+                        error=exc,
+                    )
+                ],
+                tool_calls=_workflow_tool_calls(prepared),
+            )
+        raise

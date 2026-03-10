@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -64,6 +64,45 @@ def _parse_extra_body(raw: str) -> dict[str, Any]:
             detail="LLM_EXTRA_BODY_JSON 必须为 JSON 对象",
         )
     return payload
+
+
+def _parse_model_routing(raw: str) -> dict[str, dict[str, Any]]:
+    if not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="LLM_MODEL_ROUTING_JSON 涓嶆槸鏈夋晥鐨?JSON",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="LLM_MODEL_ROUTING_JSON 蹇呴』涓?JSON 瀵硅薄",
+        )
+    routes: dict[str, dict[str, Any]] = {}
+    for route_key, raw_definition in payload.items():
+        if not isinstance(route_key, str) or not isinstance(raw_definition, dict):
+            continue
+        cleaned: dict[str, Any] = {}
+        for key in ("provider", "base_url", "api_key", "model"):
+            value = raw_definition.get(key)
+            if isinstance(value, str) and value.strip():
+                cleaned[key] = value.strip()
+        for key in ("temperature", "timeout_seconds"):
+            value = raw_definition.get(key)
+            if isinstance(value, (int, float)):
+                cleaned[key] = float(value)
+        value = raw_definition.get("max_tokens")
+        if isinstance(value, (int, float)):
+            cleaned["max_tokens"] = max(int(value), 1)
+        extra_body = raw_definition.get("extra_body")
+        if isinstance(extra_body, dict):
+            cleaned["extra_body"] = extra_body
+        if cleaned:
+            routes[route_key.strip()] = cleaned
+    return routes
 
 
 def _extract_text_content(content: Any) -> str:
@@ -131,6 +170,7 @@ class LLMSettings:
     common_knowledge_history_chars: int
     system_prompt: str
     extra_body: dict[str, Any]
+    model_routing: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def configured(self) -> bool:
@@ -163,6 +203,7 @@ def load_llm_settings() -> LLMSettings:
         common_knowledge_history_chars=max(_read_int("LLM_COMMON_KNOWLEDGE_HISTORY_CHARS", default=400), 80),
         system_prompt=_read_env("LLM_SYSTEM_PROMPT", "AI_SYSTEM_PROMPT"),
         extra_body=_parse_extra_body(_read_env("LLM_EXTRA_BODY_JSON", "AI_EXTRA_BODY_JSON", default="{}")),
+        model_routing=_parse_model_routing(_read_env("LLM_MODEL_ROUTING_JSON", "AI_MODEL_ROUTING_JSON", default="{}")),
     )
 
 

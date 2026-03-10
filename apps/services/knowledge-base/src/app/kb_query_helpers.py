@@ -4,7 +4,6 @@ from typing import Any
 
 from fastapi import HTTPException
 from shared.grounded_answering import (
-    build_grounded_prompt,
     classify_evidence,
     dicts_to_langchain_messages,
     ensure_citation_markers,
@@ -13,6 +12,8 @@ from shared.grounded_answering import (
 )
 from shared.langchain_chat import invoke_prompt_chain, stream_prompt_chain
 from shared.llm_settings import load_llm_settings
+from shared.model_routing import settings_with_model_route
+from shared.prompt_registry import get_prompt_definition
 from shared.prompt_safety import (
     analyze_prompt_safety,
     apply_safety_response_policy,
@@ -96,11 +97,18 @@ async def _generate_query_answer(*, prepared: dict[str, Any]) -> str:
     if prepared["answer_mode"] == "refusal":
         return fallback_answer(prepared["question"], prepared["citations"], "refusal")
     settings = load_llm_settings()
-    if not settings.configured:
+    prompt_definition = get_prompt_definition("kb_grounded_answer")
+    routed_settings, route = settings_with_model_route(
+        settings,
+        prompt_definition.route_key,
+        default_temperature=0.2,
+        default_max_tokens=min(settings.default_max_tokens, 1200),
+    )
+    if not routed_settings.configured:
         return fallback_answer(prepared["question"], prepared["citations"], prepared["answer_mode"])
-    prompt = build_grounded_prompt()
+    prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
         "history": dicts_to_langchain_messages([]),
         "question": prepared["question"].strip(),
         "answer_mode": prepared["answer_mode"],
@@ -108,11 +116,15 @@ async def _generate_query_answer(*, prepared: dict[str, Any]) -> str:
     }
     try:
         completion = await invoke_prompt_chain(
-            settings=settings,
+            settings=routed_settings,
             prompt=prompt,
             inputs=inputs,
-            temperature=0.2,
-            max_tokens=min(settings.default_max_tokens, 1200),
+            prompt_key=prompt_definition.key,
+            prompt_version=prompt_definition.version,
+            route_key=route.route_key,
+            model=route["model"],
+            temperature=route["temperature"],
+            max_tokens=route["max_tokens"],
         )
         return ensure_citation_markers(str(completion["answer"]), prepared["citations"])
     except HTTPException:
@@ -139,13 +151,20 @@ async def _stream_query_answer(*, prepared: dict[str, Any], on_answer: Any) -> s
         await emit_answer(answer)
         return answer
     settings = load_llm_settings()
-    if not settings.configured:
+    prompt_definition = get_prompt_definition("kb_grounded_answer")
+    routed_settings, route = settings_with_model_route(
+        settings,
+        prompt_definition.route_key,
+        default_temperature=0.2,
+        default_max_tokens=min(settings.default_max_tokens, 1200),
+    )
+    if not routed_settings.configured:
         answer = fallback_answer(prepared["question"], prepared["citations"], prepared["answer_mode"])
         await emit_answer(answer)
         return answer
-    prompt = build_grounded_prompt()
+    prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
         "history": dicts_to_langchain_messages([]),
         "question": prepared["question"].strip(),
         "answer_mode": prepared["answer_mode"],
@@ -153,12 +172,16 @@ async def _stream_query_answer(*, prepared: dict[str, Any], on_answer: Any) -> s
     }
     try:
         completion = await stream_prompt_chain(
-            settings=settings,
+            settings=routed_settings,
             prompt=prompt,
             inputs=inputs,
             on_text_delta=lambda _delta, answer_text: emit_answer(answer_text),
-            temperature=0.2,
-            max_tokens=min(settings.default_max_tokens, 1200),
+            prompt_key=prompt_definition.key,
+            prompt_version=prompt_definition.version,
+            route_key=route.route_key,
+            model=route["model"],
+            temperature=route["temperature"],
+            max_tokens=route["max_tokens"],
         )
         finalized_answer = ensure_citation_markers(str(completion["answer"]), prepared["citations"])
         if finalized_answer != str(completion["answer"]):

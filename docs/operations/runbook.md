@@ -80,8 +80,9 @@ python scripts/dev/reindex-qdrant.py
 先确认：
 
 - `.env` 中 `ADMIN_EMAIL`、`ADMIN_PASSWORD` 正确
-- `http://localhost:8080/healthz` 可达
-- `http://localhost:8300/healthz` 可达
+- `http://localhost:8080/readyz` 可达并返回 `200`
+- `http://localhost:8300/readyz` 可达并返回 `200`
+- 如在 CI 或容器网络里跑 smoke，可优先使用 `python scripts/dev/smoke_eval.py --wait-for-ready`
 
 再看：
 
@@ -89,6 +90,17 @@ python scripts/dev/reindex-qdrant.py
 - `artifacts/reports/agent_smoke_report.md`
 - `gateway` 日志
 - `kb-service` / `kb-worker` 日志
+
+重点关注报告里的以下字段：
+
+- `suite_version`
+- `dataset_version`
+- `execution_modes`
+- `prompt_versions`
+- `model_versions`
+- `correctness`
+- `faithfulness`
+- `citation_alignment`
 
 ## 6. 常用验证命令
 
@@ -100,3 +112,49 @@ python -m pytest tests -q
 docker compose config --quiet
 docker compose ps
 ```
+
+## 7. AI 平台扩展点排障
+
+### 7.1 Prompt Registry / Model Routing
+
+如果回答链路使用了错误的 prompt 版本或错误模型，优先检查：
+
+- `PROMPT_REGISTRY_JSON` / `PROMPT_REGISTRY_PATH`
+- `LLM_MODEL_ROUTING_JSON`
+- 响应中的 `llm_trace.prompt_key`
+- 响应中的 `llm_trace.prompt_version`
+- 响应中的 `llm_trace.route_key`
+
+说明：
+
+- `route_key` 为空，说明当前请求走的是默认模型配置
+- `prompt_version` 不符合预期，优先排查 prompt registry 覆盖是否生效
+- `model_resolved` 不符合预期，优先排查 model routing 与上游 provider 的模型别名
+
+### 7.2 Cross-Encoder Rerank
+
+当 FTS / vector 命中正常，但最终排序异常时，检查：
+
+- `retrieval.rerank_provider`
+- `RERANK_PROVIDER`
+- `RERANK_API_BASE_URL`
+- `RERANK_MODEL`
+
+说明：
+
+- `rerank_provider=heuristic` 表示当前没有启用外部 rerank，或外部 rerank 失败后已自动回退
+- 如果预期使用 cross-encoder，但结果始终是 `heuristic`，优先检查 `/rerank` provider 的网络连通性和返回结构
+
+### 7.3 Layout-Aware Visual Retrieval
+
+当图片或扫描件已经 OCR，但 region 级命中始终不出现时，检查：
+
+- 外部视觉 provider 是否返回了 `layout_hints`
+- 外部视觉 provider 是否返回了 `regions`
+- ingest 后文档统计里是否出现 `visual_layout_section_count`
+- citation 的 `source_kind` 是否出现 `visual_region`
+
+说明：
+
+- 仅本地 OCR 时，系统仍可工作，但通常只会产生 `visual_ocr`
+- 要获得表格/区域级检索，需要外部视觉 provider 返回结构化 region 信息

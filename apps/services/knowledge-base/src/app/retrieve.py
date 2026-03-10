@@ -289,6 +289,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         limit=int(state["limit"]),
     )
     debug_by_unit = {item.unit_id: item.score for item in rerank_debug}
+    rerank_provider = rerank_debug[0].provider if rerank_debug else ("heuristic" if rerank_pool else "")
 
     evidence: list[EvidenceBlock] = []
     for final_rank, block in enumerate(reranked_blocks, start=1):
@@ -341,6 +342,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         selected_candidates=len(evidence),
         retrieval_ms=round((time.perf_counter() - float(state["started"])) * 1000.0, 3),
         rerank_applied=bool(rerank_pool),
+        rerank_provider=rerank_provider,
     )
     return RetrievalResult(items=evidence, stats=stats)
 
@@ -434,7 +436,7 @@ def _merge_documents(
             corpus_id=str(metadata.get("base_id") or (existing.corpus_id if existing else "")),
             corpus_type="kb",
             service_type="kb",
-            evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "") == "visual_ocr" else "text",
+            evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "").startswith("visual") else "text",
             source_kind=str(metadata.get("source_kind") or "text"),
             page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
             asset_id=str(metadata.get("asset_id") or ""),

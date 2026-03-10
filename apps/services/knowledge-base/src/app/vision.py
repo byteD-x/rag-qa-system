@@ -8,7 +8,7 @@ import os
 import subprocess
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -117,6 +117,8 @@ class VisualOcrResult:
     summary: str
     confidence: float | None = None
     error_message: str = ""
+    layout_hints: list[str] = field(default_factory=list)
+    regions: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def ocr_text(self) -> str:
@@ -319,6 +321,8 @@ def _describe_with_local_ocr(image_bytes: bytes, mime_type: str, settings: Visio
         text=cleaned,
         summary=_summarize_text(cleaned, 220),
         confidence=None,
+        layout_hints=[],
+        regions=[],
     )
 
 
@@ -330,12 +334,16 @@ def _describe_with_external_ocr(image_bytes: bytes, mime_type: str, settings: Vi
     summary = str(payload.get("summary") or "").strip() or _summarize_text(cleaned, 220)
     confidence_raw = payload.get("confidence")
     confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else None
+    layout_hints = _normalize_layout_hints(payload.get("layout_hints"))
+    regions = _normalize_regions(payload.get("regions"))
     return VisualOcrResult(
         status="ready",
         provider="external",
         text=cleaned,
         summary=summary,
         confidence=confidence,
+        layout_hints=layout_hints,
+        regions=regions,
     )
 
 
@@ -374,14 +382,24 @@ def _run_external_ocr(image_bytes: bytes, mime_type: str, settings: VisionSettin
         "messages": [
             {
                 "role": "system",
-                "content": "You extract readable text from enterprise document screenshots. Respond with strict JSON: {\"ocr_text\":\"...\",\"summary\":\"...\",\"confidence\":0.0}.",
+                "content": (
+                    "You extract readable text and layout structure from enterprise document screenshots. "
+                    "Respond with strict JSON: "
+                    "{\"ocr_text\":\"...\",\"summary\":\"...\",\"confidence\":0.0,"
+                    "\"layout_hints\":[\"table\",\"header\"],"
+                    "\"regions\":[{\"label\":\"table total\",\"text\":\"...\",\"bbox\":[0,0,1,1]}]}."
+                ),
             },
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": "Extract the screenshot text faithfully. Keep important table rows and labels. Return JSON only.",
+                        "text": (
+                            "Extract the screenshot text faithfully. "
+                            "Keep important table rows, labels, headers, footers, and visually distinct regions. "
+                            "Return JSON only."
+                        ),
                     },
                     {
                         "type": "image_url",
@@ -444,6 +462,40 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {"ocr_text": cleaned, "summary": _summarize_text(cleaned, 220)}
     return payload if isinstance(payload, dict) else {"ocr_text": cleaned, "summary": _summarize_text(cleaned, 220)}
+
+
+def _normalize_layout_hints(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    hints: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in hints:
+            hints.append(text)
+    return hints[:8]
+
+
+def _normalize_regions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    regions: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        text = _clean_ocr_text(str(item.get("text") or ""))
+        if not text:
+            continue
+        label = str(item.get("label") or "region").strip() or "region"
+        bbox = item.get("bbox")
+        normalized_bbox = bbox if isinstance(bbox, list) else []
+        regions.append(
+            {
+                "label": label[:80],
+                "text": text,
+                "bbox": normalized_bbox[:4] if normalized_bbox else [],
+            }
+        )
+    return regions[:16]
 
 
 def _clean_ocr_text(text: str) -> str:

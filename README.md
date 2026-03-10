@@ -287,6 +287,11 @@ curl -X POST http://localhost:8300/api/v1/kb/query \
 - `POST /api/v1/chat/sessions`
 - `POST /api/v1/chat/sessions/{id}/messages`
 - `POST /api/v1/chat/sessions/{id}/messages/stream`
+- `GET /api/v1/chat/sessions/{id}/workflow-runs`
+- `GET /api/v1/chat/workflow-runs/{run_id}`
+- `POST /api/v1/chat/workflow-runs/{run_id}/retry`
+
+`POST /api/v1/chat/workflow-runs/{run_id}/retry` 也支持可选 `Idempotency-Key`，用于避免客户端重放时重复创建聊天消息。
 
 ### 审计与系统接口
 
@@ -352,12 +357,35 @@ python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.js
 python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
 ```
 
+统一评测报告还会额外输出以下治理字段：
+
+- `dataset_version`
+- `prompt_version`
+- `model_version`
+- `execution_mode`
+- `correctness`
+- `faithfulness`
+- `citation_alignment`
+
+其中后三项属于可解释启发式指标，适合做回放、对比和 CI 早筛，不应直接表述为严格人工标注分数。
+
+## AI 平台扩展点
+
+当前仓库的 AI 应用后端已经补齐以下扩展接缝：
+
+- `prompt registry`：按 `prompt_key / prompt_version / route_key` 管理 grounded、common knowledge 和 KB answer prompt
+- `model routing`：按 `grounded / common_knowledge / agent` 路由不同模型、温度、token 上限和 provider
+- `cross-encoder rerank`：支持外部 `/rerank` provider，并在失败时回退到本地 heuristic rerank
+- `layout-aware visual retrieval`：视觉 OCR 除整图文本外，还支持外部 VLM 返回 `layout_hints` 与 `regions`，写入 `visual_region` 检索单元
+
 ## 文档索引
 
 - [API 规范](docs/reference/api-specification.md)
 - [开发脚本](docs/development/dev-scripts.md)
 - [运维手册](docs/operations/runbook.md)
+- [AI 平台治理与扩展点](docs/backend/ai-platform-governance.md)
 - [后端工程深入](docs/backend/engineering-deep-dive.md)
+- [LangChain 集成度与 AI 应用差距评估](docs/backend/langchain-readiness-gap-assessment-2026-03.md)
 - [贡献指南](CONTRIBUTING.md)
 - [安全政策](SECURITY.md)
 

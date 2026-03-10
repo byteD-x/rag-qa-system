@@ -25,14 +25,20 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
     lines = [
         "# Unified Eval Suite Report",
         "",
-        "| job | total | accuracy | mrr | ndcg@5 | recall@3 | p95 latency (ms) | refusal precision | refusal recall |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"- Suite version: `{report.get('suite_version') or 'unspecified'}`",
+        "",
+        "| job | dataset version | execution modes | prompt versions | model versions | accuracy | correctness | faithfulness | citation alignment | p95 latency (ms) | refusal precision | refusal recall |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in report["jobs"]:
         overall = item["report"]["summary"]["overall"]
         lines.append(
-            f"| {item['name']} | {overall['total']} | {overall['accuracy']:.4f} | {overall['mrr']:.4f} | "
-            f"{overall['ndcg_at_5']:.4f} | {overall['recall_at_3']:.4f} | {overall['latency']['p95_ms']:.2f} | "
+            f"| {item['name']} | {item['report'].get('dataset_version') or 'unspecified'} | "
+            f"{', '.join(overall.get('execution_modes') or []) or 'n/a'} | "
+            f"{', '.join(overall.get('prompt_versions') or []) or 'n/a'} | "
+            f"{', '.join(overall.get('model_versions') or []) or 'n/a'} | "
+            f"{overall['accuracy']:.4f} | {overall['correctness']:.4f} | {overall['faithfulness']:.4f} | "
+            f"{overall['citation_alignment']:.4f} | {overall['latency']['p95_ms']:.2f} | "
             f"{overall['refusal']['precision']:.4f} | {overall['refusal']['recall']:.4f} |"
         )
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -50,6 +56,7 @@ def main() -> int:
 
     module = load_eval_module()
     config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    suite_version = str(config.get("suite_version") or "")
     jobs = config.get("jobs", [])
     if not isinstance(jobs, list) or not jobs:
         raise RuntimeError("suite config must provide a non-empty jobs array")
@@ -65,11 +72,13 @@ def main() -> int:
             corpus_ids=list(job.get("corpus_ids", [])),
             document_ids=list(job.get("document_ids", [])),
             execution_mode=str(job.get("execution_mode", "grounded")),
+            dataset_version=str(job.get("dataset_version") or config.get("dataset_version") or ""),
         )
         results.append({"name": str(job.get("name") or Path(str(job["eval_file"])).stem), "report": report})
 
     output = {
         "config": str(Path(args.config).resolve()),
+        "suite_version": suite_version,
         "jobs": results,
     }
     output_path = Path(args.output)

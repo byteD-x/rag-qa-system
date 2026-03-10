@@ -76,6 +76,13 @@ def test_query_embedding_cache_reuses_previous_result(monkeypatch) -> None:
     assert calls["count"] == 1
 
 
+def test_gateway_to_json_preserves_empty_list() -> None:
+    gateway_db = _load_gateway_module("app.db")
+
+    assert gateway_db.to_json([]) == "[]"
+    assert gateway_db.to_json(None) == "{}"
+
+
 def _prioritize_sys_path(path: Path) -> None:
     target = str(path)
     try:
@@ -88,7 +95,7 @@ def _prioritize_sys_path(path: Path) -> None:
 def _load_gateway_main(monkeypatch):
     _prioritize_sys_path(GATEWAY_SRC)
 
-    for name in ("app.main", "app.ai_client", "app.db", "app"):
+    for name in ("app.main", "app.ai_client", "app.db", "app.gateway_chat_routes", "app.gateway_chat_service", "app.gateway_workflows", "app"):
         sys.modules.pop(name, None)
 
     module = importlib.import_module("app.main")
@@ -105,6 +112,7 @@ def _load_gateway_module(module_name: str):
         "app.gateway_answering",
         "app.gateway_chat_routes",
         "app.gateway_chat_service",
+        "app.gateway_workflows",
         "app.gateway_scope",
         "app.ai_client",
         "app.db",
@@ -330,10 +338,12 @@ def test_generate_grounded_answer_uses_general_llm_path_for_common_knowledge(mon
         common_knowledge_history_messages = 1
         common_knowledge_history_chars = 24
 
-    async def fake_create_llm_completion(*, settings, prompt, inputs, model, temperature, max_tokens):
+    async def fake_create_llm_completion(*, settings, prompt, inputs, prompt_key=None, prompt_version=None, model, temperature, max_tokens):
         captured["settings"] = settings
         captured["prompt"] = prompt
         captured["inputs"] = inputs
+        captured["prompt_key"] = prompt_key
+        captured["prompt_version"] = prompt_version
         captured["model"] = model
         captured["temperature"] = temperature
         captured["max_tokens"] = max_tokens
@@ -342,6 +352,7 @@ def test_generate_grounded_answer_uses_general_llm_path_for_common_knowledge(mon
             "provider": "mock-provider",
             "model": "mock-model",
             "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            "llm_trace": {"llm_call_id": "llm-1", "prompt_key": "chat_common_knowledge", "prompt_version": "2026-03-10"},
         }
 
     monkeypatch.setattr(gateway_answering, "load_llm_settings", lambda: _Settings())
@@ -368,12 +379,15 @@ def test_generate_grounded_answer_uses_general_llm_path_for_common_knowledge(mon
     assert any("This assistant reply is" in item for item in rendered)
     assert not any("history truncation limit" in item for item in rendered)
     assert captured["model"] == "mock-common-model"
+    assert captured["prompt_key"] == "chat_common_knowledge"
+    assert captured["prompt_version"] == "2026-03-10"
     assert captured["temperature"] == 0.4
     assert captured["max_tokens"] == 256
     assert result["provider"] == "mock-provider"
     assert result["model"] == "mock-model"
     assert gateway_answering.COMMON_KNOWLEDGE_DISCLAIMER in result["answer"]
     assert "nuclear fusion" in result["answer"]
+    assert result["llm_trace"]["prompt_key"] == "chat_common_knowledge"
 
 
 def test_generate_grounded_answer_short_ambiguous_common_knowledge_skips_llm(monkeypatch) -> None:
@@ -407,6 +421,7 @@ def test_generate_grounded_answer_short_ambiguous_common_knowledge_skips_llm(mon
     assert result["provider"] == ""
     assert result["model"] == ""
     assert result["usage"] == {}
+    assert result["llm_trace"] == {}
     assert "信息不足" in result["answer"]
 
 
@@ -547,6 +562,313 @@ def test_prepare_chat_message_uses_agent_execution_mode(monkeypatch) -> None:
     assert captured["scope_snapshot"]["execution_mode"] == "agent"
 
 
+def test_handle_chat_message_persists_workflow_run(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    workflow_updates: list[dict[str, object]] = []
+
+    async def fake_prepare_chat_message(**kwargs):
+        return {
+            "session_id": "session-1",
+            "payload": SimpleNamespace(question="What is the expense approval flow?"),
+            "trace_id": "gateway-trace-1",
+            "scope_snapshot": {"mode": "single", "execution_mode": "agent"},
+            "execution_mode": "agent",
+            "history": [],
+            "evidence": [{"unit_id": "chunk-1"}],
+            "contextualized_question": "expense approval flow",
+            "retrieval_meta": {
+                "aggregate": {"selected_candidates": 1, "partial_failure": False},
+                "agent": {"tool_calls": [{"tool": "search_scope", "result_count": 1}]},
+            },
+            "answer_mode": "grounded",
+            "evidence_status": "grounded",
+            "grounding_score": 0.91,
+            "refusal_reason": "",
+            "safety": {"risk_level": "low", "reason_codes": []},
+            "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0},
+        }
+
+    async def fake_generate_grounded_answer(**kwargs):
+        return {"answer": "Use [1]", "provider": "mock", "model": "mock-model", "usage": {"prompt_tokens": 10}}
+
+    def fake_build_chat_response_payload(**kwargs):
+        return {
+            "answer": "Use [1]",
+            "answer_mode": "grounded",
+            "strategy_used": "agent_grounded_qa",
+            "citations": [{"unit_id": "chunk-1"}],
+            "provider": "mock",
+            "model": "mock-model",
+            "usage": {"prompt_tokens": 10},
+            "llm_trace": {"llm_call_id": "llm-1", "prompt_key": "chat_grounded_answer", "prompt_version": "2026-03-10"},
+            "latency": {"total_ms": 12.0},
+            "cost": {"estimated_cost": 0.01},
+        }
+
+    def fake_finalize_chat_message(**kwargs):
+        response_payload = dict(kwargs["response_payload"])
+        response_payload["message"] = {"id": "message-1", "content": "Use [1]"}
+        return response_payload
+
+    def fake_start_workflow_run_fn(**kwargs):
+        return {"id": "run-1", "status": "running", "stage": "retrieval_completed"}
+
+    def fake_update_workflow_run_fn(**kwargs):
+        workflow_updates.append(dict(kwargs))
+        state = dict(kwargs["workflow_state"])
+        return {
+            "id": kwargs["run_id"],
+            "status": kwargs["status"],
+            "stage": state.get("stage", ""),
+            "message_id": kwargs.get("message_id", ""),
+            "workflow_state": state,
+            "workflow_events": list(kwargs.get("workflow_events") or []),
+            "tool_calls": list(kwargs.get("tool_calls") or []),
+        }
+
+    monkeypatch.setattr(gateway_chat_service, "prepare_chat_message", fake_prepare_chat_message)
+    monkeypatch.setattr(gateway_chat_service, "generate_grounded_answer", fake_generate_grounded_answer)
+    monkeypatch.setattr(gateway_chat_service, "build_chat_response_payload", fake_build_chat_response_payload)
+    monkeypatch.setattr(gateway_chat_service, "finalize_chat_message", fake_finalize_chat_message)
+
+    result = asyncio.run(
+        gateway_chat_service.handle_chat_message(
+            session_id="session-1",
+            payload=SimpleNamespace(question="What is the expense approval flow?"),
+            request=SimpleNamespace(),
+            user=user,
+            load_session_fn=lambda *args, **kwargs: {},
+            default_scope_fn=lambda: {"mode": "all"},
+            resolve_scope_snapshot_fn=lambda *args, **kwargs: {},
+            recent_history_messages_fn=lambda *args, **kwargs: [],
+            retrieve_scope_evidence_fn=lambda *args, **kwargs: None,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+            persist_chat_turn_fn=lambda *args, **kwargs: {},
+            start_workflow_run_fn=fake_start_workflow_run_fn,
+            update_workflow_run_fn=fake_update_workflow_run_fn,
+        )
+    )
+
+    assert result["workflow_run"]["status"] == "completed"
+    assert result["workflow_run"]["message_id"] == "message-1"
+    assert workflow_updates[0]["status"] == "running"
+    assert workflow_updates[0]["workflow_state"]["stage"] == "generation_completed"
+    assert workflow_updates[0]["workflow_state"]["response"]["llm_trace"]["prompt_key"] == "chat_grounded_answer"
+    assert workflow_updates[1]["status"] == "completed"
+    assert workflow_updates[1]["message_id"] == "message-1"
+    assert workflow_updates[1]["workflow_events"][-1]["stage"] == "persisted"
+    assert workflow_updates[1]["tool_calls"] == [{"tool": "search_scope", "result_count": 1}]
+
+
+def test_retry_chat_workflow_run_uses_idempotency_and_audit(monkeypatch) -> None:
+    gateway_chat_routes = _load_gateway_module("app.gateway_chat_routes")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    captured: dict[str, object] = {}
+    audit_events: list[dict[str, object]] = []
+    released_tickets: list[object] = []
+
+    async def fake_handle_chat_message(**kwargs):
+        return {
+            "message": {"id": "message-2"},
+            "workflow_run": {"id": "run-2"},
+            "answer": "Use [1]",
+        }
+
+    monkeypatch.setattr(gateway_chat_routes, "require_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "load_workflow_run_for_user",
+        lambda run_id, current_user: {
+            "id": run_id,
+            "session_id": "session-1",
+            "status": "failed",
+            "question": "What is the expense approval flow?",
+            "execution_mode": "agent",
+            "scope_snapshot": {
+                "mode": "single",
+                "corpus_ids": ["kb:base-1"],
+                "document_ids": [],
+                "allow_common_knowledge": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "load_session_for_user",
+        lambda session_id, current_user, default_scope_fn=None: {"id": session_id, "scope_json": {"execution_mode": "agent"}},
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "begin_gateway_idempotency",
+        lambda request, current_user, request_scope, payload: (
+            captured.update({"request_scope": request_scope, "payload": payload}) or SimpleNamespace(
+                key="retry-key",
+                request_scope=request_scope,
+                request_hash="hash",
+                replay_payload=None,
+                enabled=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "handle_chat_message",
+        fake_handle_chat_message,
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "complete_gateway_idempotency",
+        lambda state, current_user, response_payload, resource_id="": captured.update(
+            {"completed_resource_id": resource_id, "completed_payload": response_payload}
+        ),
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "fail_gateway_idempotency",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("retry should not mark idempotency as failed")),
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes,
+        "write_gateway_audit_event",
+        lambda **kwargs: audit_events.append(dict(kwargs)),
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes.CHAT_INFLIGHT_LIMITER,
+        "acquire",
+        lambda **kwargs: SimpleNamespace(allowed=True, ticket="ticket-1", scope=""),
+    )
+    monkeypatch.setattr(
+        gateway_chat_routes.CHAT_INFLIGHT_LIMITER,
+        "release",
+        lambda ticket: released_tickets.append(ticket),
+    )
+
+    result = asyncio.run(
+        gateway_chat_routes.retry_chat_workflow_run(
+            "run-1",
+            gateway_chat_routes.RetryWorkflowRunRequest(reuse_scope=True),
+            SimpleNamespace(headers={}),
+            user,
+        )
+    )
+
+    assert result["retried_from_run_id"] == "run-1"
+    assert captured["request_scope"] == "chat.workflow_run.retry"
+    assert captured["payload"] == {
+        "run_id": "run-1",
+        "session_id": "session-1",
+        "question": "What is the expense approval flow?",
+        "execution_mode": "agent",
+        "reuse_scope": True,
+        "scope": {
+            "mode": "single",
+            "corpus_ids": ["kb:base-1"],
+            "document_ids": [],
+            "allow_common_knowledge": False,
+        },
+    }
+    assert captured["completed_resource_id"] == "message-2"
+    assert released_tickets == ["ticket-1"]
+    assert audit_events[-1]["action"] == "chat.workflow_run.retry"
+    assert audit_events[-1]["outcome"] == "success"
+    assert audit_events[-1]["details"]["new_workflow_run_id"] == "run-2"
+
+
+def test_build_chat_workflow_state_includes_agent_events() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+
+    prepared = {
+        "execution_mode": "agent",
+        "answer_mode": "grounded",
+        "payload": SimpleNamespace(question="What is the expense approval flow?"),
+        "contextualized_question": "expense approval flow",
+        "scope_snapshot": {"mode": "single"},
+        "evidence": [{"unit_id": "chunk-1"}],
+        "retrieval_meta": {
+            "aggregate": {"selected_candidates": 1, "partial_failure": False},
+            "agent": {"events": [{"type": "tool_request", "tool": "search_scope"}]},
+        },
+        "safety": {"risk_level": "low"},
+        "timing": {"retrieval_ms": 4.0},
+    }
+
+    state = gateway_chat_service.build_chat_workflow_state(prepared=prepared, stage="retrieval_completed")
+
+    assert state["agent_events"] == [{"type": "tool_request", "tool": "search_scope"}]
+
+
+def test_handle_chat_message_marks_workflow_failed_on_generation_error(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    workflow_updates: list[dict[str, object]] = []
+
+    async def fake_prepare_chat_message(**kwargs):
+        return {
+            "session_id": "session-1",
+            "payload": SimpleNamespace(question="What is the expense approval flow?"),
+            "trace_id": "gateway-trace-1",
+            "scope_snapshot": {"mode": "single", "execution_mode": "agent"},
+            "execution_mode": "agent",
+            "history": [],
+            "evidence": [],
+            "contextualized_question": "expense approval flow",
+            "retrieval_meta": {"aggregate": {"selected_candidates": 0, "partial_failure": False}, "agent": {"tool_calls": []}},
+            "answer_mode": "refusal",
+            "evidence_status": "insufficient",
+            "grounding_score": 0.0,
+            "refusal_reason": "insufficient_evidence",
+            "safety": {"risk_level": "low", "reason_codes": []},
+            "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0},
+        }
+
+    async def fail_generate_grounded_answer(**kwargs):
+        raise RuntimeError("llm failed")
+
+    def fake_start_workflow_run_fn(**kwargs):
+        return {"id": "run-1", "status": "running", "stage": "retrieval_completed"}
+
+    def fake_update_workflow_run_fn(**kwargs):
+        workflow_updates.append(dict(kwargs))
+        return {
+            "id": kwargs["run_id"],
+            "status": kwargs["status"],
+            "stage": kwargs["workflow_state"].get("stage", ""),
+            "workflow_events": list(kwargs.get("workflow_events") or []),
+        }
+
+    monkeypatch.setattr(gateway_chat_service, "prepare_chat_message", fake_prepare_chat_message)
+    monkeypatch.setattr(gateway_chat_service, "generate_grounded_answer", fail_generate_grounded_answer)
+
+    try:
+        asyncio.run(
+            gateway_chat_service.handle_chat_message(
+                session_id="session-1",
+                payload=SimpleNamespace(question="What is the expense approval flow?"),
+                request=SimpleNamespace(),
+                user=user,
+                load_session_fn=lambda *args, **kwargs: {},
+                default_scope_fn=lambda: {"mode": "all"},
+                resolve_scope_snapshot_fn=lambda *args, **kwargs: {},
+                recent_history_messages_fn=lambda *args, **kwargs: [],
+                retrieve_scope_evidence_fn=lambda *args, **kwargs: None,
+                fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+                persist_chat_turn_fn=lambda *args, **kwargs: {},
+                start_workflow_run_fn=fake_start_workflow_run_fn,
+                update_workflow_run_fn=fake_update_workflow_run_fn,
+            )
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "llm failed"
+    else:
+        raise AssertionError("expected generation failure to propagate")
+
+    assert workflow_updates[-1]["status"] == "failed"
+    assert workflow_updates[-1]["workflow_state"]["stage"] == "failed"
+    assert workflow_updates[-1]["workflow_state"]["error"]["type"] == "RuntimeError"
+    assert workflow_updates[-1]["workflow_events"][-1]["status"] == "failed"
+
+
 def test_run_agent_search_degrades_to_grounded_when_tool_calling_fails(monkeypatch) -> None:
     gateway_agent = _load_gateway_module("app.gateway_agent")
     user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
@@ -596,7 +918,78 @@ def test_run_agent_search_degrades_to_grounded_when_tool_calling_fails(monkeypat
     assert contextualized_question == "expense approval flow"
     assert retrieval_meta["aggregate"]["execution_mode"] == "agent"
     assert retrieval_meta["aggregate"]["agent_fallback"] is True
+    assert retrieval_meta["aggregate"]["tool_budget"] == 3
     assert retrieval_meta["agent"]["fallback"] is True
+    assert retrieval_meta["agent"]["tool_budget"]["max_tool_calls"] == 3
+    assert retrieval_meta["agent"]["allowed_tools"] == ["search_scope", "list_scope_documents", "search_corpus"]
+    assert retrieval_meta["agent"]["tool_calls_used"] == 0
+
+
+def test_run_agent_search_records_agent_events(monkeypatch) -> None:
+    gateway_agent = _load_gateway_module("app.gateway_agent")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+
+    class _Settings:
+        configured = True
+        model = "mock-model"
+        default_max_tokens = 512
+
+    class _FakeModel:
+        def bind_tools(self, tools):
+            self._tools = tools
+            return self
+
+        async def ainvoke(self, messages):
+            if not any(isinstance(item, gateway_agent.ToolMessage) for item in messages):
+                return gateway_agent.AIMessage(
+                    content="Searching scope first.",
+                    tool_calls=[
+                        {
+                            "id": "call-1",
+                            "name": "search_scope",
+                            "args": {"search_question": "expense approval flow", "limit": 3},
+                        }
+                    ],
+                )
+            return gateway_agent.AIMessage(content="Enough evidence found.")
+
+    async def fake_retrieve_scope_evidence_fn(**kwargs):
+        return (
+            [{"unit_id": "chunk-1", "document_title": "Policy", "section_title": "Approval", "quote": "Need finance approval", "evidence_path": {"final_score": 0.91}}],
+            "expense approval flow",
+            {"aggregate": {"selected_candidates": 1}, "services": []},
+        )
+
+    monkeypatch.setattr(gateway_agent, "load_llm_settings", lambda: _Settings())
+    monkeypatch.setattr(gateway_agent, "build_chat_model", lambda **kwargs: _FakeModel())
+
+    evidence, _, retrieval_meta = asyncio.run(
+        gateway_agent.run_agent_search(
+            user=user,
+            scope_snapshot={
+                "mode": "single",
+                "corpus_ids": ["kb:base-1"],
+                "document_ids": [],
+                "documents_by_corpus": {},
+                "allow_common_knowledge": False,
+                "execution_mode": "agent",
+            },
+            question="What is the expense approval flow?",
+            history=[],
+            retrieve_scope_evidence_fn=fake_retrieve_scope_evidence_fn,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+            kb_service_url="http://kb-service:8200",
+        )
+    )
+
+    assert len(evidence) == 1
+    agent_events = retrieval_meta["agent"]["events"]
+    assert agent_events[0]["type"] == "agent_started"
+    assert any(event["type"] == "tool_request" and event["tool"] == "search_scope" for event in agent_events)
+    assert any(event["type"] == "tool_result" and event["tool"] == "search_scope" for event in agent_events)
+    assert retrieval_meta["aggregate"]["tool_calls_used"] == 1
+    assert retrieval_meta["agent"]["allowed_tools"] == ["search_scope", "list_scope_documents", "search_corpus"]
+    assert retrieval_meta["agent"]["tool_calls_used"] == 1
 
 
 def test_common_knowledge_answers_are_prefixed_with_disclaimer() -> None:

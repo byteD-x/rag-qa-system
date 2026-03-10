@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from typing import Any
+from uuid import uuid4
 
 from fastapi import HTTPException, status
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
@@ -8,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 from .llm_settings import LLMSettings
+from .tracing import current_trace_id, ensure_trace_id
 
 
 def build_chat_model(
@@ -81,16 +84,46 @@ def _ensure_llm_enabled(settings: LLMSettings) -> None:
         )
 
 
+def build_llm_trace(
+    *,
+    settings: LLMSettings,
+    prompt_key: str | None,
+    prompt_version: str | None,
+    model_requested: str | None,
+    model_resolved: str | None,
+    route_key: str | None,
+    streaming: bool,
+    started_at: float,
+) -> dict[str, Any]:
+    request_trace_id = ensure_trace_id(current_trace_id(), prefix="gateway-")
+    return {
+        "llm_call_id": f"llm-{uuid4().hex}",
+        "request_trace_id": request_trace_id,
+        "provider": settings.provider,
+        "model_requested": str(model_requested or settings.model),
+        "model_resolved": str(model_resolved or model_requested or settings.model),
+        "route_key": str(route_key or ""),
+        "prompt_key": str(prompt_key or ""),
+        "prompt_version": str(prompt_version or ""),
+        "streaming": streaming,
+        "duration_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+    }
+
+
 async def invoke_prompt_chain(
     *,
     settings: LLMSettings,
     prompt: ChatPromptTemplate,
     inputs: dict[str, Any],
+    prompt_key: str | None = None,
+    prompt_version: str | None = None,
+    route_key: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> dict[str, Any]:
     _ensure_llm_enabled(settings)
+    started_at = time.perf_counter()
     try:
         chat_model = build_chat_model(
             settings=settings,
@@ -121,6 +154,16 @@ async def invoke_prompt_chain(
         "provider": settings.provider,
         "finish_reason": str(response_metadata.get("finish_reason") or ""),
         "usage": _usage_payload(result),
+        "llm_trace": build_llm_trace(
+            settings=settings,
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+            model_requested=model,
+            model_resolved=str(response_metadata.get("model_name") or model or settings.model),
+            route_key=route_key,
+            streaming=False,
+            started_at=started_at,
+        ),
     }
 
 
@@ -130,11 +173,15 @@ async def stream_prompt_chain(
     prompt: ChatPromptTemplate,
     inputs: dict[str, Any],
     on_text_delta: Any,
+    prompt_key: str | None = None,
+    prompt_version: str | None = None,
+    route_key: str | None = None,
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> dict[str, Any]:
     _ensure_llm_enabled(settings)
+    started_at = time.perf_counter()
     answer_parts: list[str] = []
     usage: dict[str, Any] = {}
     finish_reason = ""
@@ -178,4 +225,14 @@ async def stream_prompt_chain(
         "provider": settings.provider,
         "finish_reason": finish_reason,
         "usage": usage,
+        "llm_trace": build_llm_trace(
+            settings=settings,
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+            model_requested=model,
+            model_resolved=resolved_model,
+            route_key=route_key,
+            streaming=True,
+            started_at=started_at,
+        ),
     }

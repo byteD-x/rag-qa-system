@@ -249,7 +249,7 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
         corpus_id=str(metadata.get("base_id") or ""),
         corpus_type="kb",
         service_type="kb",
-        evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "") == "visual_ocr" else "text",
+        evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "").startswith("visual") else "text",
         source_kind=str(metadata.get("source_kind") or "text"),
         page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
         asset_id=str(metadata.get("asset_id") or ""),

@@ -11,6 +11,7 @@ from langchain_core.tools import StructuredTool
 from shared.auth import CurrentUser
 from shared.grounded_answering import compact_text
 from shared.langchain_chat import build_chat_model, extract_message_text
+from shared.model_routing import settings_with_model_route
 
 from .ai_client import load_llm_settings
 from .gateway_answering import contextualize_question
@@ -21,6 +22,17 @@ from .gateway_transport import downstream_headers, parse_corpus_id, request_serv
 AGENT_MAX_TOOL_CALLS = 3
 AGENT_MAX_EVIDENCE = 8
 AGENT_MAX_DOCUMENTS = 20
+
+
+def _agent_runtime_contract(tools: list[StructuredTool]) -> dict[str, Any]:
+    return {
+        "tool_budget": {
+            "max_tool_calls": AGENT_MAX_TOOL_CALLS,
+            "max_evidence": AGENT_MAX_EVIDENCE,
+            "max_documents": AGENT_MAX_DOCUMENTS,
+        },
+        "allowed_tools": [tool.name for tool in tools],
+    }
 
 
 async def run_agent_search(
@@ -36,6 +48,12 @@ async def run_agent_search(
 ) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
     contextualized_question = contextualize_question(question, history)
     settings = load_llm_settings()
+    settings, _route = settings_with_model_route(
+        settings,
+        "agent",
+        default_temperature=0.1,
+        default_max_tokens=min(settings.default_max_tokens, 800),
+    )
     if not settings.configured:
         return await retrieve_scope_evidence_fn(
             user=user,
@@ -45,6 +63,7 @@ async def run_agent_search(
         )
 
     tool_events: list[dict[str, Any]] = []
+    agent_events: list[dict[str, Any]] = []
     evidence_by_unit: dict[str, dict[str, Any]] = {}
     services: list[dict[str, Any]] = []
     total_retrieval_ms = 0.0
@@ -69,6 +88,15 @@ async def run_agent_search(
                 "retrieval": retrieval_meta,
             }
         )
+        agent_events.append(
+            {
+                "type": "tool_result",
+                "tool": "search_scope",
+                "question": search_question,
+                "result_count": len(items),
+                "selected_candidates": int((retrieval_meta.get("aggregate") or {}).get("selected_candidates", len(items))),
+            }
+        )
         return {
             "result_count": len(items),
             "summary": _summarize_evidence(items),
@@ -87,6 +115,14 @@ async def run_agent_search(
                 documents.extend(docs[:AGENT_MAX_DOCUMENTS])
         tool_events.append(
             {
+                "tool": "list_scope_documents",
+                "corpus_id": corpus_id,
+                "result_count": len(documents),
+            }
+        )
+        agent_events.append(
+            {
+                "type": "tool_result",
                 "tool": "list_scope_documents",
                 "corpus_id": corpus_id,
                 "result_count": len(documents),
@@ -149,6 +185,16 @@ async def run_agent_search(
                 "retrieval": dict(payload.get("retrieval") or {}),
             }
         )
+        agent_events.append(
+            {
+                "type": "tool_result",
+                "tool": "search_corpus",
+                "corpus_id": corpus_id,
+                "question": search_question,
+                "result_count": len(items),
+                "selected_candidates": int((payload.get("retrieval") or {}).get("selected_candidates", len(items))),
+            }
+        )
         return {
             "result_count": len(items),
             "summary": _summarize_evidence(items),
@@ -172,13 +218,14 @@ async def run_agent_search(
             description="Search one corpus in the current scope, optionally restricted to a list of document_ids.",
         ),
     ]
+    agent_contract = _agent_runtime_contract(tools)
     tools_by_name = {tool.name: tool for tool in tools}
     try:
         chat_model = build_chat_model(
             settings=settings,
             model=settings.model,
-            temperature=0.1,
-            max_tokens=min(settings.default_max_tokens, 800),
+            temperature=settings.default_temperature,
+            max_tokens=settings.default_max_tokens,
             streaming=False,
         ).bind_tools(tools)
         messages: list[Any] = [
@@ -193,11 +240,27 @@ async def run_agent_search(
             ),
             HumanMessage(content=f"User question:\n{contextualized_question}"),
         ]
+        agent_events.append(
+            {
+                "type": "agent_started",
+                "question": question.strip(),
+                "contextualized_question": contextualized_question,
+                "scope_corpus_count": len(list(scope_snapshot.get("corpus_ids") or [])),
+            }
+        )
 
-        for _ in range(AGENT_MAX_TOOL_CALLS):
+        for round_index in range(AGENT_MAX_TOOL_CALLS):
             response = await chat_model.ainvoke(messages)
             messages.append(response)
             tool_calls = list(getattr(response, "tool_calls", []) or [])
+            agent_events.append(
+                {
+                    "type": "assistant_turn",
+                    "round": round_index + 1,
+                    "tool_call_count": len(tool_calls),
+                    "message_preview": compact_text(extract_message_text(response), 160),
+                }
+            )
             if not tool_calls:
                 break
             for tool_call in tool_calls:
@@ -206,6 +269,14 @@ async def run_agent_search(
                 if tool is None:
                     continue
                 tool_args = dict(tool_call.get("args") or {})
+                agent_events.append(
+                    {
+                        "type": "tool_request",
+                        "round": round_index + 1,
+                        "tool": tool_name,
+                        "args": tool_args,
+                    }
+                )
                 result = await tool.ainvoke(tool_args)
                 messages.append(
                     ToolMessage(
@@ -235,10 +306,15 @@ async def run_agent_search(
                 "contextualized_query": contextualized_question,
                 "retrieval_ms": round(total_retrieval_ms, 3),
                 "tool_call_count": len(tool_events),
+                "tool_calls_used": len(tool_events),
+                "tool_budget": AGENT_MAX_TOOL_CALLS,
                 "execution_mode": "agent",
             },
             "agent": {
+                **agent_contract,
+                "events": agent_events,
                 "tool_calls": tool_events,
+                "tool_calls_used": len(tool_events),
                 "final_message": final_ai_text,
             },
         }
@@ -256,9 +332,14 @@ async def run_agent_search(
         aggregate["execution_mode"] = "agent"
         aggregate["agent_fallback"] = True
         aggregate["agent_fallback_reason"] = exc.__class__.__name__
+        aggregate["tool_budget"] = AGENT_MAX_TOOL_CALLS
+        aggregate["tool_calls_used"] = len(tool_events)
         fallback_meta["aggregate"] = aggregate
         fallback_meta["agent"] = {
+            **agent_contract,
+            "events": agent_events,
             "tool_calls": tool_events,
+            "tool_calls_used": len(tool_events),
             "final_message": "",
             "fallback": True,
             "fallback_reason": exc.__class__.__name__,

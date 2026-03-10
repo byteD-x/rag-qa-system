@@ -14,6 +14,7 @@ from shared.inflight_limiter import InflightLimiter
 from shared.sse import encode_sse_event
 
 from .db import to_json
+from . import gateway_chat_service
 from .gateway_answering import stream_grounded_answer
 from .gateway_audit_support import require_permission, write_gateway_audit_event
 from .gateway_chat_service import (
@@ -25,13 +26,67 @@ from .gateway_chat_service import (
 from .gateway_idempotency import begin_gateway_idempotency, complete_gateway_idempotency, fail_gateway_idempotency
 from .gateway_retrieval import retrieve_scope_evidence
 from .gateway_runtime import CHAT_PERMISSION, GATEWAY_BACKPRESSURE_TOTAL, GATEWAY_CHAT_REQUESTS_TOTAL, gateway_db, runtime_settings
-from .gateway_schemas import CreateSessionRequest, SendMessageRequest, UpdateSessionRequest
+from .gateway_schemas import CreateSessionRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
 from .gateway_scope import default_scope, fetch_corpora, fetch_corpus_documents, normalize_execution_mode, resolve_scope_snapshot
 from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages
+from .gateway_workflows import create_workflow_run, list_session_workflow_runs, load_workflow_run_for_user, update_workflow_run
 
 
 router = APIRouter()
 CHAT_INFLIGHT_LIMITER = InflightLimiter("gateway_chat")
+
+
+def _stream_strategy_used(prepared: dict[str, Any]) -> str:
+    if prepared["execution_mode"] == "agent":
+        return "agent_grounded_qa"
+    if prepared["answer_mode"] == "common_knowledge":
+        return "common_knowledge_chat"
+    return "hybrid_grounded_qa"
+
+
+def _stream_metadata_payload(prepared: dict[str, Any], workflow_run: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "strategy_used": _stream_strategy_used(prepared),
+        "execution_mode": prepared["execution_mode"],
+        "answer_mode": prepared["answer_mode"],
+        "evidence_status": prepared["evidence_status"],
+        "grounding_score": prepared["grounding_score"],
+        "refusal_reason": prepared["refusal_reason"],
+        "safety": prepared["safety"],
+        "retrieval": prepared["retrieval_meta"],
+        "workflow_run": workflow_run or {},
+    }
+
+
+def _try_create_stream_workflow_run(
+    *,
+    session_id: str,
+    payload: SendMessageRequest,
+    user: CurrentUser,
+    prepared: dict[str, Any],
+) -> dict[str, Any] | None:
+    try:
+        return create_workflow_run(
+            session_id=session_id,
+            user=user,
+            execution_mode=prepared["execution_mode"],
+            workflow_kind=gateway_chat_service.workflow_kind_for_turn(
+                execution_mode=prepared["execution_mode"],
+                answer_mode=prepared["answer_mode"],
+            ),
+            question=str(getattr(prepared.get("payload"), "question", payload.question) or payload.question),
+            trace_id=prepared["trace_id"],
+            scope_snapshot=dict(prepared.get("scope_snapshot") or {}),
+            workflow_state=gateway_chat_service.build_chat_workflow_state(
+                prepared=prepared,
+                stage="retrieval_completed",
+            ),
+            workflow_events=[gateway_chat_service.build_workflow_event(prepared=prepared, stage="retrieval_completed", status="running")],
+            tool_calls=gateway_chat_service._workflow_tool_calls(prepared),
+        )
+    except Exception:
+        logger.warning("stream workflow tracking unavailable; continuing without workflow_run", exc_info=True)
+        return None
 
 
 def _reject_backpressure(*, request: Request, user: CurrentUser, endpoint: str, scope: str) -> None:
@@ -160,6 +215,133 @@ async def list_chat_messages(session_id: str, request: Request, user: CurrentUse
     return {"items": list_session_messages(session_id, user, load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope))}
 
 
+@router.get("/api/v1/chat/sessions/{session_id}/workflow-runs")
+async def list_chat_workflow_runs(session_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_permission(request, user, CHAT_PERMISSION, action="chat.workflow_run.list", resource_type="chat_session", resource_id=session_id)
+    return {
+        "items": list_session_workflow_runs(
+            session_id,
+            user,
+            load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope),
+        )
+    }
+
+
+@router.get("/api/v1/chat/workflow-runs/{run_id}")
+async def get_chat_workflow_run(run_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_permission(request, user, CHAT_PERMISSION, action="chat.workflow_run.get", resource_type="chat_workflow_run", resource_id=run_id)
+    return {"workflow_run": load_workflow_run_for_user(run_id, user)}
+
+
+@router.post("/api/v1/chat/workflow-runs/{run_id}/retry")
+async def retry_chat_workflow_run(run_id: str, payload: RetryWorkflowRunRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_permission(request, user, CHAT_PERMISSION, action="chat.workflow_run.retry", resource_type="chat_workflow_run", resource_id=run_id)
+    source_run = load_workflow_run_for_user(run_id, user)
+    if source_run.get("status") != "failed":
+        raise HTTPException(
+            status_code=409,
+            detail={"detail": "only failed workflow runs can be retried", "code": "chat_workflow_retry_conflict"},
+        )
+    session_id = str(source_run.get("session_id") or "")
+    session = load_session_for_user(session_id, user, default_scope_fn=default_scope)
+    scope_snapshot = dict(source_run.get("scope_snapshot") or {})
+    scope_payload = (
+        gateway_chat_service.ChatScopePayload(
+            mode=str(scope_snapshot.get("mode") or "all"),
+            corpus_ids=list(scope_snapshot.get("corpus_ids") or []),
+            document_ids=list(scope_snapshot.get("document_ids") or []),
+            allow_common_knowledge=bool(scope_snapshot.get("allow_common_knowledge")),
+        )
+        if payload.reuse_scope
+        else None
+    )
+    retry_message = SendMessageRequest(
+        question=str(source_run.get("question") or ""),
+        scope=scope_payload,
+        execution_mode=str(source_run.get("execution_mode") or str((session.get("scope_json") or {}).get("execution_mode") or "grounded")),
+    )
+    state = begin_gateway_idempotency(
+        request,
+        user,
+        request_scope="chat.workflow_run.retry",
+        payload={
+            "run_id": run_id,
+            "session_id": session_id,
+            "question": retry_message.question,
+            "execution_mode": retry_message.execution_mode,
+            "reuse_scope": payload.reuse_scope,
+            "scope": retry_message.scope.model_dump() if retry_message.scope is not None else None,
+        },
+    )
+    if state.replay_payload is not None:
+        return state.replay_payload
+    decision = CHAT_INFLIGHT_LIMITER.acquire(
+        user_key=str(user.user_id),
+        global_limit=runtime_settings.chat_max_in_flight_global,
+        per_user_limit=runtime_settings.chat_max_in_flight_per_user,
+    )
+    if not decision.allowed:
+        _reject_backpressure(request=request, user=user, endpoint="chat.workflow_run.retry", scope=decision.scope)
+    try:
+        result = await handle_chat_message(
+            session_id=session_id,
+            payload=retry_message,
+            request=request,
+            user=user,
+            load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope),
+            default_scope_fn=default_scope,
+            resolve_scope_snapshot_fn=_resolve_scope_snapshot,
+            recent_history_messages_fn=lambda sid, current_user, limit=8: recent_history_messages(sid, current_user, load_session_fn=lambda session, actor: load_session_for_user(session, actor, default_scope_fn=default_scope), limit=limit),
+            retrieve_scope_evidence_fn=_retrieve_scope_evidence,
+            fetch_corpus_documents_fn=_fetch_corpus_documents,
+            persist_chat_turn_fn=persist_chat_turn,
+            start_workflow_run_fn=create_workflow_run,
+            update_workflow_run_fn=update_workflow_run,
+        )
+    except Exception as exc:
+        fail_gateway_idempotency(state, user, exc)
+        write_gateway_audit_event(
+            action="chat.workflow_run.retry",
+            outcome="failed",
+            request=request,
+            user=user,
+            resource_type="chat_workflow_run",
+            resource_id=run_id,
+            scope="owner",
+            details={
+                "session_id": session_id,
+                "reuse_scope": payload.reuse_scope,
+                "error_type": exc.__class__.__name__,
+            },
+        )
+        raise
+    finally:
+        CHAT_INFLIGHT_LIMITER.release(decision.ticket)
+    result["retried_from_run_id"] = run_id
+    complete_gateway_idempotency(
+        state,
+        user,
+        response_payload=result,
+        resource_id=str(((result.get("message") or {}) if isinstance(result, dict) else {}).get("id") or session_id),
+    )
+    write_gateway_audit_event(
+        action="chat.workflow_run.retry",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="chat_workflow_run",
+        resource_id=run_id,
+        scope="owner",
+        details={
+            "session_id": session_id,
+            "reuse_scope": payload.reuse_scope,
+            "new_workflow_run_id": str(((result.get("workflow_run") or {}) if isinstance(result, dict) else {}).get("id") or ""),
+            "new_message_id": str(((result.get("message") or {}) if isinstance(result, dict) else {}).get("id") or ""),
+        },
+    )
+    return result
+
+
 @router.post("/api/v1/chat/sessions/{session_id}/messages")
 async def send_chat_message(session_id: str, payload: SendMessageRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_permission(request, user, CHAT_PERMISSION, action="chat.message.send", resource_type="chat_session", resource_id=session_id)
@@ -196,6 +378,8 @@ async def send_chat_message(session_id: str, payload: SendMessageRequest, reques
             retrieve_scope_evidence_fn=_retrieve_scope_evidence,
             fetch_corpus_documents_fn=_fetch_corpus_documents,
             persist_chat_turn_fn=persist_chat_turn,
+            start_workflow_run_fn=create_workflow_run,
+            update_workflow_run_fn=update_workflow_run,
         )
     except Exception as exc:
         fail_gateway_idempotency(state, user, exc)
@@ -235,6 +419,7 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                     "refusal_reason": result.get("refusal_reason", ""),
                     "safety": result.get("safety", {}),
                     "retrieval": result.get("retrieval", {}),
+                    "workflow_run": result.get("workflow_run", {}),
                 },
             )
             for citation in result.get("citations", []) or []:
@@ -260,6 +445,9 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
         _reject_backpressure(request=request, user=user, endpoint="chat.message.stream", scope=decision.scope)
 
     async def generate() -> Any:
+        prepared: dict[str, Any] | None = None
+        workflow_run: dict[str, Any] | None = None
+        workflow_events: list[dict[str, Any]] = []
         try:
             prepared = await prepare_chat_message(
                 session_id=session_id,
@@ -272,22 +460,16 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                 retrieve_scope_evidence_fn=_retrieve_scope_evidence,
                 fetch_corpus_documents_fn=_fetch_corpus_documents,
             )
-            yield encode_sse_event(
-                "metadata",
-                {
-                    "strategy_used": "agent_grounded_qa"
-                    if prepared["execution_mode"] == "agent"
-                    else "common_knowledge_chat"
-                    if prepared["answer_mode"] == "common_knowledge"
-                    else "hybrid_grounded_qa",
-                    "execution_mode": prepared["execution_mode"],
-                    "answer_mode": prepared["answer_mode"],
-                    "evidence_status": prepared["evidence_status"],
-                    "grounding_score": prepared["grounding_score"],
-                    "refusal_reason": prepared["refusal_reason"],
-                    "safety": prepared["safety"],
-                    "retrieval": prepared["retrieval_meta"],
-                },
+            yield encode_sse_event("metadata", _stream_metadata_payload(prepared))
+            workflow_run = _try_create_stream_workflow_run(
+                session_id=session_id,
+                payload=payload,
+                user=user,
+                prepared=prepared,
+            )
+            workflow_events = list(
+                (workflow_run or {}).get("workflow_events")
+                or [gateway_chat_service.build_workflow_event(prepared=prepared, stage="retrieval_completed", status="running")]
             )
             for citation in prepared["evidence"]:
                 yield encode_sse_event("citation", citation)
@@ -336,6 +518,34 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                 answer_payload=answer_payload,
                 generation_ms=generation_ms,
             )
+            if workflow_run is not None:
+                update_workflow_run(
+                    run_id=str(workflow_run.get("id") or ""),
+                    user=user,
+                    status="running",
+                    workflow_state=gateway_chat_service.build_chat_workflow_state(
+                        prepared=prepared,
+                        stage="generation_completed",
+                        response_payload=response_payload,
+                    ),
+                    workflow_events=workflow_events + [
+                        gateway_chat_service.build_workflow_event(
+                            prepared=prepared,
+                            stage="generation_completed",
+                            status="running",
+                            response_payload=response_payload,
+                        )
+                    ],
+                    tool_calls=gateway_chat_service._workflow_tool_calls(prepared),
+                )
+            workflow_events = workflow_events + [
+                gateway_chat_service.build_workflow_event(
+                    prepared=prepared,
+                    stage="generation_completed",
+                    status="running",
+                    response_payload=response_payload,
+                )
+            ]
             result = finalize_chat_message(
                 prepared=prepared,
                 request=request,
@@ -343,8 +553,31 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                 response_payload=response_payload,
                 persist_chat_turn_fn=persist_chat_turn,
             )
-            complete_gateway_idempotency(state, user, response_payload=result, resource_id=str(((result.get("message") or {}) if isinstance(result, dict) else {}).get("id") or session_id))
             final_message = (result.get("message") or {}) if isinstance(result, dict) else {}
+            if workflow_run is not None:
+                workflow_run = update_workflow_run(
+                    run_id=str(workflow_run.get("id") or ""),
+                    user=user,
+                    status="completed",
+                    workflow_state=gateway_chat_service.build_chat_workflow_state(
+                        prepared=prepared,
+                        stage="persisted",
+                        response_payload=result,
+                        message_id=str(final_message.get("id") or ""),
+                    ),
+                    workflow_events=workflow_events + [
+                        gateway_chat_service.build_workflow_event(
+                            prepared=prepared,
+                            stage="persisted",
+                            status="completed",
+                            response_payload=result,
+                        )
+                    ],
+                    tool_calls=gateway_chat_service._workflow_tool_calls(prepared),
+                    message_id=str(final_message.get("id") or ""),
+                )
+                result["workflow_run"] = workflow_run
+            complete_gateway_idempotency(state, user, response_payload=result, resource_id=str(((result.get("message") or {}) if isinstance(result, dict) else {}).get("id") or session_id))
             if str(final_message.get("content") or "") and str(final_message.get("content") or "") != latest_answer:
                 yield encode_sse_event(
                     "answer",
@@ -357,6 +590,26 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
             yield encode_sse_event("message", final_message)
             yield encode_sse_event("done", {"session_id": session_id, "trace_id": prepared["trace_id"]})
         except Exception as exc:
+            if prepared is not None and workflow_run is not None:
+                update_workflow_run(
+                    run_id=str(workflow_run.get("id") or ""),
+                    user=user,
+                    status="failed",
+                    workflow_state=gateway_chat_service.build_chat_workflow_state(
+                        prepared=prepared,
+                        stage="failed",
+                        error=exc,
+                    ),
+                    workflow_events=(locals().get("workflow_events") or []) + [
+                        gateway_chat_service.build_workflow_event(
+                            prepared=prepared,
+                            stage="failed",
+                            status="failed",
+                            error=exc,
+                        )
+                    ],
+                    tool_calls=gateway_chat_service._workflow_tool_calls(prepared),
+                )
             fail_gateway_idempotency(state, user, exc)
             GATEWAY_CHAT_REQUESTS_TOTAL.labels("error", "error").inc()
             yield encode_sse_event(

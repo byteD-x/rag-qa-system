@@ -53,7 +53,14 @@ def usage_with_meta(
     retrieval: dict[str, Any],
     latency: dict[str, Any],
     cost: dict[str, Any],
+    llm_trace: dict[str, Any],
 ) -> dict[str, Any]:
     payload = dict(usage or {})
-    payload["_meta"] = {"trace_id": trace_id, "retrieval": retrieval, "latency": latency, "cost": cost}
+    payload["_meta"] = {
+        "trace_id": trace_id,
+        "retrieval": retrieval,
+        "latency": latency,
+        "cost": cost,
+        "llm_trace": dict(llm_trace or {}),
+    }
     return payload

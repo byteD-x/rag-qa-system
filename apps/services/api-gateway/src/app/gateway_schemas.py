@@ -62,3 +62,7 @@ class SendMessageRequest(BaseModel):
         if normalized not in ALLOWED_EXECUTION_MODES:
             raise ValueError(f"unsupported execution mode: {normalized}")
         return normalized
+
+
+class RetryWorkflowRunRequest(BaseModel):
+    reuse_scope: bool = True

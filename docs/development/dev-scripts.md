@@ -50,6 +50,37 @@ make smoke-eval
 7. 调用 `scripts/evaluation/run-eval-suite.py`
 8. 输出报告到 `artifacts/reports/agent_smoke_report.json` 和 `artifacts/reports/agent_smoke_report.md`
 
+## CI 友好参数
+
+`scripts/dev/smoke_eval.py` 现在支持以下参数，便于在 GitHub Actions 或本地容器化环境里直接复用：
+
+- `--wait-for-ready`：先轮询 `gateway` 与 `kb-service` 的就绪地址，再开始 smoke
+- `--wait-timeout-seconds <n>`：控制等待上限
+- `--gateway-health-url <url>`：覆盖默认的 `gateway /readyz`
+- `--kb-health-url <url>`：覆盖默认的 `kb-service /readyz`
+
+典型 CI 调用：
+
+```bash
+python scripts/dev/smoke_eval.py --password ChangeMe123! --wait-for-ready --wait-timeout-seconds 240
+```
+
+## Eval 报告补充
+
+统一 eval 报告现在除了原有的召回、拒答与延迟指标，还会补充：
+
+- `dataset_version`
+- `prompt_version`
+- `model_version`
+- `execution_mode`
+- `citation_alignment`
+- `faithfulness`
+- `correctness`
+
+其中后三者是可解释启发式指标，用于回答质量门禁和面试答辩，不应被表述成严格人工标注分。
+
+`run-eval-suite.py` 生成的 suite 级 Markdown 摘要也会把 `suite_version`、`dataset version`、`execution modes`、`prompt versions`、`model versions` 一并带出，便于 CI artifact 直接横向对比。
+
 ## 基线命令
 
 ```powershell
@@ -59,3 +90,24 @@ python -m compileall packages/python apps/services/api-gateway apps/services/kno
 python -m pytest tests -q
 docker compose config --quiet
 ```
+
+## AI 平台配置入口
+
+与新增后端能力相关的环境变量如下：
+
+- `PROMPT_REGISTRY_JSON` / `PROMPT_REGISTRY_PATH`
+  覆盖内置 prompt 的 `key`、`version`、`route_key`
+- `LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON`
+  为 `grounded`、`common_knowledge`、`agent` 指定不同模型与 provider
+- `RERANK_PROVIDER`
+  默认是 `heuristic`，可切换为 `external-cross-encoder`
+- `RERANK_API_BASE_URL` / `RERANK_API_KEY` / `RERANK_MODEL`
+  外部 rerank provider 的最小配置
+- `RERANK_TIMEOUT_SECONDS` / `RERANK_TOP_N` / `RERANK_EXTRA_BODY_JSON`
+  rerank provider 的超时、候选数和扩展请求体
+- `VISION_PROVIDER` / `VISION_FALLBACK_PROVIDER` / `VISION_API_BASE_URL` / `VISION_API_KEY` / `VISION_MODEL`
+  视觉 OCR / VLM provider 配置
+
+当外部视觉 provider 返回 `layout_hints` 与 `regions` 时，worker 会额外生成 `visual_region` section/chunk，用于更细粒度的检索与 rerank。
+
+完整约定见 [`docs/backend/ai-platform-governance.md`](../backend/ai-platform-governance.md)。

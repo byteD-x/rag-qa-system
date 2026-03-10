@@ -59,6 +59,7 @@ class RetrievalStats:
     selected_candidates: int = 0
     retrieval_ms: float = 0.0
     rerank_applied: bool = False
+    rerank_provider: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

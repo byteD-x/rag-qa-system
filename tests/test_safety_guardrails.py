@@ -370,6 +370,7 @@ def test_gateway_stream_chat_message_metadata_includes_safety_and_releases_on_ca
 
     assert event_name == "metadata"
     assert payload["safety"]["risk_level"] == "medium"
+    assert payload["workflow_run"] == {}
     decision = gateway_routes.CHAT_INFLIGHT_LIMITER.acquire(user_key="u-1", global_limit=1, per_user_limit=1)
     assert decision.allowed is True
 
