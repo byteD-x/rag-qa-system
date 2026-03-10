@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import time
 from typing import Any
@@ -41,6 +42,8 @@ async def run_agent_search(
     scope_snapshot: dict[str, Any],
     question: str,
     history: list[dict[str, Any]],
+    agent_profile: dict[str, Any] | None = None,
+    prompt_template: dict[str, Any] | None = None,
     retrieve_scope_evidence_fn: Any,
     fetch_corpus_documents_fn: Any,
     kb_service_url: str,
@@ -67,6 +70,7 @@ async def run_agent_search(
     evidence_by_unit: dict[str, dict[str, Any]] = {}
     services: list[dict[str, Any]] = []
     total_retrieval_ms = 0.0
+    enabled_tools = set(list((agent_profile or {}).get("enabled_tools") or [])) or {"search_scope", "list_scope_documents", "search_corpus"}
 
     async def search_scope_tool(search_question: str, limit: int = AGENT_MAX_EVIDENCE) -> dict[str, Any]:
         nonlocal total_retrieval_ms
@@ -201,23 +205,76 @@ async def run_agent_search(
             "selected_candidates": int((payload.get("retrieval") or {}).get("selected_candidates", len(items))),
         }
 
-    tools = [
-        StructuredTool.from_function(
-            coroutine=search_scope_tool,
-            name="search_scope",
-            description="Search across all corpora currently visible in the user's scope and return grounded evidence.",
-        ),
-        StructuredTool.from_function(
-            coroutine=list_scope_documents_tool,
-            name="list_scope_documents",
-            description="List queryable documents in the current scope, optionally filtered by one corpus_id.",
-        ),
-        StructuredTool.from_function(
-            coroutine=search_corpus_tool,
-            name="search_corpus",
-            description="Search one corpus in the current scope, optionally restricted to a list of document_ids.",
-        ),
-    ]
+    def calculator_tool(expression: str) -> dict[str, Any]:
+        cleaned = str(expression or "").strip()
+        if not cleaned:
+            return {"expression": "", "result": "", "error": "expression is required"}
+
+        def _eval(node: ast.AST) -> float:
+            if isinstance(node, ast.Expression):
+                return _eval(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return float(node.value)
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                value = _eval(node.operand)
+                return value if isinstance(node.op, ast.UAdd) else -value
+            if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow)):
+                left = _eval(node.left)
+                right = _eval(node.right)
+                return {
+                    ast.Add: left + right,
+                    ast.Sub: left - right,
+                    ast.Mult: left * right,
+                    ast.Div: left / right,
+                    ast.Mod: left % right,
+                    ast.Pow: left**right,
+                }[type(node.op)]
+            raise ValueError("unsupported expression")
+
+        try:
+            result = _eval(ast.parse(cleaned, mode="eval"))
+            rendered = int(result) if float(result).is_integer() else round(float(result), 6)
+            tool_events.append({"tool": "calculator", "expression": cleaned, "result": rendered})
+            agent_events.append({"type": "tool_result", "tool": "calculator", "expression": cleaned, "result": rendered})
+            return {"expression": cleaned, "result": rendered}
+        except Exception as exc:
+            tool_events.append({"tool": "calculator", "expression": cleaned, "error": exc.__class__.__name__})
+            agent_events.append({"type": "tool_result", "tool": "calculator", "expression": cleaned, "error": str(exc)})
+            return {"expression": cleaned, "error": "calculation_failed"}
+
+    tools = []
+    if "search_scope" in enabled_tools:
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=search_scope_tool,
+                name="search_scope",
+                description="Search across all corpora currently visible in the user's scope and return grounded evidence.",
+            )
+        )
+    if "list_scope_documents" in enabled_tools:
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=list_scope_documents_tool,
+                name="list_scope_documents",
+                description="List queryable documents in the current scope, optionally filtered by one corpus_id.",
+            )
+        )
+    if "search_corpus" in enabled_tools:
+        tools.append(
+            StructuredTool.from_function(
+                coroutine=search_corpus_tool,
+                name="search_corpus",
+                description="Search one corpus in the current scope, optionally restricted to a list of document_ids.",
+            )
+        )
+    if "calculator" in enabled_tools:
+        tools.append(
+            StructuredTool.from_function(
+                func=calculator_tool,
+                name="calculator",
+                description="Evaluate a basic arithmetic expression when numerical computation is needed.",
+            )
+        )
     agent_contract = _agent_runtime_contract(tools)
     tools_by_name = {tool.name: tool for tool in tools}
     try:
@@ -236,6 +293,16 @@ async def run_agent_search(
                     "Stay strictly inside the user's current scope. "
                     "Prefer search_scope first, then narrow with list_scope_documents or search_corpus if needed. "
                     "Stop after enough evidence is found. Do not exceed 3 rounds of tool calls."
+                    + (
+                        f"\n\nCustom prompt template:\n{str((prompt_template or {}).get('content') or '').strip()}"
+                        if str((prompt_template or {}).get("content") or "").strip()
+                        else ""
+                    )
+                    + (
+                        f"\n\nPersona:\n{str((agent_profile or {}).get('persona_prompt') or '').strip()}"
+                        if str((agent_profile or {}).get("persona_prompt") or "").strip()
+                        else ""
+                    )
                 )
             ),
             HumanMessage(content=f"User question:\n{contextualized_question}"),

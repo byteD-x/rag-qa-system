@@ -2,6 +2,10 @@
   <div class="page-shell entry-page">
     <PageHeaderCompact title="业务总览">
       <template #actions>
+        <el-radio-group v-if="authStore.isAdmin()" v-model="viewMode" size="small" @change="loadDashboard" style="margin-right: 16px;">
+          <el-radio-button value="personal">个人数据</el-radio-button>
+          <el-radio-button value="admin">全局大盘</el-radio-button>
+        </el-radio-group>
         <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
         <el-button plain @click="go('/workspace/kb/upload')">知识库治理</el-button>
       </template>
@@ -26,10 +30,79 @@
         </div>
       </section>
 
+      <!-- Dashboard Section -->
+      <section v-if="loadingDashboard" class="dashboard-loading">
+        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
+        <span>加载数据大盘...</span>
+      </section>
+
+      <section v-else class="dashboard-grid">
+        <!-- 热点词云 -->
+        <div class="dash-card">
+          <h3 class="dash-title">问答热点词</h3>
+          <div class="word-cloud">
+            <span v-for="(term, i) in dashboardData?.hot_terms" :key="i"
+                  class="cloud-tag"
+                  :style="{ fontSize: `${12 + Math.min(term.count, 20)}px`, opacity: 0.5 + (term.count / 40) }">
+              {{ term.term }}
+            </span>
+            <span v-if="!dashboardData?.hot_terms?.length" class="empty-text">暂无热点数据</span>
+          </div>
+        </div>
+
+        <!-- 成本与Token消耗 -->
+        <div class="dash-card">
+          <h3 class="dash-title">消耗统计 ({{ dashboardData?.usage?.currency || 'CNY' }})</h3>
+          <div class="usage-summary">
+            <div class="usage-item">
+              <span class="usage-val">{{ dashboardData?.usage?.summary?.assistant_turns || 0 }}</span>
+              <span class="usage-label">助手对话轮数</span>
+            </div>
+            <div class="usage-item">
+              <span class="usage-val">{{ (dashboardData?.usage?.summary?.estimated_cost || 0).toFixed(2) }}</span>
+              <span class="usage-label">预估成本</span>
+            </div>
+          </div>
+          <div class="usage-details">
+            Prompt Tokens: {{ dashboardData?.usage?.summary?.prompt_tokens || 0 }}<br/>
+            Completion Tokens: {{ dashboardData?.usage?.summary?.completion_tokens || 0 }}
+          </div>
+        </div>
+
+        <!-- 用户满意度 -->
+        <div class="dash-card">
+          <h3 class="dash-title">用户满意度趋势 (近14天)</h3>
+          <div class="satisfaction-bars">
+            <div v-for="(trend, i) in dashboardData?.satisfaction?.trend" :key="i" class="sat-bar-wrap" :title="trend.date">
+              <div class="sat-bar up" :style="{ flex: trend.up_count || 0.1 }"></div>
+              <div class="sat-bar down" :style="{ flex: trend.down_count || 0.1 }"></div>
+            </div>
+            <span v-if="!dashboardData?.satisfaction?.trend?.length" class="empty-text">暂无趋势数据</span>
+          </div>
+          <div class="sat-legend" v-if="dashboardData?.satisfaction?.trend?.length">
+            <span class="leg-up">■ 赞</span>
+            <span class="leg-down">■ 踩</span>
+          </div>
+        </div>
+
+        <!-- Zero-hit 拦截统计 -->
+        <div class="dash-card">
+          <h3 class="dash-title">知识盲区 (无命中拦截)</h3>
+          <ul class="zero-hit-list">
+            <li v-for="(q, i) in dashboardData?.zero_hit?.top_queries" :key="i">
+              <span class="q-text">{{ q.query }}</span>
+              <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
+            </li>
+            <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">暂无无命中查询</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Recent History -->
       <section class="recent-grid">
         <div class="recent-col">
-          <h3 class="section-label">知识库</h3>
-          <div v-if="loading" class="recent-skeleton">
+          <h3 class="section-label">最近知识库</h3>
+          <div v-if="loadingHistory" class="recent-skeleton">
             <div v-for="i in 4" :key="i" class="skeleton-item" />
           </div>
           <EnhancedEmpty
@@ -55,7 +128,7 @@
         </div>
         <div class="recent-col">
           <h3 class="section-label">最近会话</h3>
-          <div v-if="loading" class="recent-skeleton">
+          <div v-if="loadingHistory" class="recent-skeleton">
             <div v-for="i in 4" :key="i" class="skeleton-item" />
           </div>
           <EnhancedEmpty
@@ -87,20 +160,46 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound } from '@element-plus/icons-vue';
+import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listKnowledgeBases } from '@/api/kb';
 import { listChatSessions } from '@/api/chat';
+import { getAnalyticsDashboard } from '@/api/analytics';
+import { useAuthStore } from '@/store/auth';
 
 const router = useRouter();
+const authStore = useAuthStore();
 
 const recentKnowledgeBases = ref<{ id: string; name: string; docCount: number }[]>([]);
 const recentSessions = ref<{ id: string; title: string; questionCount: number }[]>([]);
-const loading = ref(true);
+const loadingHistory = ref(true);
+
+const viewMode = ref<'personal' | 'admin'>('personal');
+const dashboardData = ref<any>(null);
+const loadingDashboard = ref(true);
+
+const loadDashboard = async () => {
+  loadingDashboard.value = true;
+  try {
+    const res: any = await getAnalyticsDashboard({ view: viewMode.value, days: 14 });
+    dashboardData.value = res;
+  } catch (e) {
+    dashboardData.value = {};
+  } finally {
+    loadingDashboard.value = false;
+  }
+};
 
 onMounted(async () => {
-  loading.value = true;
+  if (authStore.isAdmin()) {
+    viewMode.value = 'admin';
+  } else {
+    viewMode.value = 'personal';
+  }
+  loadDashboard();
+
+  loadingHistory.value = true;
   try {
     const [kbRes, sessionRes] = await Promise.all([
       listKnowledgeBases().catch(() => ({ items: [] })),
@@ -119,7 +218,7 @@ onMounted(async () => {
       questionCount: Number(s.message_count ?? s.question_count ?? 0)
     }));
   } finally {
-    loading.value = false;
+    loadingHistory.value = false;
   }
 });
 
@@ -179,6 +278,153 @@ const go = (path: string) => {
   background: var(--blue-50);
 }
 
+/* Dashboard Grid */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--section-gap, 24px);
+}
+
+.dashboard-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  padding: 20px 0;
+}
+
+.dash-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-title {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.word-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}
+
+.cloud-tag {
+  color: var(--blue-600);
+  font-weight: bold;
+}
+
+.usage-summary {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+
+.usage-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.usage-val {
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--text-primary);
+}
+
+.usage-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.usage-details {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.satisfaction-bars {
+  display: flex;
+  gap: 4px;
+  height: 100px;
+  align-items: flex-end;
+  flex: 1;
+}
+
+.sat-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.sat-bar {
+  width: 100%;
+  border-radius: 2px;
+}
+
+.sat-bar.up {
+  background: var(--success-color, #67c23a);
+}
+
+.sat-bar.down {
+  background: var(--danger-color, #f56c6c);
+}
+
+.sat-legend {
+  margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.leg-up { color: var(--success-color, #67c23a); }
+.leg-down { color: var(--danger-color, #f56c6c); }
+
+.zero-hit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.zero-hit-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.q-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-primary);
+  margin-right: 12px;
+}
+
+/* Recent Grid */
 .recent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -234,11 +480,6 @@ const go = (path: string) => {
 
 .recent-empty-inline {
   padding: 32px 16px !important;
-}
-
-.recent-empty-inline :deep(.default-illustration) {
-  width: 56px;
-  height: 56px;
 }
 
 .recent-skeleton {

@@ -16,10 +16,13 @@ from shared.tracing import TRACE_ID_HEADER, ensure_trace_id, reset_trace_id, set
 
 from .kb_api_support import check_readiness as _kb_readiness_checks
 from .kb_base_routes import router as kb_base_router
+from .kb_chunk_routes import router as kb_chunk_router
+from .kb_connector_routes import router as kb_connector_router
 from .kb_ingest_routes import router as kb_ingest_router
 from .kb_legacy_upload_routes import router as kb_legacy_upload_router
 from .kb_query_routes import router as kb_query_router
 from .kb_runtime import db, logger, prepare_runtime, storage
+from .kb_sync_routes import router as kb_sync_router
 from .kb_system_routes import router as kb_system_router
 from .kb_upload_routes import router as kb_upload_router
 from .kb_visual_routes import router as kb_visual_router
@@ -67,6 +70,9 @@ async def trace_middleware(request: Request, call_next):
 
 app.include_router(kb_system_router)
 app.include_router(kb_base_router)
+app.include_router(kb_chunk_router)
+app.include_router(kb_connector_router)
+app.include_router(kb_sync_router)
 app.include_router(kb_upload_router)
 app.include_router(kb_legacy_upload_router)
 app.include_router(kb_ingest_router)

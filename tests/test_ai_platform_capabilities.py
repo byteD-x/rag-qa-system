@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from shared.llm_settings import LLMSettings
-from shared.model_routing import settings_with_model_route
+from shared.model_routing import resolve_model_route_plan, settings_with_model_route
 from shared.prompt_registry import get_prompt_definition
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath
@@ -81,6 +81,42 @@ def test_model_routing_applies_route_specific_provider_and_limits() -> None:
     assert routed_settings.default_temperature == 0.15
     assert routed_settings.default_max_tokens == 1024
     assert routed_settings.extra_body == {"reasoning": {"effort": "medium"}}
+
+
+def test_model_routing_plan_includes_configured_fallback_route() -> None:
+    settings = LLMSettings(
+        enabled=True,
+        provider="openai-compatible",
+        base_url="https://llm.example.test/v1",
+        api_key="secret",
+        model="default-model",
+        common_knowledge_model="common-model",
+        timeout_seconds=30.0,
+        default_temperature=0.7,
+        default_max_tokens=512,
+        common_knowledge_max_tokens=256,
+        common_knowledge_history_messages=4,
+        common_knowledge_history_chars=400,
+        system_prompt="system",
+        extra_body={},
+        model_routing={
+            "grounded": {
+                "model": "grounded-model",
+                "fallback_route_key": "grounded_backup",
+            },
+            "grounded_backup": {
+                "model": "grounded-backup-model",
+                "base_url": "https://backup.example.test/v1",
+            },
+        },
+    )
+
+    decisions = resolve_model_route_plan(settings, "grounded", default_temperature=0.2, default_max_tokens=900)
+
+    assert [decision.route_key for decision in decisions] == ["grounded", "grounded_backup"]
+    assert decisions[0].fallback_route_key == "grounded_backup"
+    assert decisions[1]["model"] == "grounded-backup-model"
+    assert decisions[1]["base_url"] == "https://backup.example.test/v1"
 
 
 def test_external_cross_encoder_rerank_prefers_provider_scores(monkeypatch) -> None:

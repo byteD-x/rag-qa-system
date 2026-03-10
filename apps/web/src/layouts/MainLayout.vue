@@ -191,7 +191,11 @@ import {
   Grid,
   Platform,
   SwitchButton,
-  Tickets
+  Tickets,
+  Link,
+  Aim,
+  User as Robot,
+  EditPen
 } from '@element-plus/icons-vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
 
@@ -212,9 +216,29 @@ const navItemsPrimary = [
     icon: ChatDotRound
   },
   {
+    path: '/workspace/platform/agents',
+    label: 'Agent 工作台',
+    icon: Robot
+  },
+  {
+    path: '/workspace/platform/prompts',
+    label: 'Prompt 库',
+    icon: EditPen
+  },
+  {
     path: '/workspace/kb/upload',
     label: '知识库治理',
     icon: Files
+  },
+  {
+    path: '/workspace/kb/connectors',
+    label: '多源同步',
+    icon: Link
+  },
+  {
+    path: '/workspace/kb/debugger',
+    label: '检索测试',
+    icon: Aim
   }
 ];
 

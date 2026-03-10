@@ -107,3 +107,16 @@ export function retryWorkflowRun(runId: string, options: { idempotencyKey?: stri
     }
   });
 }
+
+export function submitMessageFeedback(
+  sessionId: string,
+  messageId: string,
+  data: {
+    verdict: 'up' | 'down';
+    reason_code?: string;
+    notes?: string;
+  }
+) {
+  return request.put(`/chat/sessions/${sessionId}/messages/${messageId}/feedback`, data);
+}
+

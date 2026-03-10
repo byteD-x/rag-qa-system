@@ -70,6 +70,28 @@ const routes = [
         }
       },
       {
+        path: 'kb/connectors',
+        name: 'KBConnectorsView',
+        component: () => import('@/views/kb/KBConnectorsView.vue'),
+        meta: {
+          requiresPermission: 'kb.manage',
+          title: '多源同步',
+          subtitle: '',
+          breadcrumb: ['工作台', '多源同步']
+        }
+      },
+      {
+        path: 'kb/debugger',
+        name: 'RetrievalDebuggerView',
+        component: () => import('@/views/kb/RetrievalDebuggerView.vue'),
+        meta: {
+          requiresPermission: 'kb.manage',
+          title: '检索测试',
+          subtitle: '',
+          breadcrumb: ['工作台', '检索测试']
+        }
+      },
+      {
         path: 'kb/chat',
         redirect: (to: any) => ({
           path: '/workspace/chat',
@@ -88,6 +110,39 @@ const routes = [
           title: '文档详情',
           subtitle: '',
           breadcrumb: ['工作台', '知识库治理', '文档详情']
+        }
+      },
+      {
+        path: 'kb/documents/:id/chunks',
+        name: 'KBChunkReviewView',
+        component: () => import('@/views/kb/KBChunkReviewView.vue'),
+        meta: {
+          requiresPermission: 'kb.write',
+          title: '切片管理',
+          subtitle: '',
+          breadcrumb: ['工作台', '知识库治理', '文档详情', '切片管理']
+        }
+      },
+      {
+        path: 'platform/agents',
+        name: 'AgentProfileView',
+        component: () => import('@/views/platform/AgentProfileView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'Agent 工作台',
+          subtitle: '',
+          breadcrumb: ['工作台', 'Agent 工作台']
+        }
+      },
+      {
+        path: 'platform/prompts',
+        name: 'PromptTemplateView',
+        component: () => import('@/views/platform/PromptTemplateView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'Prompt 库',
+          subtitle: '',
+          breadcrumb: ['工作台', 'Prompt 库']
         }
       },
       {

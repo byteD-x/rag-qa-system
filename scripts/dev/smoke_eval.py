@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = REPO_ROOT / "scripts" / "evaluation" / "fixtures"
 REPORT_DIR = REPO_ROOT / "artifacts" / "reports"
 EVAL_SUITE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "run-eval-suite.py"
+REGRESSION_GATE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "check-eval-regression.py"
+REGRESSION_BASELINE = REPO_ROOT / "scripts" / "evaluation" / "fixtures" / "agent_smoke_baseline.json"
 
 
 def load_env_file() -> dict[str, str]:
@@ -148,8 +150,10 @@ def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
     return runtime_suite_path
 
 
-def run_eval_suite(base_url: str, email: str, password: str, config_path: Path) -> None:
+def run_eval_suite(base_url: str, email: str, password: str, config_path: Path) -> tuple[Path, Path]:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    report_path = REPORT_DIR / "agent_smoke_report.json"
+    summary_path = REPORT_DIR / "agent_smoke_report.md"
     subprocess.run(
         [
             sys.executable,
@@ -163,13 +167,37 @@ def run_eval_suite(base_url: str, email: str, password: str, config_path: Path) 
             "--config",
             str(config_path),
             "--output",
-            str(REPORT_DIR / "agent_smoke_report.json"),
+            str(report_path),
             "--summary-output",
-            str(REPORT_DIR / "agent_smoke_report.md"),
+            str(summary_path),
         ],
         check=True,
         cwd=str(REPO_ROOT),
     )
+    return report_path, summary_path
+
+
+def run_regression_gate(report_path: Path) -> tuple[Path, Path]:
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = REPORT_DIR / "agent_smoke_regression_gate.json"
+    summary_path = REPORT_DIR / "agent_smoke_regression_gate.md"
+    subprocess.run(
+        [
+            sys.executable,
+            str(REGRESSION_GATE_SCRIPT),
+            "--report",
+            str(report_path),
+            "--baseline",
+            str(REGRESSION_BASELINE),
+            "--output",
+            str(output_path),
+            "--summary-output",
+            str(summary_path),
+        ],
+        check=True,
+        cwd=str(REPO_ROOT),
+    )
+    return output_path, summary_path
 
 
 def main() -> int:
@@ -238,7 +266,8 @@ def main() -> int:
         )
 
     runtime_suite_path = write_runtime_suite(policy_corpus_id, travel_corpus_id)
-    run_eval_suite(base_url, email, password, runtime_suite_path)
+    report_path, _summary_path = run_eval_suite(base_url, email, password, runtime_suite_path)
+    run_regression_gate(report_path)
     return 0
 
 

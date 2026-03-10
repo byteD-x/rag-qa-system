@@ -1,9 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ALLOWED_KB_FILE_TYPES = {"txt", "pdf", "docx", "png", "jpg", "jpeg"}
+ALLOWED_CONNECTOR_TYPES = {
+    "local_directory",
+    "notion",
+    "feishu_document",
+    "dingtalk_document",
+    "web_crawler",
+    "sql_query",
+}
 
 
 class CreateBaseRequest(BaseModel):
@@ -56,6 +66,10 @@ class RetrieveRequest(BaseModel):
     limit: int = Field(default=8, ge=1, le=20)
 
 
+class RetrievalDebugRequest(RetrieveRequest):
+    pass
+
+
 class KBQueryRequest(BaseModel):
     base_id: str
     question: str = Field(min_length=1, max_length=12000)
@@ -66,3 +80,136 @@ class KBQueryRequest(BaseModel):
 class UpdateDocumentRequest(BaseModel):
     file_name: str | None = Field(default=None, min_length=1, max_length=255)
     category: str | None = Field(default=None, max_length=120)
+
+
+class UpdateChunkRequest(BaseModel):
+    text_content: str | None = Field(default=None, min_length=1, max_length=40000)
+    disabled: bool | None = None
+    disabled_reason: str = Field(default="", max_length=240)
+    manual_note: str = Field(default="", max_length=1000)
+
+    @field_validator("text_content")
+    @classmethod
+    def normalize_text_content(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("text_content must not be blank")
+        return normalized
+
+    @field_validator("disabled_reason", "manual_note")
+    @classmethod
+    def normalize_text_fields(cls, value: str) -> str:
+        return value.strip()
+
+
+class SplitChunkRequest(BaseModel):
+    parts: list[str] = Field(min_length=2, max_length=16)
+
+    @field_validator("parts")
+    @classmethod
+    def validate_parts(cls, value: list[str]) -> list[str]:
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        if len(normalized) < 2:
+            raise ValueError("parts must contain at least two non-empty text blocks")
+        return normalized
+
+
+class MergeChunksRequest(BaseModel):
+    chunk_ids: list[str] = Field(min_length=2, max_length=16)
+    separator: str = Field(default="\n\n", max_length=16)
+
+    @field_validator("chunk_ids")
+    @classmethod
+    def validate_chunk_ids(cls, value: list[str]) -> list[str]:
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        if len(normalized) < 2:
+            raise ValueError("chunk_ids must contain at least two items")
+        return list(dict.fromkeys(normalized))
+
+
+class LocalDirectorySyncRequest(BaseModel):
+    base_id: str
+    source_path: str = Field(min_length=1, max_length=1024)
+    category: str = Field(default="", max_length=120)
+    recursive: bool = True
+    delete_missing: bool = True
+    dry_run: bool = False
+    max_files: int | None = Field(default=None, ge=1, le=5000)
+
+
+class NotionSyncRequest(BaseModel):
+    base_id: str
+    page_ids: list[str] = Field(min_length=1, max_length=64)
+    category: str = Field(default="", max_length=120)
+    delete_missing: bool = True
+    dry_run: bool = False
+    max_pages: int | None = Field(default=None, ge=1, le=256)
+
+    @field_validator("page_ids")
+    @classmethod
+    def validate_page_ids(cls, value: list[str]) -> list[str]:
+        normalized = [str(item).strip() for item in value if str(item).strip()]
+        if not normalized:
+            raise ValueError("page_ids must not be empty")
+        return normalized
+
+
+class ConnectorScheduleRequest(BaseModel):
+    enabled: bool = False
+    interval_minutes: int | None = Field(default=None, ge=15, le=10080)
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.enabled and self.interval_minutes is None:
+            raise ValueError("interval_minutes is required when schedule.enabled is true")
+        return self
+
+
+class CreateConnectorRequest(BaseModel):
+    base_id: str
+    name: str = Field(min_length=1, max_length=120)
+    connector_type: str = Field(min_length=1, max_length=64)
+    config: dict[str, Any] = Field(default_factory=dict)
+    schedule: ConnectorScheduleRequest = Field(default_factory=ConnectorScheduleRequest)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("connector_type")
+    @classmethod
+    def validate_connector_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in ALLOWED_CONNECTOR_TYPES:
+            raise ValueError(f"unsupported connector type: {normalized}")
+        return normalized
+
+
+class UpdateConnectorRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    config: dict[str, Any] | None = None
+    schedule: ConnectorScheduleRequest | None = None
+    status: str | None = Field(default=None, max_length=32)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in {"active", "paused"}:
+            raise ValueError(f"unsupported connector status: {normalized}")
+        return normalized
+
+
+class RunConnectorRequest(BaseModel):
+    dry_run: bool = False
+    limit: int | None = Field(default=None, ge=1, le=64)

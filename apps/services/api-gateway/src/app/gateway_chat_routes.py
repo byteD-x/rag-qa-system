@@ -13,8 +13,8 @@ from shared.auth import CurrentUser
 from shared.inflight_limiter import InflightLimiter
 from shared.sse import encode_sse_event
 
-from .db import to_json
 from . import gateway_chat_service
+from .db import to_json
 from .gateway_answering import stream_grounded_answer
 from .gateway_audit_support import require_permission, write_gateway_audit_event
 from .gateway_chat_service import (
@@ -25,15 +25,26 @@ from .gateway_chat_service import (
 )
 from .gateway_idempotency import begin_gateway_idempotency, complete_gateway_idempotency, fail_gateway_idempotency
 from .gateway_retrieval import retrieve_scope_evidence
-from .gateway_runtime import CHAT_PERMISSION, GATEWAY_BACKPRESSURE_TOTAL, GATEWAY_CHAT_REQUESTS_TOTAL, gateway_db, runtime_settings
-from .gateway_schemas import CreateSessionRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
+from .gateway_runtime import CHAT_PERMISSION, GATEWAY_BACKPRESSURE_TOTAL, GATEWAY_CHAT_REQUESTS_TOTAL, gateway_db, logger, runtime_settings
+from .gateway_schemas import CreateSessionRequest, MessageFeedbackRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
 from .gateway_scope import default_scope, fetch_corpora, fetch_corpus_documents, normalize_execution_mode, resolve_scope_snapshot
-from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages
+from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages, upsert_chat_message_feedback
 from .gateway_workflows import create_workflow_run, list_session_workflow_runs, load_workflow_run_for_user, update_workflow_run
 
 
 router = APIRouter()
 CHAT_INFLIGHT_LIMITER = InflightLimiter("gateway_chat")
+
+
+def _scope_payload_dict(scope: Any | None) -> dict[str, Any] | None:
+    if scope is None:
+        return None
+    payload = scope.model_dump() if hasattr(scope, "model_dump") else dict(scope)
+    if not payload.get("agent_profile_id"):
+        payload.pop("agent_profile_id", None)
+    if not payload.get("prompt_template_id"):
+        payload.pop("prompt_template_id", None)
+    return payload
 
 
 def _stream_strategy_used(prepared: dict[str, Any]) -> str:
@@ -53,6 +64,7 @@ def _stream_metadata_payload(prepared: dict[str, Any], workflow_run: dict[str, A
         "grounding_score": prepared["grounding_score"],
         "refusal_reason": prepared["refusal_reason"],
         "safety": prepared["safety"],
+        "resume": dict(prepared.get("resume") or {}),
         "retrieval": prepared["retrieval_meta"],
         "workflow_run": workflow_run or {},
     }
@@ -215,6 +227,41 @@ async def list_chat_messages(session_id: str, request: Request, user: CurrentUse
     return {"items": list_session_messages(session_id, user, load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope))}
 
 
+@router.put("/api/v1/chat/sessions/{session_id}/messages/{message_id}/feedback")
+async def put_chat_message_feedback(
+    session_id: str,
+    message_id: str,
+    payload: MessageFeedbackRequest,
+    request: Request,
+    user: CurrentUser,
+) -> dict[str, Any]:
+    require_permission(request, user, CHAT_PERMISSION, action="chat.message.feedback", resource_type="chat_session", resource_id=session_id)
+    feedback = upsert_chat_message_feedback(
+        session_id=session_id,
+        message_id=message_id,
+        user=user,
+        verdict=payload.verdict,
+        reason_code=payload.reason_code,
+        notes=payload.notes,
+    )
+    write_gateway_audit_event(
+        action="chat.message.feedback",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="chat_message",
+        resource_id=message_id,
+        scope="owner",
+        details={
+            "session_id": session_id,
+            "verdict": payload.verdict,
+            "reason_code": payload.reason_code,
+            "has_notes": bool(payload.notes),
+        },
+    )
+    return {"feedback": feedback}
+
+
 @router.get("/api/v1/chat/sessions/{session_id}/workflow-runs")
 async def list_chat_workflow_runs(session_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_permission(request, user, CHAT_PERMISSION, action="chat.workflow_run.list", resource_type="chat_session", resource_id=session_id)
@@ -270,7 +317,7 @@ async def retry_chat_workflow_run(run_id: str, payload: RetryWorkflowRunRequest,
             "question": retry_message.question,
             "execution_mode": retry_message.execution_mode,
             "reuse_scope": payload.reuse_scope,
-            "scope": retry_message.scope.model_dump() if retry_message.scope is not None else None,
+            "scope": _scope_payload_dict(retry_message.scope),
         },
     )
     if state.replay_payload is not None:
@@ -287,6 +334,7 @@ async def retry_chat_workflow_run(run_id: str, payload: RetryWorkflowRunRequest,
             session_id=session_id,
             payload=retry_message,
             request=request,
+            request_scope="chat.workflow_run.retry",
             user=user,
             load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope),
             default_scope_fn=default_scope,
@@ -297,6 +345,7 @@ async def retry_chat_workflow_run(run_id: str, payload: RetryWorkflowRunRequest,
             persist_chat_turn_fn=persist_chat_turn,
             start_workflow_run_fn=create_workflow_run,
             update_workflow_run_fn=update_workflow_run,
+            resume_workflow_run=source_run if payload.reuse_scope else None,
         )
     except Exception as exc:
         fail_gateway_idempotency(state, user, exc)
@@ -335,6 +384,8 @@ async def retry_chat_workflow_run(run_id: str, payload: RetryWorkflowRunRequest,
         details={
             "session_id": session_id,
             "reuse_scope": payload.reuse_scope,
+            "resume_used": bool(((result.get("resume") or {}) if isinstance(result, dict) else {}).get("resumed")),
+            "resumed_from_stage": str(((result.get("resume") or {}) if isinstance(result, dict) else {}).get("source_stage") or ""),
             "new_workflow_run_id": str(((result.get("workflow_run") or {}) if isinstance(result, dict) else {}).get("id") or ""),
             "new_message_id": str(((result.get("message") or {}) if isinstance(result, dict) else {}).get("id") or ""),
         },
@@ -352,7 +403,7 @@ async def send_chat_message(session_id: str, payload: SendMessageRequest, reques
         payload={
             "session_id": session_id,
             "question": payload.question.strip(),
-            "scope": payload.scope.model_dump() if payload.scope is not None else None,
+            "scope": _scope_payload_dict(payload.scope),
             "execution_mode": payload.execution_mode,
         },
     )
@@ -370,6 +421,7 @@ async def send_chat_message(session_id: str, payload: SendMessageRequest, reques
             session_id=session_id,
             payload=payload,
             request=request,
+            request_scope="chat.message.send",
             user=user,
             load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope),
             default_scope_fn=default_scope,
@@ -401,12 +453,13 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
         payload={
             "session_id": session_id,
             "question": payload.question.strip(),
-            "scope": payload.scope.model_dump() if payload.scope is not None else None,
+            "scope": _scope_payload_dict(payload.scope),
             "execution_mode": payload.execution_mode,
         },
     )
     if state.replay_payload is not None:
         result = state.replay_payload
+
         def replay_generate() -> Any:
             yield encode_sse_event(
                 "metadata",
@@ -418,6 +471,7 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                     "grounding_score": result.get("grounding_score", 0),
                     "refusal_reason": result.get("refusal_reason", ""),
                     "safety": result.get("safety", {}),
+                    "resume": result.get("resume", {}),
                     "retrieval": result.get("retrieval", {}),
                     "workflow_run": result.get("workflow_run", {}),
                 },
@@ -452,6 +506,8 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
             prepared = await prepare_chat_message(
                 session_id=session_id,
                 payload=payload,
+                request=request,
+                request_scope="chat.message.stream",
                 user=user,
                 load_session_fn=lambda sid, current_user: load_session_for_user(sid, current_user, default_scope_fn=default_scope),
                 default_scope_fn=default_scope,
@@ -501,6 +557,7 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                         answer_mode=prepared["answer_mode"],
                         on_answer=emit_answer,
                         safety=prepared["safety"],
+                        settings_prompt_append=str(prepared.get("settings_prompt_append") or ""),
                     )
                 finally:
                     await answer_queue.put(None)

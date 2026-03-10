@@ -12,7 +12,7 @@ from shared.grounded_answering import (
 )
 from shared.langchain_chat import invoke_prompt_chain, stream_prompt_chain
 from shared.llm_settings import load_llm_settings
-from shared.model_routing import settings_with_model_route
+from shared.model_routing import execute_with_model_route_fallback, settings_with_model_route_plan
 from shared.prompt_registry import get_prompt_definition
 from shared.prompt_safety import (
     analyze_prompt_safety,
@@ -98,33 +98,36 @@ async def _generate_query_answer(*, prepared: dict[str, Any]) -> str:
         return fallback_answer(prepared["question"], prepared["citations"], "refusal")
     settings = load_llm_settings()
     prompt_definition = get_prompt_definition("kb_grounded_answer")
-    routed_settings, route = settings_with_model_route(
+    route_plan = settings_with_model_route_plan(
         settings,
         prompt_definition.route_key,
         default_temperature=0.2,
         default_max_tokens=min(settings.default_max_tokens, 1200),
     )
-    if not routed_settings.configured:
+    if not any(candidate.configured for candidate, _decision in route_plan):
         return fallback_answer(prepared["question"], prepared["citations"], prepared["answer_mode"])
     prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(route_plan[0][0].system_prompt or ""),
         "history": dicts_to_langchain_messages([]),
         "question": prepared["question"].strip(),
         "answer_mode": prepared["answer_mode"],
         "evidence_block": evidence_prompt_lines(prepared["citations"]),
     }
     try:
-        completion = await invoke_prompt_chain(
-            settings=routed_settings,
-            prompt=prompt,
-            inputs=inputs,
-            prompt_key=prompt_definition.key,
-            prompt_version=prompt_definition.version,
-            route_key=route.route_key,
-            model=route["model"],
-            temperature=route["temperature"],
-            max_tokens=route["max_tokens"],
+        completion, _route, _attempted_routes = await execute_with_model_route_fallback(
+            route_plan,
+            call=lambda candidate_settings, candidate_route: invoke_prompt_chain(
+                settings=candidate_settings,
+                prompt=prompt,
+                inputs=inputs,
+                prompt_key=prompt_definition.key,
+                prompt_version=prompt_definition.version,
+                route_key=candidate_route.route_key,
+                model=candidate_route["model"],
+                temperature=candidate_route["temperature"],
+                max_tokens=candidate_route["max_tokens"],
+            ),
         )
         return ensure_citation_markers(str(completion["answer"]), prepared["citations"])
     except HTTPException:
@@ -152,36 +155,39 @@ async def _stream_query_answer(*, prepared: dict[str, Any], on_answer: Any) -> s
         return answer
     settings = load_llm_settings()
     prompt_definition = get_prompt_definition("kb_grounded_answer")
-    routed_settings, route = settings_with_model_route(
+    route_plan = settings_with_model_route_plan(
         settings,
         prompt_definition.route_key,
         default_temperature=0.2,
         default_max_tokens=min(settings.default_max_tokens, 1200),
     )
-    if not routed_settings.configured:
+    if not any(candidate.configured for candidate, _decision in route_plan):
         answer = fallback_answer(prepared["question"], prepared["citations"], prepared["answer_mode"])
         await emit_answer(answer)
         return answer
     prompt = prompt_definition.build_prompt()
     inputs = {
-        "settings_prompt": augment_settings_prompt(routed_settings.system_prompt or ""),
+        "settings_prompt": augment_settings_prompt(route_plan[0][0].system_prompt or ""),
         "history": dicts_to_langchain_messages([]),
         "question": prepared["question"].strip(),
         "answer_mode": prepared["answer_mode"],
         "evidence_block": evidence_prompt_lines(prepared["citations"]),
     }
     try:
-        completion = await stream_prompt_chain(
-            settings=routed_settings,
-            prompt=prompt,
-            inputs=inputs,
-            on_text_delta=lambda _delta, answer_text: emit_answer(answer_text),
-            prompt_key=prompt_definition.key,
-            prompt_version=prompt_definition.version,
-            route_key=route.route_key,
-            model=route["model"],
-            temperature=route["temperature"],
-            max_tokens=route["max_tokens"],
+        completion, _route, _attempted_routes = await execute_with_model_route_fallback(
+            route_plan,
+            call=lambda candidate_settings, candidate_route: stream_prompt_chain(
+                settings=candidate_settings,
+                prompt=prompt,
+                inputs=inputs,
+                on_text_delta=lambda _delta, answer_text: emit_answer(answer_text),
+                prompt_key=prompt_definition.key,
+                prompt_version=prompt_definition.version,
+                route_key=candidate_route.route_key,
+                model=candidate_route["model"],
+                temperature=candidate_route["temperature"],
+                max_tokens=candidate_route["max_tokens"],
+            ),
         )
         finalized_answer = ensure_citation_markers(str(completion["answer"]), prepared["citations"])
         if finalized_answer != str(completion["answer"]):

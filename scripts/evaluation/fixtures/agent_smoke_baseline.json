@@ -1,0 +1,58 @@
+{
+  "suite_name": "agent_smoke",
+  "suite_version": "smoke-eval-2026-03-10",
+  "required_dataset_versions": [
+    "agent-smoke-grounded-2026-03-10",
+    "agent-smoke-agent-2026-03-10",
+    "agent-smoke-refusal-2026-03-10"
+  ],
+  "overall_thresholds": {
+    "correctness": 0.85,
+    "faithfulness": 0.8,
+    "citation_alignment": 0.6
+  },
+  "jobs": {
+    "grounded_single": {
+      "dataset_version": "agent-smoke-grounded-2026-03-10",
+      "execution_modes": [
+        "grounded"
+      ],
+      "prompt_versions_required": true,
+      "model_versions_required": true,
+      "thresholds": {
+        "accuracy": 1.0,
+        "correctness": 0.85,
+        "faithfulness": 0.75,
+        "citation_alignment": 1.0
+      }
+    },
+    "agent_multi": {
+      "dataset_version": "agent-smoke-agent-2026-03-10",
+      "execution_modes": [
+        "agent"
+      ],
+      "prompt_versions_required": true,
+      "model_versions_required": true,
+      "thresholds": {
+        "accuracy": 1.0,
+        "correctness": 0.7,
+        "faithfulness": 0.6,
+        "citation_alignment": 0.8
+      }
+    },
+    "strict_refusal": {
+      "dataset_version": "agent-smoke-refusal-2026-03-10",
+      "execution_modes": [
+        "grounded"
+      ],
+      "prompt_versions_required": true,
+      "model_versions_required": true,
+      "thresholds": {
+        "correctness": 1.0,
+        "faithfulness": 1.0,
+        "refusal_precision": 1.0,
+        "refusal_recall": 1.0
+      }
+    }
+  }
+}

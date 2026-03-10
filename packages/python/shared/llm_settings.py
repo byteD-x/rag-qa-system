@@ -88,6 +88,9 @@ def _parse_model_routing(raw: str) -> dict[str, dict[str, Any]]:
             value = raw_definition.get(key)
             if isinstance(value, str) and value.strip():
                 cleaned[key] = value.strip()
+        fallback_route_key = raw_definition.get("fallback_route_key")
+        if isinstance(fallback_route_key, str) and fallback_route_key.strip():
+            cleaned["fallback_route_key"] = fallback_route_key.strip()
         for key in ("temperature", "timeout_seconds"):
             value = raw_definition.get(key)
             if isinstance(value, (int, float)):

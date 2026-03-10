@@ -24,7 +24,7 @@ from .kb_runtime import (
     KB_RETRIEVE_REQUESTS_TOTAL,
     KB_SAFETY_EVENTS_TOTAL,
 )
-from .kb_schemas import KBQueryRequest, RetrieveRequest
+from .kb_schemas import KBQueryRequest, RetrievalDebugRequest, RetrieveRequest
 from .retrieve import retrieve_kb_result
 
 
@@ -66,6 +66,44 @@ def retrieve_kb(payload: RetrieveRequest, request: Request, user: CurrentUser) -
     KB_RETRIEVE_LATENCY_MS.observe(float(result.stats.retrieval_ms))
     return {
         "items": [serialize_evidence(item, corpus_id=f"kb:{payload.base_id}") for item in result.items],
+        "retrieval": result.stats.as_dict(),
+        "trace_id": current_trace_id(),
+    }
+
+
+@router.post("/api/v1/kb/retrieve/debug")
+def retrieve_kb_debug(payload: RetrievalDebugRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_kb_permission(
+        request,
+        user,
+        KB_READ_PERMISSION,
+        action="kb.retrieve.debug",
+        resource_type="knowledge_base",
+        resource_id=payload.base_id,
+    )
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.retrieve.debug")
+    result = retrieve_kb_result(
+        base_id=payload.base_id,
+        question=payload.question,
+        document_ids=payload.document_ids,
+        limit=payload.limit,
+    )
+    items = []
+    for rank, item in enumerate(result.items, start=1):
+        payload_item = serialize_evidence(item, corpus_id=f"kb:{payload.base_id}")
+        payload_item["debug"] = {
+            "rank": rank,
+            "score": float(((payload_item.get("evidence_path") or {}).get("final_score") or 0.0)),
+            "signal_scores": dict(payload_item.get("signal_scores") or {}),
+            "rerank_score": float(((payload_item.get("signal_scores") or {}).get("rerank") or 0.0)),
+        }
+        items.append(payload_item)
+    degraded = "true" if result.stats.degraded_signals else "false"
+    KB_RETRIEVE_REQUESTS_TOTAL.labels("success", degraded).inc()
+    KB_RETRIEVE_LATENCY_MS.observe(float(result.stats.retrieval_ms))
+    return {
+        "query": payload.question,
+        "items": items,
         "retrieval": result.stats.as_dict(),
         "trace_id": current_trace_id(),
     }

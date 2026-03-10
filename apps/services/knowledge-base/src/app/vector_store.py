@@ -316,6 +316,12 @@ def _load_section_rows(document_id: str) -> list[dict[str, Any]]:
                 FROM kb_sections sections
                 JOIN kb_documents documents ON documents.id = sections.document_id
                 WHERE sections.document_id = %s::uuid
+                  AND EXISTS (
+                      SELECT 1
+                      FROM kb_chunks chunks
+                      WHERE chunks.section_id = sections.id
+                        AND chunks.disabled = FALSE
+                  )
                 ORDER BY sections.section_index ASC
                 """,
                 (document_id,),
@@ -347,6 +353,7 @@ def _load_chunk_rows(document_id: str) -> list[dict[str, Any]]:
                 JOIN kb_sections sections ON sections.id = chunks.section_id
                 JOIN kb_documents documents ON documents.id = chunks.document_id
                 WHERE chunks.document_id = %s::uuid
+                  AND chunks.disabled = FALSE
                 ORDER BY chunks.section_index ASC, chunks.chunk_index ASC
                 """,
                 (document_id,),

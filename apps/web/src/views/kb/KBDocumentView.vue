@@ -4,6 +4,7 @@
       <template #actions>
         <el-button plain @click="router.push('/workspace/kb/upload')">返回</el-button>
         <el-button plain :disabled="!document || !canWrite" @click="openEditDrawer">编辑</el-button>
+        <el-button plain :disabled="!document" @click="router.push(`/workspace/kb/documents/${document.id}/chunks`)">切片管理</el-button>
         <el-button plain type="danger" :disabled="!document || !canWrite" @click="handleDeleteDocument">删除</el-button>
         <el-button
           v-if="document?.latest_job?.retryable && canManage"

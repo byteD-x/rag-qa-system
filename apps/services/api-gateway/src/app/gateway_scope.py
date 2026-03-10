@@ -21,6 +21,8 @@ def default_scope() -> dict[str, Any]:
         "document_ids": [],
         "documents_by_corpus": {},
         "allow_common_knowledge": False,
+        "agent_profile_id": "",
+        "prompt_template_id": "",
         "execution_mode": "grounded",
     }
 
@@ -49,6 +51,8 @@ def normalize_scope_payload(payload: ChatScopePayload | None) -> dict[str, Any]:
         "corpus_ids": list(dict.fromkeys(corpus_ids)),
         "document_ids": list(dict.fromkeys(document_ids)),
         "allow_common_knowledge": bool(payload.allow_common_knowledge),
+        "agent_profile_id": payload.agent_profile_id.strip(),
+        "prompt_template_id": payload.prompt_template_id.strip(),
         "execution_mode": "grounded",
     }
 
@@ -147,5 +151,7 @@ async def resolve_scope_snapshot(
         "document_ids": list(dict.fromkeys(selected_documents)),
         "documents_by_corpus": {corpus_id: list(dict.fromkeys(ids)) for corpus_id, ids in documents_by_corpus.items() if ids},
         "allow_common_knowledge": bool(scope["allow_common_knowledge"]),
+        "agent_profile_id": str(scope.get("agent_profile_id") or ""),
+        "prompt_template_id": str(scope.get("prompt_template_id") or ""),
         "execution_mode": "grounded",
     }

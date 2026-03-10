@@ -185,15 +185,59 @@
                     </div>
                     <div v-else class="message-content markdown-body" v-html="renderMarkdown(message.content)"></div>
                     <div v-if="message.role === 'assistant'" class="rag-meta">
-                      <span v-if="message.retrieval">检索 {{ message.retrieval.aggregate?.retrieval_ms || 0 }}ms</span>
-                      <span v-if="message.retrieval?.aggregate?.selected_candidates">
-                        · 召回 {{ message.retrieval.aggregate.selected_candidates }} 条
-                      </span>
-                      <span v-if="message.workflow_run" class="workflow-link">
-                        <a href="#" @click.prevent="showWorkflow(message.workflow_run)">
-                          <el-icon><Link /></el-icon> 查看执行轨迹
-                        </a>
-                      </span>
+                      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+                        <span v-if="message.retrieval">检索 {{ message.retrieval.aggregate?.retrieval_ms || 0 }}ms</span>
+                        <span v-if="message.retrieval?.aggregate?.selected_candidates">
+                          · 召回 {{ message.retrieval.aggregate.selected_candidates }} 条
+                        </span>
+                        <span v-if="message.workflow_run" class="workflow-link">
+                          <a href="#" @click.prevent="showWorkflow(message.workflow_run)">
+                            <el-icon><Link /></el-icon> 查看执行轨迹
+                          </a>
+                        </span>
+                      </div>
+                      <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;" v-if="!message.streaming && message.id && !message.id.startsWith('temp-')">
+                        <button type="button" class="feedback-btn" :class="{ active: message.feedback?.verdict === 'up' }" @click="handleFeedback(message, 'up')" title="有帮助">👍</button>
+                        <el-popover
+                          placement="top"
+                          :width="280"
+                          trigger="click"
+                          :visible="feedbackPopoverVisible[message.id]"
+                        >
+                          <template #reference>
+                            <button
+                              type="button"
+                              class="feedback-btn"
+                              :class="{ active: message.feedback?.verdict === 'down' }"
+                              @click="openFeedbackPopover(message)"
+                              title="无帮助"
+                            >
+                              👎
+                            </button>
+                          </template>
+                          <div class="feedback-form">
+                            <h4 style="margin: 0 0 10px; font-size: 14px; font-weight: 600;">提交改进建议</h4>
+                            <el-select v-model="currentFeedback.reason_code" placeholder="选择原因 (可选)" size="small" style="width: 100%; margin-bottom: 10px;">
+                              <el-option label="答非所问" value="irrelevant" />
+                              <el-option label="存在幻觉 / 事实错误" value="hallucination" />
+                              <el-option label="引用不当 / 证据错误" value="bad_citation" />
+                              <el-option label="内容不完整" value="incomplete" />
+                              <el-option label="其他" value="other" />
+                            </el-select>
+                            <el-input
+                              v-model="currentFeedback.notes"
+                              type="textarea"
+                              :rows="3"
+                              placeholder="详细描述问题，帮助我们优化模型 (可选)"
+                              style="margin-bottom: 10px;"
+                            />
+                            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                              <el-button size="small" @click="closeFeedbackPopover(message.id)">取消</el-button>
+                              <el-button type="primary" size="small" @click="submitDownFeedback(message)">提交反馈</el-button>
+                            </div>
+                          </div>
+                        </el-popover>
+                      </div>
                     </div>
                   </div>
                   <div v-if="message.role === 'assistant' && (message.citations?.length || 0) > 0" class="inline-citations">
@@ -313,6 +357,7 @@ import {
   updateChatSession,
   getWorkflowRun,
   retryWorkflowRun,
+  submitMessageFeedback,
   type ChatScope
 } from '@/api/chat';
 import { createIdempotencyKey, isAbortRequestError, isHandledRequestError } from '@/api/request';
@@ -331,6 +376,9 @@ const activeSessionId = ref('');
 const question = ref('');
 const asking = ref(false);
 let currentController: AbortController | null = null;
+
+const feedbackPopoverVisible = ref<Record<string, boolean>>({});
+const currentFeedback = ref({ reason_code: '', notes: '' });
 
 const scopeMode = ref<'single' | 'multi' | 'all'>('all');
 const selectedCorpusIds = ref<string[]>([]);
@@ -845,6 +893,72 @@ async function ask() {
     currentController = null;
     messages.value = messages.value.map((item: any) => item?.streaming ? attachMessageSafety({ ...item, streaming: false }) : item);
     asking.value = false;
+  }
+}
+
+async function handleFeedback(message: any, verdict: 'up' | 'down') {
+  if (!activeSessionId.value || !message || !message.id || message.id.startsWith('temp-')) return;
+  const originalVerdict = message.feedback?.verdict;
+  const newVerdict = originalVerdict === verdict ? undefined : verdict; // Toggle behavior
+
+  // Optimistic UI update
+  message.feedback = message.feedback || {};
+  message.feedback.verdict = newVerdict;
+
+  try {
+    // If we wanted to allow deleting feedback we'd need an endpoint, but the API doesn't specify one.
+    // Assuming sending the same verdict again might not be supported or we just re-send.
+    // The API `submitMessageFeedback` takes `verdict`. If newVerdict is undefined, we might not be able to clear it.
+    // For now, if they click the same one, we just do nothing or we only support setting it.
+    if (!newVerdict) {
+       // Just resetting UI if toggle was intended, but let's just re-submit the verdict for simplicity if not toggleable.
+       // Actually, let's keep it simple: just submit the new verdict.
+       // We'll enforce that a click always submits that verdict.
+    }
+    
+    if (newVerdict) {
+      await submitMessageFeedback(activeSessionId.value, message.id, { verdict: newVerdict });
+    }
+    if (newVerdict === 'up') {
+      ElMessage.success('感谢您的好评反馈');
+    }
+  } catch (e: any) {
+    // Revert on failure
+    message.feedback.verdict = originalVerdict;
+    if (isAbortRequestError(e)) return;
+    if (!isHandledRequestError(e)) {
+      ElMessage.error('提交反馈失败');
+    }
+  }
+}
+
+function openFeedbackPopover(message: any) {
+  if (!message || !message.id) return;
+  // If already down-voted, maybe they just want to see/edit it, but let's keep it simple
+  handleFeedback(message, 'down');
+  currentFeedback.value = { reason_code: '', notes: '' };
+  feedbackPopoverVisible.value[message.id] = true;
+}
+
+function closeFeedbackPopover(messageId: string) {
+  feedbackPopoverVisible.value[messageId] = false;
+}
+
+async function submitDownFeedback(message: any) {
+  if (!activeSessionId.value || !message || !message.id) return;
+  try {
+    await submitMessageFeedback(activeSessionId.value, message.id, {
+      verdict: 'down',
+      reason_code: currentFeedback.value.reason_code || undefined,
+      notes: currentFeedback.value.notes || undefined
+    });
+    ElMessage.success('感谢您的反馈，我们会继续改进');
+    closeFeedbackPopover(message.id);
+  } catch (e: any) {
+    if (isAbortRequestError(e)) return;
+    if (!isHandledRequestError(e)) {
+      ElMessage.error('提交反馈详情失败');
+    }
   }
 }
 
@@ -1514,6 +1628,31 @@ onBeforeUnmount(() => {
   .session-item .session-title {
     max-width: 80px;
   }
+}
+
+.feedback-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feedback-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.feedback-btn.active {
+  background: var(--blue-50);
+  border-color: var(--blue-200);
+  color: var(--blue-600);
 }
 
 @media (max-width: 768px) {

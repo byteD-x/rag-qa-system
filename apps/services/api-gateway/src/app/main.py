@@ -17,6 +17,7 @@ from shared.tracing import TRACE_ID_HEADER, ensure_trace_id, reset_trace_id, set
 
 from .ai_client import load_llm_settings
 from .gateway_admin_routes import router as gateway_admin_router
+from .gateway_analytics_routes import router as gateway_analytics_router
 from .gateway_audit_support import merge_audit_event_lists as _merge_audit_event_lists
 from .gateway_auth_routes import router as gateway_auth_router
 from .gateway_chat_routes import router as gateway_chat_router
@@ -26,6 +27,7 @@ from .gateway_pricing import estimate_usage_cost
 from .gateway_runtime import gateway_db, logger, runtime_settings
 from .gateway_schemas import ChatScopePayload
 from .gateway_scope import fetch_corpora, fetch_corpus_documents, resolve_scope_snapshot
+from .gateway_platform_routes import router as gateway_platform_router
 from .gateway_system_routes import router as gateway_system_router
 from .gateway_transport import request_service_json
 
@@ -145,6 +147,8 @@ app.include_router(gateway_auth_router)
 app.include_router(gateway_system_router)
 app.include_router(gateway_chat_router)
 app.include_router(gateway_admin_router)
+app.include_router(gateway_platform_router)
+app.include_router(gateway_analytics_router)
 
 
 __all__ = [

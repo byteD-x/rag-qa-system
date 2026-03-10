@@ -83,6 +83,16 @@ def test_gateway_to_json_preserves_empty_list() -> None:
     assert gateway_db.to_json(None) == "{}"
 
 
+def test_message_feedback_request_normalizes_fields() -> None:
+    gateway_schemas = _load_gateway_module("app.gateway_schemas")
+
+    payload = gateway_schemas.MessageFeedbackRequest(verdict=" Down ", reason_code="Low Confidence", notes="  needs citations  ")
+
+    assert payload.verdict == "down"
+    assert payload.reason_code == "low_confidence"
+    assert payload.notes == "needs citations"
+
+
 def _prioritize_sys_path(path: Path) -> None:
     target = str(path)
     try:
@@ -425,6 +435,82 @@ def test_generate_grounded_answer_short_ambiguous_common_knowledge_skips_llm(mon
     assert "信息不足" in result["answer"]
 
 
+def test_generate_grounded_answer_retries_with_fallback_route(monkeypatch) -> None:
+    gateway_answering = _load_gateway_module("app.gateway_answering")
+    attempts: list[tuple[str, str]] = []
+
+    class _Settings:
+        configured = True
+        provider = "openai-compatible"
+        base_url = "https://primary.example.test/v1"
+        api_key = "secret"
+        model = "default-model"
+        system_prompt = "custom system prompt"
+        default_temperature = 0.7
+        default_max_tokens = 900
+        common_knowledge_model = ""
+        common_knowledge_max_tokens = 256
+        common_knowledge_history_messages = 1
+        common_knowledge_history_chars = 24
+        timeout_seconds = 30.0
+        extra_body = {}
+        model_routing = {
+            "grounded": {
+                "model": "primary-grounded-model",
+                "fallback_route_key": "grounded_backup",
+                "temperature": 0.2,
+                "max_tokens": 800,
+            },
+            "grounded_backup": {
+                "model": "backup-grounded-model",
+                "base_url": "https://backup.example.test/v1",
+                "temperature": 0.2,
+                "max_tokens": 800,
+            },
+        }
+
+    async def fake_create_llm_completion(*, settings, prompt, inputs, prompt_key=None, prompt_version=None, model, temperature, max_tokens):
+        attempts.append((settings.base_url, model))
+        if model == "primary-grounded-model":
+            raise gateway_answering.HTTPException(status_code=502, detail="primary unavailable")
+        return {
+            "answer": "Expense approvals require owner sign-off. [1]",
+            "provider": "mock-provider",
+            "model": model,
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            "llm_trace": {"llm_call_id": "llm-2", "prompt_key": "chat_grounded_answer", "prompt_version": "2026-03-10"},
+        }
+
+    monkeypatch.setattr(gateway_answering, "load_llm_settings", lambda: _Settings())
+    monkeypatch.setattr(gateway_answering, "create_llm_completion", fake_create_llm_completion)
+
+    result = asyncio.run(
+        gateway_answering.generate_grounded_answer(
+            question="What approvals are needed for expense reimbursement?",
+            history=[],
+            evidence=[
+                {
+                    "document_title": "Expense policy",
+                    "section_title": "Approval",
+                    "quote": "Department owner approval is required before reimbursement.",
+                    "raw_text": "Department owner approval is required before reimbursement.",
+                    "evidence_path": {"final_score": 0.82},
+                }
+            ],
+            answer_mode="grounded",
+        )
+    )
+
+    assert attempts == [
+        ("https://primary.example.test/v1", "primary-grounded-model"),
+        ("https://backup.example.test/v1", "backup-grounded-model"),
+    ]
+    assert result["model"] == "backup-grounded-model"
+    assert result["llm_trace"]["route_key"] == "grounded_backup"
+    assert result["llm_trace"]["route_attempts"] == ["grounded", "grounded_backup"]
+    assert result["llm_trace"]["fallback_used"] is True
+
+
 def test_create_llm_completion_stream_yields_live_deltas(monkeypatch) -> None:
     ai_client = _load_gateway_module("app.ai_client")
     captured: dict[str, object] = {}
@@ -659,6 +745,127 @@ def test_handle_chat_message_persists_workflow_run(monkeypatch) -> None:
     assert workflow_updates[1]["message_id"] == "message-1"
     assert workflow_updates[1]["workflow_events"][-1]["stage"] == "persisted"
     assert workflow_updates[1]["tool_calls"] == [{"tool": "search_scope", "result_count": 1}]
+
+
+def test_handle_chat_message_reuses_generation_checkpoint_for_persistence_resume(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    started_runs: list[dict[str, object]] = []
+    workflow_updates: list[dict[str, object]] = []
+    build_payload_calls: list[dict[str, object]] = []
+
+    async def fake_prepare_chat_message(**kwargs):
+        return {
+            "session_id": "session-1",
+            "payload": SimpleNamespace(question="What is the expense approval flow?"),
+            "trace_id": "gateway-trace-2",
+            "scope_snapshot": {"mode": "single", "execution_mode": "agent"},
+            "execution_mode": "agent",
+            "history": [],
+            "evidence": [{"unit_id": "chunk-1"}],
+            "contextualized_question": "expense approval flow",
+            "retrieval_meta": {
+                "aggregate": {"selected_candidates": 1, "partial_failure": False},
+                "agent": {"tool_calls": [{"tool": "search_scope", "result_count": 1}]},
+            },
+            "answer_mode": "grounded",
+            "evidence_status": "grounded",
+            "grounding_score": 0.91,
+            "refusal_reason": "",
+            "safety": {"risk_level": "low", "reason_codes": []},
+            "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 0.0, "resume_ms": 0.1},
+            "resume": {
+                "resumed": True,
+                "source_run_id": "run-0",
+                "source_stage": "failed",
+                "resume_target": "persist_message",
+                "reused_retrieval": True,
+                "reused_generation": True,
+            },
+            "generation_checkpoint": {
+                "answer_payload": {
+                    "answer": "Use [1]",
+                    "provider": "mock",
+                    "model": "mock-model",
+                    "usage": {"prompt_tokens": 10},
+                    "llm_trace": {"llm_call_id": "llm-2", "prompt_key": "chat_grounded_answer", "prompt_version": "2026-03-10"},
+                },
+                "generation_ms": 18.5,
+            },
+        }
+
+    async def fail_generate_grounded_answer(**kwargs):
+        raise AssertionError("generation should be reused from checkpoint")
+
+    def fake_build_chat_response_payload(**kwargs):
+        build_payload_calls.append(dict(kwargs))
+        return {
+            "answer": kwargs["answer_payload"]["answer"],
+            "answer_mode": "grounded",
+            "strategy_used": "agent_grounded_qa",
+            "citations": [{"unit_id": "chunk-1"}],
+            "provider": kwargs["answer_payload"]["provider"],
+            "model": kwargs["answer_payload"]["model"],
+            "usage": dict(kwargs["answer_payload"]["usage"]),
+            "llm_trace": dict(kwargs["answer_payload"]["llm_trace"]),
+            "latency": {"total_ms": 12.0, "generation_ms": kwargs["generation_ms"]},
+            "cost": {"estimated_cost": 0.01},
+        }
+
+    def fake_finalize_chat_message(**kwargs):
+        response_payload = dict(kwargs["response_payload"])
+        response_payload["message"] = {"id": "message-2", "content": response_payload["answer"]}
+        return response_payload
+
+    def fake_start_workflow_run_fn(**kwargs):
+        started_runs.append(dict(kwargs))
+        return {"id": "run-2", "status": "running", "stage": "persistence_resumed"}
+
+    def fake_update_workflow_run_fn(**kwargs):
+        workflow_updates.append(dict(kwargs))
+        state = dict(kwargs["workflow_state"])
+        return {
+            "id": kwargs["run_id"],
+            "status": kwargs["status"],
+            "stage": state.get("stage", ""),
+            "message_id": kwargs.get("message_id", ""),
+            "workflow_state": state,
+            "workflow_events": list(kwargs.get("workflow_events") or []),
+            "tool_calls": list(kwargs.get("tool_calls") or []),
+        }
+
+    monkeypatch.setattr(gateway_chat_service, "prepare_chat_message", fake_prepare_chat_message)
+    monkeypatch.setattr(gateway_chat_service, "generate_grounded_answer", fail_generate_grounded_answer)
+    monkeypatch.setattr(gateway_chat_service, "build_chat_response_payload", fake_build_chat_response_payload)
+    monkeypatch.setattr(gateway_chat_service, "finalize_chat_message", fake_finalize_chat_message)
+
+    result = asyncio.run(
+        gateway_chat_service.handle_chat_message(
+            session_id="session-1",
+            payload=SimpleNamespace(question="What is the expense approval flow?"),
+            request=SimpleNamespace(),
+            user=user,
+            load_session_fn=lambda *args, **kwargs: {},
+            default_scope_fn=lambda: {"mode": "all"},
+            resolve_scope_snapshot_fn=lambda *args, **kwargs: {},
+            recent_history_messages_fn=lambda *args, **kwargs: [],
+            retrieve_scope_evidence_fn=lambda *args, **kwargs: None,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+            persist_chat_turn_fn=lambda *args, **kwargs: {},
+            start_workflow_run_fn=fake_start_workflow_run_fn,
+            update_workflow_run_fn=fake_update_workflow_run_fn,
+        )
+    )
+
+    assert result["workflow_run"]["status"] == "completed"
+    assert result["workflow_run"]["message_id"] == "message-2"
+    assert started_runs[0]["workflow_state"]["stage"] == "persistence_resumed"
+    assert started_runs[0]["workflow_state"]["resume_target"] == "persist_message"
+    assert started_runs[0]["workflow_state"]["resume_checkpoint"]["generation_checkpoint"]["generation_ms"] == 18.5
+    assert build_payload_calls[0]["generation_ms"] == 18.5
+    assert len(workflow_updates) == 1
+    assert workflow_updates[0]["status"] == "completed"
+    assert workflow_updates[0]["workflow_state"]["stage"] == "persisted"
 
 
 def test_retry_chat_workflow_run_uses_idempotency_and_audit(monkeypatch) -> None:
@@ -1137,6 +1344,189 @@ def test_auth_configuration_rejects_default_credentials_outside_local(monkeypatc
         assert "insecure auth configuration" in str(exc)
     else:
         raise AssertionError("expected insecure non-local auth configuration to raise RuntimeError")
+
+
+def test_upsert_chat_message_feedback_snapshots_llm_metadata(monkeypatch) -> None:
+    gateway_sessions = _load_gateway_module("app.gateway_sessions")
+    user = auth_module.AuthUser(user_id="user-1", email="member@local", role="member")
+    message_row = {
+        "id": "msg-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "role": "assistant",
+        "answer_mode": "grounded",
+        "provider": "openai-compatible",
+        "model": "gpt-4.1-mini",
+        "scope_snapshot_json": {"execution_mode": "agent"},
+        "usage_json": {
+            "_meta": {
+                "trace_id": "gateway-trace-1",
+                "cost": {"estimated_cost": 0.0123, "currency": "USD"},
+                "llm_trace": {
+                    "prompt_key": "chat_grounded_answer",
+                    "prompt_version": "2026-03-10",
+                    "route_key": "grounded",
+                    "model_resolved": "gpt-4.1-mini",
+                },
+            }
+        },
+    }
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+
+        def execute(self, query, params=None):
+            if "FROM chat_messages" in query:
+                self._row = message_row
+            elif "INSERT INTO chat_message_feedback" in query:
+                self._row = {
+                    "id": "feedback-1",
+                    "session_id": params[1],
+                    "message_id": params[2],
+                    "user_id": params[3],
+                    "verdict": params[4],
+                    "reason_code": params[5],
+                    "notes": params[6],
+                    "trace_id": params[7],
+                    "prompt_key": params[8],
+                    "prompt_version": params[9],
+                    "route_key": params[10],
+                    "model": params[11],
+                    "provider": params[12],
+                    "execution_mode": params[13],
+                    "answer_mode": params[14],
+                    "cost_json": {"estimated_cost": 0.0123, "currency": "USD"},
+                    "llm_trace_json": {"prompt_key": "chat_grounded_answer", "prompt_version": "2026-03-10", "route_key": "grounded"},
+                    "created_at": None,
+                    "updated_at": None,
+                }
+            return None
+
+        def fetchone(self):
+            return self._row
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(gateway_sessions.gateway_db, "connect", lambda: _Connection())
+
+    feedback = gateway_sessions.upsert_chat_message_feedback(
+        session_id="session-1",
+        message_id="msg-1",
+        user=user,
+        verdict="down",
+        reason_code="low_confidence",
+        notes="needs citations",
+    )
+
+    assert feedback["verdict"] == "down"
+    assert feedback["reason_code"] == "low_confidence"
+    assert feedback["trace_id"] == "gateway-trace-1"
+    assert feedback["prompt_key"] == "chat_grounded_answer"
+    assert feedback["prompt_version"] == "2026-03-10"
+    assert feedback["route_key"] == "grounded"
+    assert feedback["model"] == "gpt-4.1-mini"
+    assert feedback["provider"] == "openai-compatible"
+    assert feedback["execution_mode"] == "agent"
+    assert feedback["cost"]["estimated_cost"] == 0.0123
+
+
+def test_list_session_messages_attaches_feedback_payload(monkeypatch) -> None:
+    gateway_sessions = _load_gateway_module("app.gateway_sessions")
+    user = auth_module.AuthUser(user_id="user-1", email="member@local", role="member")
+    message_row = {
+        "id": "msg-1",
+        "session_id": "session-1",
+        "role": "assistant",
+        "question": "",
+        "answer": "approved",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "citations_json": [],
+        "evidence_path_json": [],
+        "scope_snapshot_json": {"execution_mode": "grounded"},
+        "provider": "openai-compatible",
+        "model": "gpt-4.1-mini",
+        "usage_json": {"_meta": {"trace_id": "gateway-trace-1", "cost": {}, "llm_trace": {}}},
+        "created_at": None,
+    }
+    feedback_row = {
+        "id": "feedback-1",
+        "session_id": "session-1",
+        "message_id": "msg-1",
+        "verdict": "up",
+        "reason_code": "helpful",
+        "notes": "",
+        "trace_id": "gateway-trace-1",
+        "prompt_key": "chat_grounded_answer",
+        "prompt_version": "2026-03-10",
+        "route_key": "grounded",
+        "model": "gpt-4.1-mini",
+        "provider": "openai-compatible",
+        "execution_mode": "grounded",
+        "answer_mode": "grounded",
+        "cost_json": {},
+        "llm_trace_json": {},
+        "created_at": None,
+        "updated_at": None,
+    }
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._rows = []
+
+        def execute(self, query, params=None):
+            if "FROM chat_messages" in query:
+                self._rows = [message_row]
+            elif "FROM chat_message_feedback" in query:
+                self._rows = [feedback_row]
+            return None
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(gateway_sessions.gateway_db, "connect", lambda: _Connection())
+
+    messages = gateway_sessions.list_session_messages("session-1", user, load_session_fn=lambda *_args, **_kwargs: None)
+
+    assert len(messages) == 1
+    assert messages[0]["id"] == "msg-1"
+    assert messages[0]["feedback"]["verdict"] == "up"
 
 
 def test_auth_permissions_are_derived_from_role_aliases() -> None:

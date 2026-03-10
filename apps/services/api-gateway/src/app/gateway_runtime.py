@@ -38,6 +38,11 @@ GATEWAY_BACKPRESSURE_TOTAL = Counter(
     "Gateway backpressure rejections.",
     labelnames=("scope", "endpoint"),
 )
+GATEWAY_COST_BUDGET_REJECTIONS_TOTAL = Counter(
+    "rag_gateway_cost_budget_rejections_total",
+    "Gateway chat cost budget rejections.",
+    labelnames=("scope",),
+)
 GATEWAY_SAFETY_EVENTS_TOTAL = Counter(
     "rag_gateway_safety_events_total",
     "Gateway prompt safety events.",

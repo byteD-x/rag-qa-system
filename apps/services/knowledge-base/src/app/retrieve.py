@@ -64,6 +64,7 @@ class StructureRetriever(BaseRetriever):
                     JOIN kb_documents d ON d.id = c.document_id
                     WHERE d.base_id = %s
                       AND d.query_ready = TRUE
+                      AND c.disabled = FALSE
                       AND c.document_id = ANY(%s::uuid[])
                       AND (
                           lower(s.title) = lower(%s)
@@ -126,6 +127,7 @@ class FTSRetriever(BaseRetriever):
                     JOIN query ON TRUE
                     WHERE d.base_id = %s
                       AND d.query_ready = TRUE
+                      AND c.disabled = FALSE
                       AND c.document_id = ANY(%s::uuid[])
                       AND c.fts_document @@ query.tsq
                     ORDER BY fts_score DESC, c.section_index ASC, c.chunk_index ASC

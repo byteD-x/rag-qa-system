@@ -95,6 +95,7 @@ class GatewayRuntimeSettings:
     retrieval_fanout_limit: int
     chat_max_in_flight_global: int
     chat_max_in_flight_per_user: int
+    chat_session_cost_budget: float
     idempotency_ttl_hours: int
     llm_price_currency: str
     llm_input_price_per_1k_tokens: float
@@ -169,6 +170,7 @@ def load_gateway_runtime_settings() -> GatewayRuntimeSettings:
         retrieval_fanout_limit=max(_read_int_env("GATEWAY_RETRIEVAL_FANOUT_LIMIT", default=4), 1),
         chat_max_in_flight_global=max(_read_int_env("GATEWAY_CHAT_MAX_IN_FLIGHT_GLOBAL", default=32), 1),
         chat_max_in_flight_per_user=max(_read_int_env("GATEWAY_CHAT_MAX_IN_FLIGHT_PER_USER", default=4), 1),
+        chat_session_cost_budget=max(_read_float_env("GATEWAY_CHAT_SESSION_COST_BUDGET", default=0.0), 0.0),
         idempotency_ttl_hours=max(_read_int_env("GATEWAY_IDEMPOTENCY_TTL_HOURS", default=24), 1),
         llm_price_currency=(_read_env("LLM_PRICE_CURRENCY", "AI_PRICE_CURRENCY", default="CNY").upper() or "CNY"),
         llm_input_price_per_1k_tokens=_read_float_env(

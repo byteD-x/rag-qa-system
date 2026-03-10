@@ -115,3 +115,81 @@ export function streamKBQuery(data: {
 }, options?: StreamRequestOptions) {
   return streamRequest('/api/v1/kb/query/stream', data, options);
 }
+
+export function syncLocalDirectory(data: {
+  base_id: string;
+  source_path: string;
+  category?: string;
+  recursive?: boolean;
+  delete_missing?: boolean;
+  dry_run?: boolean;
+  max_files?: number;
+}) {
+  return request.post('/kb/connectors/local-directory/sync', data);
+}
+
+export function syncNotion(data: {
+  base_id: string;
+  page_ids: string[];
+  category?: string;
+  delete_missing?: boolean;
+  dry_run?: boolean;
+  max_pages?: number;
+}) {
+  return request.post('/kb/connectors/notion/sync', data);
+}
+
+// ---- Chunk Management ----
+export function getKBChunks(documentId: string, includeDisabled: boolean = false) {
+  return request.get(`/kb/documents/${documentId}/chunks`, { params: { include_disabled: includeDisabled } });
+}
+
+export function updateKBChunk(chunkId: string, data: { text_content?: string, disabled?: boolean, disabled_reason?: string, manual_note?: string }) {
+  return request.patch(`/kb/chunks/${chunkId}`, data);
+}
+
+export function splitKBChunk(chunkId: string, parts: string[]) {
+  return request.post(`/kb/chunks/${chunkId}/split`, { parts });
+}
+
+export function mergeKBChunks(chunkIds: string[], separator: string = '\n\n') {
+  return request.post(`/kb/chunks/merge`, { chunk_ids: chunkIds, separator });
+}
+
+// ---- Retrieval Debugger ----
+export function retrieveDebugKB(data: { query: string; base_id?: string; document_ids?: string[]; top_k?: number; [key: string]: any }) {
+  return request.post('/kb/retrieve/debug', data);
+}
+
+// ---- Connectors ----
+export function listConnectors(baseId?: string) {
+  return request.get('/kb/connectors', { params: { base_id: baseId } });
+}
+
+export function createConnector(data: { base_id: string; name: string; connector_type: string; config: any; schedule?: any }) {
+  return request.post('/kb/connectors', data);
+}
+
+export function getConnector(connectorId: string) {
+  return request.get(`/kb/connectors/${connectorId}`);
+}
+
+export function updateConnector(connectorId: string, data: any) {
+  return request.patch(`/kb/connectors/${connectorId}`, data);
+}
+
+export function deleteConnector(connectorId: string) {
+  return request.delete(`/kb/connectors/${connectorId}`);
+}
+
+export function getConnectorRuns(connectorId: string) {
+  return request.get(`/kb/connectors/${connectorId}/runs`);
+}
+
+export function syncConnector(connectorId: string, dryRun: boolean = false) {
+  return request.post(`/kb/connectors/${connectorId}/sync`, { dry_run: dryRun });
+}
+
+export function runDueConnectors(limit: number = 10, dryRun: boolean = false) {
+  return request.post('/kb/connectors/run-due', { limit, dry_run: dryRun });
+}
