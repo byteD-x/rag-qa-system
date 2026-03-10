@@ -105,9 +105,19 @@ async def request_service_json(
             payload = response.json()
         except ValueError:
             payload = {}
-        detail = payload.get("detail") if isinstance(payload, dict) else ""
+        if isinstance(payload, dict):
+            detail = payload.get("detail") or payload.get("message") or ""
+            code = payload.get("code") or payload.get("error_code") or ""
+        else:
+            detail = ""
+            code = ""
+        upstream_status = int(response.status_code)
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"detail": str(detail or f"upstream service returned {response.status_code}"), "code": "upstream_request_failed"},
+            status_code=upstream_status if 400 <= upstream_status < 500 else status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "detail": str(detail or f"upstream service returned {response.status_code}"),
+                "code": str(code or "upstream_request_failed"),
+                "upstream_status": upstream_status,
+            },
         )
     return response.json()

@@ -213,3 +213,16 @@ class UpdateAgentProfileRequest(BaseModel):
         if value is None:
             return None
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+class AnalyticsDashboardResponse(BaseModel):
+    view: str = Field(description="Analytics scope. personal only includes the caller's activity; admin includes all visible activity.")
+    days: int = Field(description="Rolling window in days for funnel, QA, and trend metrics.", ge=1, le=90)
+    hot_terms: list[dict[str, Any]] = Field(description="Recent high-frequency user question tokens from the chat flow.")
+    zero_hit: dict[str, Any] = Field(description="Existing zero-hit trend and top-query aggregates based on missing citations or zero selected candidates.")
+    satisfaction: dict[str, Any] = Field(description="User feedback trend for up, down, and flag verdicts.")
+    usage: dict[str, Any] = Field(description="Assistant token and estimated cost usage summary with day-level trend.")
+    funnel: dict[str, Any] = Field(description="Core funnel metrics spanning KB creation, ingest progress, Q&A turns, answer outcomes, and user feedback.")
+    ingest_health: dict[str, Any] | None = Field(default=None, description="Knowledge-base ingest health snapshot. Null when KB analytics data is temporarily unavailable.")
+    qa_quality: dict[str, Any] = Field(description="Answer-mode, evidence-status, zero-hit, and low-quality aggregates for front-end quality dashboards.")
+    data_quality: dict[str, Any] = Field(description="Unsupported fields or degraded sections. Frontend should inspect this section to handle null analytics values.")

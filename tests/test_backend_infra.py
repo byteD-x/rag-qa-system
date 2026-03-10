@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from pydantic import ValidationError
 
@@ -153,6 +155,10 @@ def _load_kb_module(module_name: str):
 
     module = importlib.import_module(module_name)
     return importlib.reload(module)
+
+
+def _auth_headers(user: auth_module.AuthUser) -> dict[str, str]:
+    return {"Authorization": f"Bearer {auth_module.create_access_token(user)}"}
 
 
 def test_resolve_scope_snapshot_persists_documents_by_corpus(monkeypatch) -> None:
@@ -1529,6 +1535,312 @@ def test_list_session_messages_attaches_feedback_payload(monkeypatch) -> None:
     assert messages[0]["feedback"]["verdict"] == "up"
 
 
+def test_kb_analytics_dashboard_payload_aggregates_ingest_health(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="user-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+            self._rows = []
+
+        def execute(self, query, params=None):
+            if "FROM kb_bases" in query:
+                self._row = {"total_count": 2}
+                self._rows = []
+            elif "COUNT(*) AS uploaded_count" in query:
+                self._row = {"uploaded_count": 6}
+                self._rows = []
+            elif "COUNT(*) AS ready_count" in query:
+                self._row = {"ready_count": 4}
+                self._rows = []
+            elif "AVG(EXTRACT(EPOCH FROM (ready_at - created_at))" in query:
+                self._row = {
+                    "sample_count": 4,
+                    "avg_ms": 82000.0,
+                    "p50_ms": 78000.0,
+                    "p95_ms": 110000.0,
+                    "max_ms": 120000.0,
+                }
+                self._rows = []
+            elif "COUNT(*) AS total_documents" in query:
+                self._row = {
+                    "total_documents": 8,
+                    "ready_documents": 4,
+                    "queryable_documents": 5,
+                    "failed_documents": 1,
+                    "unfinished_documents": 4,
+                    "stalled_documents": 1,
+                    "dead_letter_documents": 1,
+                    "in_progress_documents": 2,
+                }
+                self._rows = []
+            elif "COALESCE(NULLIF(enhancement_status, ''), 'none')" in query:
+                self._rows = [
+                    {"key": "chunk_vectors_ready", "total_count": 4},
+                    {"key": "visual_ready", "total_count": 2},
+                    {"key": "failed", "total_count": 1},
+                ]
+                self._row = None
+            elif "COALESCE(NULLIF(status, ''), 'missing')" in query:
+                self._rows = [
+                    {"key": "done", "total_count": 4},
+                    {"key": "processing", "total_count": 2},
+                    {"key": "dead_letter", "total_count": 1},
+                ]
+                self._row = None
+            elif "COALESCE(NULLIF(status, ''), 'unknown')" in query:
+                self._rows = [
+                    {"key": "ready", "total_count": 4},
+                    {"key": "enhancing", "total_count": 2},
+                    {"key": "failed", "total_count": 1},
+                ]
+                self._row = None
+            else:
+                raise AssertionError(f"unexpected query: {query}")
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_analytics.db, "connect", lambda: _Connection())
+
+    payload = kb_analytics._dashboard_payload(user, view="personal", days=14)
+
+    assert payload["funnel"]["knowledge_bases_created"] == 2
+    assert payload["funnel"]["documents_uploaded"] == 6
+    assert payload["funnel"]["documents_ready"] == 4
+    assert payload["ingest_health"]["summary"]["dead_letter_documents"] == 1
+    assert payload["ingest_health"]["summary"]["stalled_documents"] == 1
+    assert payload["ingest_health"]["upload_to_ready_latency_ms"]["p95_ms"] == 110000.0
+    assert payload["ingest_health"]["document_status_distribution"][0]["key"] == "ready"
+
+
+def test_gateway_qa_quality_stats_handles_empty_window(monkeypatch) -> None:
+    gateway_analytics = _load_gateway_module("app.gateway_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="user-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+            self._rows = []
+
+        def execute(self, query, params=None):
+            if "COUNT(*) AS assistant_answers" in query:
+                self._row = {
+                    "assistant_answers": 0,
+                    "refusal_answers": 0,
+                    "weak_grounded_answers": 0,
+                    "grounded_answers": 0,
+                    "selected_candidates_zero": 0,
+                    "missing_citations": 0,
+                    "missing_citations_non_refusal": 0,
+                    "zero_hit_non_refusal": 0,
+                    "grounding_score_lt_0_5": 0,
+                    "partial_evidence": 0,
+                    "low_quality_answers": 0,
+                }
+                self._rows = []
+            elif "COALESCE(NULLIF(answer_mode, ''), 'unknown')" in query or "COALESCE(NULLIF(evidence_status, ''), 'unknown')" in query:
+                self._rows = []
+                self._row = None
+            else:
+                raise AssertionError(f"unexpected query: {query}")
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(gateway_analytics.gateway_db, "connect", lambda: _Connection())
+
+    payload = gateway_analytics._qa_quality_stats(user, view="personal", days=14)
+
+    assert payload["summary"]["assistant_answers"] == 0
+    assert payload["zero_hit"]["selected_candidates_zero_rate"] == 0.0
+    assert payload["low_quality"]["rate"] == 0.0
+    assert payload["answer_mode_distribution"] == []
+    assert payload["evidence_status_distribution"] == []
+
+
+def test_gateway_dashboard_route_returns_extended_payload(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_analytics = importlib.import_module("app.gateway_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="admin-1",
+        email="admin@local",
+        role="platform_admin",
+        permissions=auth_module.permissions_for_role("platform_admin"),
+    )
+
+    monkeypatch.setattr(gateway_analytics, "_hot_terms", lambda *_args, **_kwargs: [{"term": "expense", "count": 3}])
+    monkeypatch.setattr(gateway_analytics, "_zero_hit_stats", lambda *_args, **_kwargs: {"trend": [], "top_queries": []})
+    monkeypatch.setattr(gateway_analytics, "_satisfaction_stats", lambda *_args, **_kwargs: {"trend": []})
+    monkeypatch.setattr(
+        gateway_analytics,
+        "_usage_stats",
+        lambda *_args, **_kwargs: {"currency": "USD", "summary": {"assistant_turns": 8, "prompt_tokens": 1200.0, "completion_tokens": 480.0, "estimated_cost": 0.52}, "trend": []},
+    )
+    monkeypatch.setattr(
+        gateway_analytics,
+        "_chat_funnel_stats",
+        lambda *_args, **_kwargs: {
+            "chat_sessions_with_questions": 5,
+            "questions_asked": 11,
+            "answer_outcomes": {"grounded": 7, "weak_grounded": 2, "refusal": 1, "other": 0},
+            "feedback": {"up": 4, "down": 1, "flag": 0},
+        },
+    )
+    monkeypatch.setattr(
+        gateway_analytics,
+        "_qa_quality_stats",
+        lambda *_args, **_kwargs: {
+            "summary": {"assistant_answers": 10, "grounded_answers": 7, "weak_grounded_answers": 2, "refusal_answers": 1},
+            "answer_mode_distribution": [{"key": "grounded", "count": 7}],
+            "evidence_status_distribution": [{"key": "grounded", "count": 7}],
+            "zero_hit": {"selected_candidates_zero": 1, "selected_candidates_zero_rate": 0.1, "missing_citations": 2, "missing_citations_rate": 0.2},
+            "low_quality": {"count": 2, "rate": 0.2, "score_threshold": 0.5, "reason_breakdown": [{"key": "partial_evidence", "count": 2}]},
+        },
+    )
+
+    async def _fake_kb_dashboard_snapshot(current_user, *, view: str, days: int):
+        assert current_user.user_id == "admin-1"
+        assert view == "admin"
+        assert days == 30
+        return (
+            {
+                "funnel": {
+                    "knowledge_bases_created": 2,
+                    "documents_uploaded": 6,
+                    "documents_ready": 4,
+                },
+                "ingest_health": {
+                    "summary": {"total_documents": 8, "ready_documents": 4},
+                    "document_status_distribution": [{"key": "ready", "count": 4}],
+                    "latest_job_status_distribution": [{"key": "done", "count": 4}],
+                    "enhancement_status_distribution": [{"key": "chunk_vectors_ready", "count": 4}],
+                    "upload_to_ready_latency_ms": {"count": 4, "avg_ms": 82000.0, "p50_ms": 78000.0, "p95_ms": 110000.0, "max_ms": 120000.0, "unsupported": False},
+                },
+                "data_quality": {"unsupported_fields": [], "degraded_sections": []},
+            },
+            [],
+        )
+
+    monkeypatch.setattr(gateway_analytics, "_kb_dashboard_snapshot", _fake_kb_dashboard_snapshot)
+    monkeypatch.setattr(gateway_analytics, "write_gateway_audit_event", lambda **_kwargs: None)
+
+    client = TestClient(gateway_main.app)
+    response = client.get("/api/v1/analytics/dashboard?view=admin&days=30", headers=_auth_headers(user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["funnel"]["knowledge_bases_created"] == 2
+    assert payload["funnel"]["questions_asked"] == 11
+    assert payload["qa_quality"]["zero_hit"]["selected_candidates_zero"] == 1
+    assert payload["ingest_health"]["summary"]["ready_documents"] == 4
+    assert payload["data_quality"]["unsupported_fields"] == []
+
+
+def test_gateway_dashboard_route_rejects_invalid_days(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    user = auth_module.AuthUser(
+        user_id="admin-1",
+        email="admin@local",
+        role="platform_admin",
+        permissions=auth_module.permissions_for_role("platform_admin"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.get("/api/v1/analytics/dashboard?days=0", headers=_auth_headers(user))
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["code"] == "validation_error"
+
+
+def test_gateway_dashboard_route_requires_chat_permission(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_audit_support = importlib.import_module("app.gateway_audit_support")
+    monkeypatch.setattr(gateway_audit_support, "write_gateway_audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="audit-1",
+        email="audit@local",
+        role="audit_viewer",
+        permissions=auth_module.permissions_for_role("audit_viewer"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.get("/api/v1/analytics/dashboard", headers=_auth_headers(user))
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
+
+
+def test_kb_analytics_dashboard_route_requires_kb_read_permission(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_api_support = importlib.import_module("app.kb_api_support")
+    monkeypatch.setattr(kb_api_support, "audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="audit-1",
+        email="audit@local",
+        role="audit_viewer",
+        permissions=auth_module.permissions_for_role("audit_viewer"),
+    )
+
+    client = TestClient(kb_main.app)
+    response = client.get("/api/v1/kb/analytics/dashboard", headers=_auth_headers(user))
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
+
+
 def test_auth_permissions_are_derived_from_role_aliases() -> None:
     admin_permissions = auth_module.permissions_for_role("admin")
     member_permissions = auth_module.permissions_for_role("member")
@@ -1717,5 +2029,63 @@ def test_retrieve_merge_documents_include_visual_metadata() -> None:
     assert item.page_number == 3
     assert item.asset_id == "asset-1"
     assert item.thumbnail_url == "/api/v1/kb/visual-assets/asset-1/thumbnail"
+
+
+def test_request_service_json_preserves_upstream_4xx() -> None:
+    gateway_transport = _load_gateway_module("app.gateway_transport")
+
+    class FakeClient:
+        async def request(self, method, url, *, headers=None, json=None, params=None):
+            return httpx.Response(
+                404,
+                json={"detail": "kb base not found", "code": "kb_base_not_found"},
+                request=httpx.Request(method, url),
+            )
+
+    try:
+        asyncio.run(
+            gateway_transport.request_service_json(
+                FakeClient(),
+                "GET",
+                "http://kb-service:8200/api/v1/kb/bases/base-1",
+                headers={},
+            )
+        )
+    except gateway_transport.HTTPException as exc:
+        assert exc.status_code == 404
+        assert exc.detail["detail"] == "kb base not found"
+        assert exc.detail["code"] == "kb_base_not_found"
+        assert exc.detail["upstream_status"] == 404
+    else:
+        raise AssertionError("expected upstream 404 to be preserved")
+
+
+def test_request_service_json_wraps_upstream_5xx_as_502() -> None:
+    gateway_transport = _load_gateway_module("app.gateway_transport")
+
+    class FakeClient:
+        async def request(self, method, url, *, headers=None, json=None, params=None):
+            return httpx.Response(
+                503,
+                json={"detail": "kb analytics unavailable", "code": "kb_not_ready"},
+                request=httpx.Request(method, url),
+            )
+
+    try:
+        asyncio.run(
+            gateway_transport.request_service_json(
+                FakeClient(),
+                "GET",
+                "http://kb-service:8200/api/v1/kb/analytics/dashboard",
+                headers={},
+            )
+        )
+    except gateway_transport.HTTPException as exc:
+        assert exc.status_code == 502
+        assert exc.detail["detail"] == "kb analytics unavailable"
+        assert exc.detail["code"] == "kb_not_ready"
+        assert exc.detail["upstream_status"] == 503
+    else:
+        raise AssertionError("expected upstream 503 to be wrapped as 502")
 
 

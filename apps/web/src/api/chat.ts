@@ -97,11 +97,11 @@ export function listWorkflowRuns(sessionId: string) {
 }
 
 export function getWorkflowRun(runId: string) {
-  return request.get(`/chat/workflow-runs/${runId}`);
+  return request.get(`/chat/workflow-runs/${runId}`).then((response: any) => response.workflow_run || response);
 }
 
 export function retryWorkflowRun(runId: string, options: { idempotencyKey?: string } = {}) {
-  return request.post(`/chat/workflow-runs/${runId}/retry`, null, {
+  return request.post(`/chat/workflow-runs/${runId}/retry`, {}, {
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('workflow-retry')
     }
@@ -119,4 +119,3 @@ export function submitMessageFeedback(
 ) {
   return request.put(`/chat/sessions/${sessionId}/messages/${messageId}/feedback`, data);
 }
-

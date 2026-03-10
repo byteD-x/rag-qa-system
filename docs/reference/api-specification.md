@@ -1,31 +1,70 @@
 # API 规范
 
-本文档描述当前仓库已经实现并对前端开放的核心后端接口，覆盖：
+本文档是仓库唯一的 API 文档，覆盖当前项目对前端开放的核心接口，包括：
 
+- 认证与健康检查
 - 统一聊天与工作流
-- 知识库上传、治理、检索与调试
-- 多源连接器与定时同步
-- Agent 工作台与 Prompt 模板库
+- 知识库、文档上传、检索与调试
+- 连接器与同步调度
+- Prompt Template 与 Agent Profile
 - 运营分析看板
 
-## 1. 健康检查
+默认本地地址：
+
+- Gateway：`http://localhost:8080`
+- KB Service：`http://localhost:8300`
+
+## 1. 通用约定
+
+### 认证
+
+除健康检查外，大多数业务接口都需要：
+
+```http
+Authorization: Bearer <ACCESS_TOKEN>
+```
+
+登录接口：
+
+- `POST /api/v1/auth/login`
+
+### 内容类型
+
+- 普通接口：`application/json`
+- 流式问答：`text/event-stream`
+
+### 常见错误码
+
+| HTTP 状态码 | `code` | 含义 |
+|---|---|---|
+| `400` | `analytics_view_invalid` / 其他业务错误 | 请求参数合法但业务不成立 |
+| `401` | `unauthorized` | 未登录或 token 无效 |
+| `403` | `permission_denied` | 权限不足 |
+| `404` | `not_found` | 资源不存在 |
+| `409` | `conflict` | 状态冲突或重复操作 |
+| `422` | `validation_error` | 参数校验失败 |
+| `429` | `too_many_inflight_requests` | 高成本接口触发背压保护 |
+| `500` | `internal_error` | 服务内部异常 |
+| `502` | `upstream_error` | Gateway 访问上游服务失败 |
+
+## 2. 健康检查
 
 ### `GET /healthz`
 
 - 用于存活探针
-- 返回：`200 {"status":"ok"}`
+- 返回 `200 {"status":"ok"}`
 
 ### `GET /readyz`
 
-- `gateway` 会检查数据库、`kb-service` 和 LLM 配置
-- `kb-service` 会检查数据库、对象存储和 Qdrant / vector store
-- 任一关键依赖未就绪时返回 `503`
+- Gateway 会检查数据库、KB Service 与模型配置
+- KB Service 会检查数据库、对象存储与 Qdrant
+- 关键依赖未就绪时返回 `503`
 
-## 2. 认证
+## 3. 认证
 
 ### `POST /api/v1/auth/login`
 
-请求：
+请求示例：
 
 ```json
 {
@@ -34,17 +73,17 @@
 }
 ```
 
-响应字段：
+响应关键字段：
 
 - `access_token`
 - `token_type`
 - `user`
 
-## 3. 统一聊天
+## 4. 统一聊天与工作流
 
 ### `POST /api/v1/chat/sessions`
 
-创建会话并持久化默认 `scope` 与 `execution_mode`。
+创建聊天会话。
 
 请求示例：
 
@@ -63,14 +102,9 @@
 }
 ```
 
-新增说明：
-
-- `scope.agent_profile_id`：挂载 Agent 工作台中的 persona / 工具配置
-- `scope.prompt_template_id`：挂载 Prompt 模板库中的模板
-
 ### `PATCH /api/v1/chat/sessions/{id}`
 
-可更新：
+可更新字段：
 
 - `title`
 - `scope`
@@ -78,10 +112,11 @@
 
 ### `POST /api/v1/chat/sessions/{id}/messages`
 
-请求头：
+发送一条消息并等待完整回答。
 
-- `Authorization: Bearer <token>`
-- `Idempotency-Key: <optional>`
+可选请求头：
+
+- `Idempotency-Key: <value>`
 
 响应关键字段：
 
@@ -104,11 +139,15 @@
 
 ### `POST /api/v1/chat/sessions/{id}/messages/stream`
 
-SSE 顺序：
+SSE 流式回答，事件顺序：
 
-- `metadata -> citation -> answer -> message -> done`
+- `metadata`
+- `citation`
+- `answer`
+- `message`
+- `done`
 
-`metadata` 会额外返回：
+`metadata` 会额外包含：
 
 - `execution_mode`
 - `workflow_run`
@@ -118,27 +157,27 @@ SSE 顺序：
 
 ### `GET /api/v1/chat/sessions/{id}/workflow-runs`
 
-列出当前会话下的工作流运行记录。
+列出当前会话下的工作流执行记录。
 
 ### `GET /api/v1/chat/workflow-runs/{run_id}`
 
-获取单次聊天工作流快照。
+查询单次工作流执行详情。
 
 ### `POST /api/v1/chat/workflow-runs/{run_id}/retry`
 
-对失败工作流执行重试。
+重试失败的工作流运行。
 
 当前约束：
 
 - 仅允许重试 `status=failed`
-- 默认复用原 `scope_snapshot`
+- 默认复用原始 `scope_snapshot`
 - 会创建新的 `message` 和新的 `workflow_run`
 
 ### `PUT /api/v1/chat/sessions/{id}/messages/{message_id}/feedback`
 
-用户满意度数据入口。
+提交用户反馈。
 
-请求：
+请求示例：
 
 ```json
 {
@@ -148,7 +187,7 @@ SSE 顺序：
 }
 ```
 
-## 4. `execution_mode`
+## 5. `execution_mode`
 
 适用接口：
 
@@ -162,65 +201,49 @@ SSE 顺序：
 - `grounded`
 - `agent`
 
-约束：
+说明：
 
-- 默认值是 `grounded`
-- `agent` 仍然必须在当前 `scope` 内检索
-- `agent` 当前支持的工具选择由 Agent Profile 控制，已落地工具：
-  - `search_scope`
-  - `list_scope_documents`
-  - `search_corpus`
-  - `calculator`
+- 默认值为 `grounded`
+- `agent` 仍受当前 `scope` 约束
+- `agent` 模式的工具能力由 Agent Profile 控制
 
-## 5. 知识库基础管理
+当前已落地工具：
 
-### `POST /api/v1/kb/bases`
+- `search_scope`
+- `list_scope_documents`
+- `search_corpus`
+- `calculator`
 
-创建知识库。
+## 6. 知识库与文档管理
 
-### `GET /api/v1/kb/bases`
+### 知识库
 
-列出当前用户可见的知识库。
+- `POST /api/v1/kb/bases`
+- `GET /api/v1/kb/bases`
+- `GET /api/v1/kb/bases/{base_id}`
+- `PATCH /api/v1/kb/bases/{base_id}`
+- `DELETE /api/v1/kb/bases/{base_id}`
 
-### `GET /api/v1/kb/bases/{base_id}`
+### 文档
 
-获取单个知识库详情。
+- `GET /api/v1/kb/bases/{base_id}/documents`
+- `GET /api/v1/kb/documents/{document_id}`
+- `PATCH /api/v1/kb/documents/{document_id}`
+- `DELETE /api/v1/kb/documents/{document_id}`
+- `GET /api/v1/kb/documents/{document_id}/events`
+- `GET /api/v1/kb/documents/{document_id}/visual-assets`
 
-### `PATCH /api/v1/kb/bases/{base_id}`
+常见文档状态：
 
-更新知识库元数据。
+- `uploaded`
+- `parsing_fast`
+- `fast_index_ready`
+- `hybrid_ready`
+- `ready`
 
-### `DELETE /api/v1/kb/bases/{base_id}`
+## 7. 上传与 Ingest
 
-删除知识库及其下属文档、向量与关联资源。
-
-### `GET /api/v1/kb/bases/{base_id}/documents`
-
-列出知识库文档。
-
-### `GET /api/v1/kb/documents/{document_id}`
-
-获取文档详情，包含 `latest_job`。
-
-### `PATCH /api/v1/kb/documents/{document_id}`
-
-更新文档文件名、分类等元数据。
-
-### `DELETE /api/v1/kb/documents/{document_id}`
-
-删除文档及关联向量、上传会话、视觉资源。
-
-### `GET /api/v1/kb/documents/{document_id}/events`
-
-查看文档处理事件流。
-
-### `GET /api/v1/kb/documents/{document_id}/visual-assets`
-
-列出文档视觉资源。
-
-## 6. 文档上传与 Ingest
-
-推荐路径：
+推荐上传链路：
 
 - `POST /api/v1/kb/uploads`
 - `GET /api/v1/kb/uploads/{upload_id}`
@@ -229,38 +252,70 @@ SSE 顺序：
 - `GET /api/v1/kb/ingest-jobs/{job_id}`
 - `POST /api/v1/kb/ingest-jobs/{job_id}/retry`
 
-兼容路径仍保留：
+说明：
 
-- `POST /api/v1/kb/documents/upload`
+- 旧的 legacy 上传接口已移除
+- 新链路统一走 upload session + multipart / complete 模型
 
-## 7. Chunk 治理与 Retrieval Debugger
+## 8. 检索、问答与调试
+
+### 检索
+
+### `POST /api/v1/kb/retrieve`
+
+纯检索接口，不触发 LLM 生成。
+
+响应关键字段：
+
+- `items`
+- `retrieval`
+- `trace_id`
+
+### `POST /api/v1/kb/retrieve/debug`
+
+检索调试工作台接口。
+
+用途：
+
+- 查看 Top-K 召回结果
+- 查看 rerank 分数与信号分数
+- 排查 zero-hit、低质量召回和排序问题
+
+响应关键字段：
+
+- `query`
+- `items[*].debug.rank`
+- `items[*].debug.score`
+- `items[*].debug.signal_scores`
+- `items[*].debug.rerank_score`
+- `retrieval`
+- `trace_id`
+
+### 知识库问答
+
+- `POST /api/v1/kb/query`
+- `POST /api/v1/kb/query/stream`
+
+流式接口事件顺序：
+
+- `metadata`
+- `citation`
+- `answer`
+- `done`
+
+## 9. Chunk 治理
 
 ### `GET /api/v1/kb/documents/{document_id}/chunks`
 
-查看文档切片详情页数据。
+查看文档切片详情。
 
 查询参数：
 
 - `include_disabled=true|false`
 
-响应字段：
-
-- `document_id`
-- `base_id`
-- `counts.total`
-- `counts.active`
-- `counts.disabled`
-- `items[*].chunk_id`
-- `items[*].section_title`
-- `items[*].text_content`
-- `items[*].disabled`
-- `items[*].disabled_reason`
-- `items[*].manual_note`
-- `items[*].source_kind`
-
 ### `PATCH /api/v1/kb/chunks/{chunk_id}`
 
-人工修改切片文本或启用/禁用切片。
+人工修改切片文本，或启用 / 禁用切片。
 
 请求示例：
 
@@ -273,92 +328,33 @@ SSE 顺序：
 }
 ```
 
-说明：
-
-- 会同步刷新 FTS 字段
-- 会重建该文档的 section/chunk 向量
-
 ### `POST /api/v1/kb/chunks/{chunk_id}/split`
 
 手动拆分单个切片。
 
-请求示例：
-
-```json
-{
-  "parts": [
-    "第一段",
-    "第二段",
-    "第三段"
-  ]
-}
-```
-
 ### `POST /api/v1/kb/chunks/merge`
 
-手动合并同一 section 内连续切片。
+手动合并连续切片。
 
-请求示例：
+## 10. 连接器与同步
 
-```json
-{
-  "chunk_ids": ["chunk-1", "chunk-2"],
-  "separator": "\n\n"
-}
-```
-
-### `POST /api/v1/kb/retrieve`
-
-纯检索接口，不触发 LLM 生成。
-
-响应字段：
-
-- `items`
-- `retrieval`
-- `trace_id`
-
-### `POST /api/v1/kb/retrieve/debug`
-
-检索调试工作台接口。
-
-用途：
-
-- 输入 Query 后仅返回 Top-K 召回结果
-- 暴露最终排序分数、信号分数和 rerank 分数
-- 不触发 LLM 生成
-
-响应字段：
-
-- `query`
-- `items[*].debug.rank`
-- `items[*].debug.score`
-- `items[*].debug.signal_scores`
-- `items[*].debug.rerank_score`
-- `retrieval`
-- `trace_id`
-
-### `POST /api/v1/kb/query`
-
-严格 grounded 的 KB 问答接口。
-
-### `POST /api/v1/kb/query/stream`
-
-SSE 顺序保持：
-
-- `metadata -> citation -> answer -> done`
-
-## 8. 多源连接器与定时同步
-
-### 8.1 直接执行型连接器
-
-保留的老接口：
+### 直接执行型接口
 
 - `POST /api/v1/kb/connectors/local-directory/sync`
 - `POST /api/v1/kb/connectors/notion/sync`
 
-### 8.2 连接器注册表
+### 连接器注册表
 
-新增统一连接器配置接口，支持：
+- `GET /api/v1/kb/connectors`
+- `POST /api/v1/kb/connectors`
+- `GET /api/v1/kb/connectors/{connector_id}`
+- `PATCH /api/v1/kb/connectors/{connector_id}`
+- `DELETE /api/v1/kb/connectors/{connector_id}`
+- `GET /api/v1/kb/connectors/{connector_id}/runs`
+- `POST /api/v1/kb/connectors/{connector_id}/sync`
+- `POST /api/v1/kb/connectors/run-due`
+
+当前支持的连接器类型：
 
 - `local_directory`
 - `notion`
@@ -367,95 +363,22 @@ SSE 顺序保持：
 - `dingtalk_document`
 - `sql_query`
 
-### `GET /api/v1/kb/connectors?base_id=<optional>`
-
-列出当前用户可见的连接器。
-
-### `POST /api/v1/kb/connectors`
-
-创建连接器配置。
-
-请求示例：
-
-```json
-{
-  "base_id": "base-uuid",
-  "name": "飞书制度同步",
-  "connector_type": "feishu_document",
-  "config": {
-    "urls": ["https://open.feishu.cn/docx/xxx"],
-    "category": "policy",
-    "delete_missing": true,
-    "header_name": "Authorization",
-    "header_value_env": "KB_FEISHU_AUTH_HEADER"
-  },
-  "schedule": {
-    "enabled": true,
-    "interval_minutes": 60
-  }
-}
-```
-
 说明：
 
-- `web_crawler` / `feishu_document` / `dingtalk_document` 当前以 URL 抓取模式落地
-- `sql_query` 当前以安全的 SQL 模板同步落地，要求 `dsn_env` 指向后端环境变量中的 DSN
-- 调度采用“注册表 + run-due 执行入口”模式，便于后续接外部 cron / worker
+- `sql_query` 通过 `dsn_env` 引用后端环境变量中的 DSN，避免在请求体中直接传递敏感连接串
+- `run-due` 适合配合外部 cron / worker 做定时执行
 
-### `GET /api/v1/kb/connectors/{connector_id}`
+## 11. Prompt Template 与 Agent Profile
 
-获取单个连接器配置。
+### Prompt Template
 
-### `PATCH /api/v1/kb/connectors/{connector_id}`
+- `GET /api/v1/platform/prompt-templates`
+- `POST /api/v1/platform/prompt-templates`
+- `GET /api/v1/platform/prompt-templates/{template_id}`
+- `PATCH /api/v1/platform/prompt-templates/{template_id}`
+- `DELETE /api/v1/platform/prompt-templates/{template_id}`
 
-更新配置、状态与调度信息。
-
-### `DELETE /api/v1/kb/connectors/{connector_id}`
-
-删除连接器配置。
-
-### `GET /api/v1/kb/connectors/{connector_id}/runs`
-
-查看连接器历史运行记录。
-
-### `POST /api/v1/kb/connectors/{connector_id}/sync`
-
-立即执行一次连接器同步。
-
-请求：
-
-```json
-{
-  "dry_run": false
-}
-```
-
-### `POST /api/v1/kb/connectors/run-due`
-
-执行所有到期的定时连接器。
-
-请求：
-
-```json
-{
-  "dry_run": false,
-  "limit": 10
-}
-```
-
-## 9. Agent 工作台与 Prompt 模板库
-
-### 9.1 Prompt 模板库
-
-#### `GET /api/v1/platform/prompt-templates`
-
-列出个人模板和公共模板。
-
-#### `POST /api/v1/platform/prompt-templates`
-
-创建模板。
-
-请求：
+请求示例：
 
 ```json
 {
@@ -467,29 +390,15 @@ SSE 顺序保持：
 }
 ```
 
-#### `GET /api/v1/platform/prompt-templates/{template_id}`
+### Agent Profile
 
-获取模板详情。
+- `GET /api/v1/platform/agent-profiles`
+- `POST /api/v1/platform/agent-profiles`
+- `GET /api/v1/platform/agent-profiles/{profile_id}`
+- `PATCH /api/v1/platform/agent-profiles/{profile_id}`
+- `DELETE /api/v1/platform/agent-profiles/{profile_id}`
 
-#### `PATCH /api/v1/platform/prompt-templates/{template_id}`
-
-更新模板。
-
-#### `DELETE /api/v1/platform/prompt-templates/{template_id}`
-
-删除模板。
-
-### 9.2 Agent Profile
-
-#### `GET /api/v1/platform/agent-profiles`
-
-列出 Agent Profile。
-
-#### `POST /api/v1/platform/agent-profiles`
-
-创建 Agent Profile。
-
-请求：
+请求示例：
 
 ```json
 {
@@ -502,103 +411,150 @@ SSE 顺序保持：
 }
 ```
 
-#### `GET /api/v1/platform/agent-profiles/{profile_id}`
+## 12. 运营分析看板
 
-获取单个 Agent Profile。
+项目只保留这一份看板 API 说明，不再拆出单独文档。
 
-#### `PATCH /api/v1/platform/agent-profiles/{profile_id}`
+### Gateway 看板
 
-更新 Agent Profile。
+#### `GET /api/v1/analytics/dashboard`
 
-#### `DELETE /api/v1/platform/agent-profiles/{profile_id}`
+用途：
 
-删除 Agent Profile。
-
-## 10. 运营与数据看板
-
-### `GET /api/v1/analytics/dashboard?view=personal|admin&days=14`
-
-返回 EntryView 可直接消费的运营看板数据。
+- 聚合知识库创建、文档 ready 漏斗、问答质量、反馈趋势、成本趋势
+- 供前端运营看板直接渲染
 
 权限：
 
-- `view=personal`：普通用户可访问
-- `view=admin`：需要 `platform_admin`
+- `view=personal` 需要 `chat.use`
+- `view=admin` 额外需要 `platform_admin`
 
-响应结构：
+Query 参数：
 
-```json
-{
-  "view": "admin",
-  "days": 14,
-  "hot_terms": [
-    {"term": "报销", "count": 18}
-  ],
-  "zero_hit": {
-    "trend": [{"date": "2026-03-10", "count": 3}],
-    "top_queries": [{"query": "海外差旅餐补", "count": 2}]
-  },
-  "satisfaction": {
-    "trend": [
-      {"date": "2026-03-10", "up_count": 12, "down_count": 2, "flag_count": 1}
-    ]
-  },
-  "usage": {
-    "currency": "CNY",
-    "summary": {
-      "assistant_turns": 64,
-      "prompt_tokens": 12034,
-      "completion_tokens": 5088,
-      "estimated_cost": 23.42
-    },
-    "trend": [
-      {"date": "2026-03-10", "prompt_tokens": 900, "completion_tokens": 420, "estimated_cost": 1.82}
-    ]
-  }
-}
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `view` | `personal \| admin` | `personal` | 聚合范围 |
+| `days` | `int` | `14` | 滚动时间窗口，范围 `1-90` |
+
+响应顶层字段：
+
+- `view`
+- `days`
+- `hot_terms`
+- `zero_hit`
+- `satisfaction`
+- `usage`
+- `funnel`
+- `ingest_health`
+- `qa_quality`
+- `data_quality`
+
+`funnel` 关键字段：
+
+- `knowledge_bases_created`
+- `documents_uploaded`
+- `documents_ready`
+- `chat_sessions_with_questions`
+- `questions_asked`
+- `answer_outcomes`
+- `feedback`
+
+`qa_quality` 关键字段：
+
+- `summary`
+- `answer_mode_distribution`
+- `evidence_status_distribution`
+- `zero_hit`
+- `low_quality`
+
+`data_quality` 关键字段：
+
+- `unsupported_fields`
+- `degraded_sections`
+
+#### 请求示例
+
+```bash
+curl -X GET "http://localhost:8080/api/v1/analytics/dashboard?view=admin&days=30" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
-## 11. 安全与背压补充
+### KB Service 看板
 
-以下高成本接口具备 in-flight 背压保护：
+#### `GET /api/v1/kb/analytics/dashboard`
+
+用途：
+
+- 为 Gateway 提供知识库创建、文档上传、`ready` 漏斗与 ingest 健康度聚合
+- 也可供前端在需要时直接消费
+
+权限：
+
+- `view=personal` 需要 `kb.read`
+- `view=admin` 需要 `kb.manage` 或平台管理员权限
+
+Query 参数与 Gateway 保持一致：
+
+- `view=personal|admin`
+- `days=1..90`
+
+#### 请求示例
+
+```bash
+curl -X GET "http://localhost:8300/api/v1/kb/analytics/dashboard?view=personal&days=14" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
+### 指标说明
+
+- `knowledge_bases_created`：按知识库创建时间统计
+- `documents_uploaded`：按文档上传时间统计
+- `documents_ready`：按文档进入 `ready` 的时间统计
+- `zero_hit.selected_candidates_zero`：严格以 `selected_candidates = 0` 为准
+- 顶层 `zero_hit`：兼容旧口径，命中条件是“无引用”或 `selected_candidates = 0`
+- `stalled_documents`：当前非 `ready/failed` 且超过阈值未更新的文档数
+
+### 降级行为
+
+当 KB analytics 上游暂时不可用时，Gateway 仍可能返回 `200`，但：
+
+- `ingest_health = null`
+- `funnel` 中部分 KB 字段为 `null`
+- 具体原因写入 `data_quality.degraded_sections`
+
+## 13. 审计与运维接口
+
+- `GET /api/v1/audit/events`
+- `GET /metrics`
+
+## 14. 背压与安全
+
+以下高成本接口有 in-flight 背压保护：
 
 - `POST /api/v1/chat/sessions/{id}/messages`
 - `POST /api/v1/chat/sessions/{id}/messages/stream`
 - `POST /api/v1/kb/query`
 - `POST /api/v1/kb/query/stream`
 
-超限返回：
+超限时返回：
 
-- `429`
+- HTTP `429`
 - `code=too_many_inflight_requests`
 
-以下接口会返回 `safety` 字段或在 SSE `metadata` 中返回：
+以下接口会返回 `safety` 字段，或在 SSE `metadata` 中返回：
 
 - `POST /api/v1/chat/sessions/{id}/messages`
 - `POST /api/v1/chat/sessions/{id}/messages/stream`
 - `POST /api/v1/kb/query`
 - `POST /api/v1/kb/query/stream`
 
-字段结构：
-
-```json
-{
-  "risk_level": "low | medium | high",
-  "blocked": false,
-  "action": "allow | warn | fallback | refuse",
-  "reason_codes": ["prompt_injection_user"],
-  "source_types": ["user"],
-  "matched_signals": ["instruction_override"]
-}
-```
-
-## 12. 基线验证
+## 15. 基线验证
 
 在仓库根目录执行：
 
 ```powershell
 python scripts/quality/check-encoding.py
+cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 docker compose config --quiet
-pytest tests/test_platform_and_connector_extensions.py tests/test_kb_local_sync.py tests/test_kb_notion_sync.py tests/test_chat_workflow_resume_and_budget.py
 ```

@@ -18,6 +18,12 @@ REPORT_DIR = REPO_ROOT / "artifacts" / "reports"
 EVAL_SUITE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "run-eval-suite.py"
 REGRESSION_GATE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "check-eval-regression.py"
 REGRESSION_BASELINE = REPO_ROOT / "scripts" / "evaluation" / "fixtures" / "agent_smoke_baseline.json"
+HTTP_HELPERS_DIR = REPO_ROOT / "scripts" / "evaluation"
+
+if str(HTTP_HELPERS_DIR) not in sys.path:
+    sys.path.insert(0, str(HTTP_HELPERS_DIR))
+
+from http_helpers import auth_headers, upload_and_wait  # noqa: E402
 
 
 def load_env_file() -> dict[str, str]:
@@ -70,44 +76,6 @@ def create_base(client: httpx.Client, api_base: str, token: str, name: str, desc
     )
     response.raise_for_status()
     return str(response.json()["id"])
-
-
-def upload_legacy_document(
-    client: httpx.Client,
-    api_base: str,
-    token: str,
-    *,
-    base_id: str,
-    path: Path,
-) -> tuple[str, str]:
-    with path.open("rb") as handle:
-        response = client.post(
-            f"{api_base}/kb/documents/upload",
-            headers={"Authorization": f"Bearer {token}"},
-            data={"base_id": base_id, "category": "smoke-eval"},
-            files=[("files", (path.name, handle, "text/plain"))],
-        )
-    response.raise_for_status()
-    item = list(response.json()["items"])[0]
-    return str(item["document_id"]), str(item["job_id"])
-
-
-def wait_ingest_job(client: httpx.Client, api_base: str, token: str, job_id: str, *, timeout_seconds: int = 240) -> None:
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        response = client.get(
-            f"{api_base}/kb/ingest-jobs/{job_id}",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-        status_value = str(payload.get("status") or "")
-        if status_value == "done":
-            return
-        if status_value in {"failed", "dead_letter"}:
-            raise RuntimeError(f"ingest job failed: {job_id} status={status_value}")
-        time.sleep(2.0)
-    raise RuntimeError(f"ingest job did not complete before timeout: {job_id}")
 
 
 def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
@@ -224,8 +192,9 @@ def main() -> int:
         wait_for_service(args.kb_health_url or env_values.get("KB_HEALTH_URL", "http://localhost:8300/readyz"), timeout_seconds=args.wait_timeout_seconds)
 
     token = login(base_url, email, password)
-    client = httpx.Client(timeout=60.0)
+    client = httpx.Client(timeout=120.0)
     api_base = base_url
+    headers = auth_headers(token)
 
     policy_corpus_id = env_values.get("SMOKE_POLICY_CORPUS_ID", "").strip()
     travel_corpus_id = env_values.get("SMOKE_TRAVEL_CORPUS_ID", "").strip()
@@ -233,22 +202,26 @@ def main() -> int:
     if not args.skip_upload or not policy_corpus_id or not travel_corpus_id:
         policy_base_id = create_base(client, api_base, token, "Smoke Policy Base", "Local smoke fixture for expense policy.")
         travel_base_id = create_base(client, api_base, token, "Smoke Travel Base", "Local smoke fixture for travel policy.")
-        policy_document_id, policy_job_id = upload_legacy_document(
+        policy_upload = upload_and_wait(
             client,
-            api_base,
-            token,
-            base_id=policy_base_id,
-            path=FIXTURE_DIR / "agent_smoke_policy.txt",
+            base_url=api_base,
+            headers=headers,
+            corpus_id=policy_base_id,
+            file_path=FIXTURE_DIR / "agent_smoke_policy.txt",
+            title="Smoke Policy Base",
+            category="smoke-eval",
+            timeout_seconds=args.wait_timeout_seconds,
         )
-        travel_document_id, travel_job_id = upload_legacy_document(
+        travel_upload = upload_and_wait(
             client,
-            api_base,
-            token,
-            base_id=travel_base_id,
-            path=FIXTURE_DIR / "agent_smoke_travel.txt",
+            base_url=api_base,
+            headers=headers,
+            corpus_id=travel_base_id,
+            file_path=FIXTURE_DIR / "agent_smoke_travel.txt",
+            title="Smoke Travel Base",
+            category="smoke-eval",
+            timeout_seconds=args.wait_timeout_seconds,
         )
-        wait_ingest_job(client, api_base, token, policy_job_id)
-        wait_ingest_job(client, api_base, token, travel_job_id)
         policy_corpus_id = f"kb:{policy_base_id}"
         travel_corpus_id = f"kb:{travel_base_id}"
         os.environ["SMOKE_POLICY_CORPUS_ID"] = policy_corpus_id
@@ -258,8 +231,8 @@ def main() -> int:
                 {
                     "policy_base_id": policy_base_id,
                     "travel_base_id": travel_base_id,
-                    "policy_document_id": policy_document_id,
-                    "travel_document_id": travel_document_id,
+                    "policy_document_id": str(policy_upload.get("document_id") or ""),
+                    "travel_document_id": str(travel_upload.get("document_id") or ""),
                 },
                 ensure_ascii=False,
             )

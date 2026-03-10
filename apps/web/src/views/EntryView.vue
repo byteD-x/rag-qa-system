@@ -1,3 +1,4 @@
+
 <template>
   <div class="page-shell entry-page">
     <PageHeaderCompact title="业务总览">
@@ -6,6 +7,11 @@
           <el-radio-button value="personal">个人数据</el-radio-button>
           <el-radio-button value="admin">全局大盘</el-radio-button>
         </el-radio-group>
+        <el-select v-model="days" size="small" style="width: 100px; margin-right: 16px;" @change="loadDashboard">
+          <el-option label="近 7 天" :value="7" />
+          <el-option label="近 14 天" :value="14" />
+          <el-option label="近 30 天" :value="30" />
+        </el-select>
         <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
         <el-button plain @click="go('/workspace/kb/upload')">知识库治理</el-button>
       </template>
@@ -36,67 +42,196 @@
         <span>加载数据大盘...</span>
       </section>
 
-      <section v-else class="dashboard-grid">
-        <!-- 热点词云 -->
-        <div class="dash-card">
-          <h3 class="dash-title">问答热点词</h3>
-          <div class="word-cloud">
-            <span v-for="(term, i) in dashboardData?.hot_terms" :key="i"
-                  class="cloud-tag"
-                  :style="{ fontSize: `${12 + Math.min(term.count, 20)}px`, opacity: 0.5 + (term.count / 40) }">
-              {{ term.term }}
-            </span>
-            <span v-if="!dashboardData?.hot_terms?.length" class="empty-text">暂无热点数据</span>
+      <template v-else>
+        <!-- 主链路漏斗 -->
+        <section v-if="dashboardData?.funnel" class="dashboard-section">
+          <div class="section-header">
+            <h3 class="section-label" style="margin:0;">核心转化漏斗</h3>
+            <span class="degraded-hint" v-if="hasDegradedSections">部分数据暂时降级，以下为可用指标</span>
           </div>
-        </div>
-
-        <!-- 成本与Token消耗 -->
-        <div class="dash-card">
-          <h3 class="dash-title">消耗统计 ({{ dashboardData?.usage?.currency || 'CNY' }})</h3>
-          <div class="usage-summary">
-            <div class="usage-item">
-              <span class="usage-val">{{ dashboardData?.usage?.summary?.assistant_turns || 0 }}</span>
-              <span class="usage-label">助手对话轮数</span>
+          <div class="funnel-container">
+            <div class="funnel-step">
+              <div class="f-label">新建知识库</div>
+              <div class="f-value">{{ dashboardData.funnel.knowledge_bases_created ?? '-' }}</div>
             </div>
-            <div class="usage-item">
-              <span class="usage-val">{{ (dashboardData?.usage?.summary?.estimated_cost || 0).toFixed(2) }}</span>
-              <span class="usage-label">预估成本</span>
+            <el-icon class="f-arrow"><Right /></el-icon>
+            <div class="funnel-step">
+              <div class="f-label">上传文档</div>
+              <div class="f-value">{{ dashboardData.funnel.documents_uploaded ?? '-' }}</div>
+            </div>
+            <el-icon class="f-arrow"><Right /></el-icon>
+            <div class="funnel-step">
+              <div class="f-label">就绪可问</div>
+              <div class="f-value">{{ dashboardData.funnel.documents_ready ?? '-' }}</div>
+            </div>
+            <el-icon class="f-arrow"><Right /></el-icon>
+            <div class="funnel-step">
+              <div class="f-label">发起提问</div>
+              <div class="f-value">{{ dashboardData.funnel.questions_asked ?? 0 }}</div>
+            </div>
+            <el-icon class="f-arrow"><Right /></el-icon>
+            <div class="funnel-step" :class="{'success-text': (dashboardData.funnel.answer_outcomes?.grounded || 0) > 0}">
+              <div class="f-label">有据回答</div>
+              <div class="f-value">{{ dashboardData.funnel.answer_outcomes?.grounded ?? 0 }}</div>
+            </div>
+            <el-icon class="f-arrow"><Right /></el-icon>
+            <div class="funnel-step">
+              <div class="f-label">接收反馈</div>
+              <div class="f-value">{{ (dashboardData.funnel.feedback?.up || 0) + (dashboardData.funnel.feedback?.down || 0) }}</div>
             </div>
           </div>
-          <div class="usage-details">
-            Prompt Tokens: {{ dashboardData?.usage?.summary?.prompt_tokens || 0 }}<br/>
-            Completion Tokens: {{ dashboardData?.usage?.summary?.completion_tokens || 0 }}
-          </div>
-        </div>
+        </section>
 
-        <!-- 用户满意度 -->
-        <div class="dash-card">
-          <h3 class="dash-title">用户满意度趋势 (近14天)</h3>
-          <div class="satisfaction-bars">
-            <div v-for="(trend, i) in dashboardData?.satisfaction?.trend" :key="i" class="sat-bar-wrap" :title="trend.date">
-              <div class="sat-bar up" :style="{ flex: trend.up_count || 0.1 }"></div>
-              <div class="sat-bar down" :style="{ flex: trend.down_count || 0.1 }"></div>
+        <!-- 健康与质量并排 -->
+        <section class="health-quality-grid">
+          <!-- 入库健康度 -->
+          <div class="dash-card">
+            <div class="card-header">
+              <h3 class="dash-title">入库健康度</h3>
+              <el-button link type="primary" @click="go('/workspace/kb/upload')">去处理异常</el-button>
             </div>
-            <span v-if="!dashboardData?.satisfaction?.trend?.length" class="empty-text">暂无趋势数据</span>
+            <div v-if="!dashboardData?.ingest_health" class="empty-state">
+              <span>暂不支持入库指标或服务降级</span>
+            </div>
+            <div v-else class="health-content">
+              <div class="metric-row">
+                <div class="metric-box">
+                  <div class="m-val">{{ dashboardData.ingest_health.summary.total_documents }}</div>
+                  <div class="m-label">总文档</div>
+                </div>
+                <div class="metric-box success-bg">
+                  <div class="m-val">{{ dashboardData.ingest_health.summary.ready_documents }}</div>
+                  <div class="m-label">就绪状态</div>
+                </div>
+                <div class="metric-box" :class="{'danger-bg': dashboardData.ingest_health.summary.failed_documents > 0}">
+                  <div class="m-val">{{ dashboardData.ingest_health.summary.failed_documents }}</div>
+                  <div class="m-label">解析失败</div>
+                </div>
+                <div class="metric-box" :class="{'warning-bg': dashboardData.ingest_health.summary.stalled_documents > 0}">
+                  <div class="m-val">{{ dashboardData.ingest_health.summary.stalled_documents }}</div>
+                  <div class="m-label">长期卡住</div>
+                </div>
+              </div>
+              <div v-if="dashboardData.ingest_health.summary.failed_documents > 0 || dashboardData.ingest_health.summary.stalled_documents > 0" class="health-alert danger">
+                <el-icon><Warning /></el-icon> 有文档未能正常解析入库，请前往知识库进行排查。
+              </div>
+              <div v-else-if="dashboardData.ingest_health.summary.in_progress_documents > 0" class="health-alert info">
+                <el-icon><Loading /></el-icon> 正在处理 {{ dashboardData.ingest_health.summary.in_progress_documents }} 篇文档...
+              </div>
+              <div v-else class="health-alert success">
+                <el-icon><CircleCheckFilled /></el-icon> 所有文档均已就绪
+              </div>
+            </div>
           </div>
-          <div class="sat-legend" v-if="dashboardData?.satisfaction?.trend?.length">
-            <span class="leg-up">■ 赞</span>
-            <span class="leg-down">■ 踩</span>
-          </div>
-        </div>
 
-        <!-- Zero-hit 拦截统计 -->
-        <div class="dash-card">
-          <h3 class="dash-title">知识盲区 (无命中拦截)</h3>
-          <ul class="zero-hit-list">
-            <li v-for="(q, i) in dashboardData?.zero_hit?.top_queries" :key="i">
-              <span class="q-text">{{ q.query }}</span>
-              <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
-            </li>
-            <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">暂无无命中查询</li>
-          </ul>
-        </div>
-      </section>
+          <!-- 问答质量 -->
+          <div class="dash-card">
+            <div class="card-header">
+              <h3 class="dash-title">问答质量洞察</h3>
+              <el-button link type="primary" @click="go('/workspace/chat')">去检索调试</el-button>
+            </div>
+            <div v-if="!dashboardData?.qa_quality" class="empty-state">
+              <span>暂无问答质量数据</span>
+            </div>
+            <div v-else class="qa-content">
+              <div class="metric-row">
+                <div class="metric-box">
+                  <div class="m-val">{{ dashboardData.qa_quality.summary.assistant_answers }}</div>
+                  <div class="m-label">总回答数</div>
+                </div>
+                <div class="metric-box" :class="{'warning-bg': dashboardData.qa_quality.zero_hit.selected_candidates_zero > 0}">
+                  <div class="m-val">{{ dashboardData.qa_quality.zero_hit.selected_candidates_zero }}</div>
+                  <div class="m-label">零命中拦截</div>
+                </div>
+                <div class="metric-box" :class="{'danger-bg': dashboardData.qa_quality.low_quality.count > 0}">
+                  <div class="m-val">{{ dashboardData.qa_quality.low_quality.count }}</div>
+                  <div class="m-label">低质量回答</div>
+                </div>
+              </div>
+              <div class="quality-bars" v-if="dashboardData.qa_quality.summary.assistant_answers > 0">
+                <div class="q-bar-row">
+                  <span class="q-label">Grounded (有据)</span>
+                  <div class="q-track"><div class="q-fill success" :style="{ width: percent(dashboardData.qa_quality.summary.grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
+                  <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
+                </div>
+                <div class="q-bar-row">
+                  <span class="q-label">Weak / Partial</span>
+                  <div class="q-track"><div class="q-fill warning" :style="{ width: percent(dashboardData.qa_quality.summary.weak_grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
+                  <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.weak_grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
+                </div>
+                <div class="q-bar-row">
+                  <span class="q-label">Refusal (无据拒答)</span>
+                  <div class="q-track"><div class="q-fill danger" :style="{ width: percent(dashboardData.qa_quality.summary.refusal_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
+                  <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.refusal_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 辅助指标网格 -->
+        <section class="dashboard-grid" style="margin-bottom: 24px;">
+          <!-- 知识盲区 -->
+          <div class="dash-card">
+            <h3 class="dash-title">知识盲区 (高频无命中)</h3>
+            <ul class="zero-hit-list">
+              <li v-for="(q, i) in dashboardData?.zero_hit?.top_queries" :key="i">
+                <span class="q-text" :title="q.query">{{ q.query }}</span>
+                <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
+              </li>
+              <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">暂无无命中查询，知识库覆盖良好</li>
+            </ul>
+          </div>
+
+          <!-- 热点词云 -->
+          <div class="dash-card">
+            <h3 class="dash-title">问答热点词</h3>
+            <div class="word-cloud">
+              <span v-for="(term, i) in dashboardData?.hot_terms" :key="i"
+                    class="cloud-tag"
+                    :style="{ fontSize: `${12 + Math.min(term.count, 20)}px`, opacity: 0.5 + (term.count / 40) }">
+                {{ term.term }}
+              </span>
+              <span v-if="!dashboardData?.hot_terms?.length" class="empty-text">暂无热点数据</span>
+            </div>
+          </div>
+
+          <!-- 用户满意度 -->
+          <div class="dash-card">
+            <h3 class="dash-title">用户满意度趋势</h3>
+            <div class="satisfaction-bars">
+              <div v-for="(trend, i) in dashboardData?.satisfaction?.trend" :key="i" class="sat-bar-wrap" :title="trend.date">
+                <div class="sat-bar up" :style="{ flex: trend.up_count || 0.1 }"></div>
+                <div class="sat-bar down" :style="{ flex: trend.down_count || 0.1 }"></div>
+              </div>
+              <span v-if="!dashboardData?.satisfaction?.trend?.length" class="empty-text">暂无趋势数据</span>
+            </div>
+            <div class="sat-legend" v-if="dashboardData?.satisfaction?.trend?.length">
+              <span class="leg-up">■ 赞</span>
+              <span class="leg-down">■ 踩</span>
+            </div>
+          </div>
+
+          <!-- 成本与Token消耗 -->
+          <div class="dash-card">
+            <h3 class="dash-title">消耗统计 ({{ dashboardData?.usage?.currency || 'CNY' }})</h3>
+            <div class="usage-summary">
+              <div class="usage-item">
+                <span class="usage-val">{{ dashboardData?.usage?.summary?.assistant_turns || 0 }}</span>
+                <span class="usage-label">对话轮数</span>
+              </div>
+              <div class="usage-item">
+                <span class="usage-val">{{ (dashboardData?.usage?.summary?.estimated_cost || 0).toFixed(2) }}</span>
+                <span class="usage-label">预估成本</span>
+              </div>
+            </div>
+            <div class="usage-details">
+              Prompt: {{ dashboardData?.usage?.summary?.prompt_tokens || 0 }}<br/>
+              Completion: {{ dashboardData?.usage?.summary?.completion_tokens || 0 }}
+            </div>
+          </div>
+        </section>
+      </template>
 
       <!-- Recent History -->
       <section class="recent-grid">
@@ -160,12 +295,14 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading } from '@element-plus/icons-vue';
+import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listKnowledgeBases } from '@/api/kb';
 import { listChatSessions } from '@/api/chat';
 import { getAnalyticsDashboard } from '@/api/analytics';
+import type { AnalyticsDashboardResponse } from '@/api/analytics';
+import { computed } from 'vue';
 import { useAuthStore } from '@/store/auth';
 
 const router = useRouter();
@@ -176,16 +313,23 @@ const recentSessions = ref<{ id: string; title: string; questionCount: number }[
 const loadingHistory = ref(true);
 
 const viewMode = ref<'personal' | 'admin'>('personal');
-const dashboardData = ref<any>(null);
+const days = ref(14);
+const dashboardData = ref<AnalyticsDashboardResponse | null>(null);
+const hasDegradedSections = computed(() => (dashboardData.value?.data_quality?.degraded_sections?.length ?? 0) > 0);
+
+const percent = (part: number, total: number) => {
+  if (!total) return '0%';
+  return Math.round((part / total) * 100) + '%';
+};
 const loadingDashboard = ref(true);
 
 const loadDashboard = async () => {
   loadingDashboard.value = true;
   try {
-    const res: any = await getAnalyticsDashboard({ view: viewMode.value, days: 14 });
-    dashboardData.value = res;
+    const res = await getAnalyticsDashboard({ view: viewMode.value, days: days.value });
+    dashboardData.value = (res as any).data ?? res;
   } catch (e) {
-    dashboardData.value = {};
+    dashboardData.value = null;
   } finally {
     loadingDashboard.value = false;
   }
@@ -226,7 +370,6 @@ const go = (path: string) => {
   router.push(path);
 };
 </script>
-
 <style scoped>
 .entry-page {
   gap: var(--content-gap, 20px);
@@ -499,5 +642,178 @@ const go = (path: string) => {
 @keyframes skeleton-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* Dashboard Specific Styles */
+.dashboard-section {
+  margin-bottom: var(--section-gap, 24px);
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.degraded-hint {
+  font-size: 12px;
+  color: var(--warning-color, #e6a23c);
+  background: var(--warning-bg, #fdf6ec);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Funnel */
+.funnel-container {
+  display: flex;
+  align-items: center;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  overflow-x: auto;
+}
+.funnel-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 80px;
+}
+.f-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.f-value {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.f-arrow {
+  font-size: 20px;
+  color: var(--border-color);
+  margin: 0 16px;
+  flex-shrink: 0;
+}
+.success-text .f-value {
+  color: var(--success-color, #67c23a);
+}
+
+/* Health & Quality Grid */
+.health-quality-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: var(--section-gap, 24px);
+  margin-bottom: var(--section-gap, 24px);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.card-header .dash-title {
+  margin: 0;
+}
+.metric-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.metric-box {
+  flex: 1;
+  background: var(--bg-panel-muted);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid transparent;
+}
+.metric-box.success-bg {
+  background: rgba(103, 194, 58, 0.1);
+  border-color: rgba(103, 194, 58, 0.2);
+}
+.metric-box.warning-bg {
+  background: rgba(230, 162, 60, 0.1);
+  border-color: rgba(230, 162, 60, 0.2);
+}
+.metric-box.danger-bg {
+  background: rgba(245, 108, 108, 0.1);
+  border-color: rgba(245, 108, 108, 0.2);
+}
+.m-val {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.m-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.health-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.health-alert.danger {
+  background: rgba(245, 108, 108, 0.1);
+  color: var(--danger-color, #f56c6c);
+}
+.health-alert.warning {
+  background: rgba(230, 162, 60, 0.1);
+  color: var(--warning-color, #e6a23c);
+}
+.health-alert.info {
+  background: rgba(64, 158, 255, 0.1);
+  color: var(--blue-600);
+}
+.health-alert.success {
+  background: rgba(103, 194, 58, 0.1);
+  color: var(--success-color, #67c23a);
+}
+
+/* Quality Bars */
+.quality-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.q-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.q-label {
+  width: 120px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+  flex-shrink: 0;
+}
+.q-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-panel-muted);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.q-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+.q-fill.success { background: var(--success-color, #67c23a); }
+.q-fill.warning { background: var(--warning-color, #e6a23c); }
+.q-fill.danger { background: var(--danger-color, #f56c6c); }
+.q-percent {
+  width: 40px;
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+  flex-shrink: 0;
 }
 </style>

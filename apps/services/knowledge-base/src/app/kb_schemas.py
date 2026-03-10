@@ -213,3 +213,11 @@ class UpdateConnectorRequest(BaseModel):
 class RunConnectorRequest(BaseModel):
     dry_run: bool = False
     limit: int | None = Field(default=None, ge=1, le=64)
+
+
+class KBAnalyticsDashboardResponse(BaseModel):
+    view: str = Field(description="Analytics scope. personal only includes the caller's KB resources; admin includes all visible resources.")
+    days: int = Field(description="Rolling window in days for funnel and latency metrics.", ge=1, le=90)
+    funnel: dict[str, Any] = Field(description="Core KB funnel metrics for knowledge-base creation, document upload, and document ready transitions.")
+    ingest_health: dict[str, Any] = Field(description="Current ingest health snapshot, status distributions, and upload-to-ready latency statistics.")
+    data_quality: dict[str, Any] = Field(description="Unsupported or degraded KB analytics fields. Empty arrays mean full support for the current payload.")

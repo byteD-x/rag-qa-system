@@ -39,11 +39,9 @@ import {
   ElOption,
   ElPopover,
   ElProgress,
-  ElInputNumber,
   ElRadioButton,
   ElRadioGroup,
   ElSelect,
-  ElSlider,
   ElSwitch,
   ElTable,
   ElTableColumn,
@@ -54,10 +52,7 @@ import {
 } from 'element-plus'
 import 'element-plus/dist/index.css'
 
-// 导入自定义组件
-import SkeletonLoader from './components/SkeletonLoader.vue'
 import EnhancedEmpty from './components/EnhancedEmpty.vue'
-import ErrorBoundary from './components/ErrorBoundary.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 
 const app = createApp(App)
@@ -92,11 +87,9 @@ const elementComponents = [
   ElOption,
   ElPopover,
   ElProgress,
-  ElInputNumber,
   ElRadioButton,
   ElRadioGroup,
   ElSelect,
-  ElSlider,
   ElSwitch,
   ElTable,
   ElTableColumn,
@@ -106,13 +99,8 @@ const elementComponents = [
   ElUpload
 ]
 
-// 初始化主题
 initTheme()
-
-// 初始化全局快捷键
 initShortcuts()
-
-// 安装波纹效果插件
 installRipplePlugin(app)
 
 app.use(pinia)
@@ -125,10 +113,7 @@ for (const component of elementComponents) {
   }
 }
 
-// 注册全局自定义组件
-app.component('SkeletonLoader', SkeletonLoader)
 app.component('EnhancedEmpty', EnhancedEmpty)
-app.component('ErrorBoundary', ErrorBoundary)
 app.component('ThemeToggle', ThemeToggle)
 
 app.mount('#app')

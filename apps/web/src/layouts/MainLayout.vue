@@ -244,8 +244,17 @@ const navItemsPrimary = [
 
 const navItemsPrimaryFiltered = computed(() =>
   navItemsPrimary.filter((item) => {
-    if (item.path === '/workspace/chat') return authStore.hasPermission('chat.use');
+    if (
+      item.path === '/workspace/chat' ||
+      item.path === '/workspace/platform/agents' ||
+      item.path === '/workspace/platform/prompts'
+    ) {
+      return authStore.hasPermission('chat.use');
+    }
     if (item.path === '/workspace/kb/upload') return authStore.hasPermission('kb.read');
+    if (item.path === '/workspace/kb/connectors' || item.path === '/workspace/kb/debugger') {
+      return authStore.hasPermission('kb.manage');
+    }
     return true;
   })
 );
