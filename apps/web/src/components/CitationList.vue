@@ -1,75 +1,68 @@
 <template>
-  <div class="citation-list">
-    <div class="citation-header">
-      <h3 class="citation-title">{{ title || '引用来源' }}</h3>
-      <span v-if="citations.length" class="citation-count">{{ citations.length }} 处</span>
-    </div>
-
-    <el-empty v-if="!citations.length" description="暂无引用" />
-
-    <div v-else class="citation-grid">
-      <article v-for="(citation, index) in citations" :key="citation.unit_id || index" class="citation-card">
-        <div class="citation-card-head">
-          <div class="citation-title-area">
-            <span class="citation-index">{{ index + 1 }}</span>
-            <div class="citation-info">
-              <strong>{{ citation.section_title || '未命名片段' }}</strong>
-              <p>{{ citation.document_title || citation.document_id }}</p>
+  <div class="citation-container">
+    <el-collapse class="citation-collapse" v-model="activeNames">
+      <el-collapse-item name="1">
+        <template #title>
+          <div class="citation-summary">
+            <div class="citation-icon-wrap">
+              <el-icon><Reading /></el-icon>
+            </div>
+            <span class="summary-text">{{ citations.length }} 个引用来源</span>
+            <div class="citation-avatars">
+              <div v-for="(_, i) in citations.slice(0, 3)" :key="i" class="citation-mini-badge">
+                {{ i + 1 }}
+              </div>
+              <span v-if="citations.length > 3" class="citation-more">...</span>
             </div>
           </div>
-          <router-link :to="documentPath(citation)" class="document-link">
-            <el-icon><Document /></el-icon> 查看原件
-          </router-link>
-        </div>
-
-        <div class="pill-row citation-meta">
-          <el-tag size="small" effect="plain" type="info" class="meta-tag">
-            <el-icon><Files /></el-icon> {{ citation.corpus_type || mode }}
-          </el-tag>
-          <el-tag size="small" effect="plain" type="info" class="meta-tag">
-            <el-icon><Location /></el-icon> {{ citation.char_range || '-' }}
-          </el-tag>
-          <el-tag v-if="citation.page_number" size="small" effect="plain" type="success" class="meta-tag">
-            <el-icon><Picture /></el-icon> 第 {{ citation.page_number }} 页
-          </el-tag>
-
-          <div v-if="citation.evidence_path?.final_score !== undefined" class="score-indicator">
-            <span class="score-label">相关度</span>
-            <div class="score-bar-bg">
-              <div
-                class="score-bar-fill"
-                :style="{ width: `${Math.min(100, Math.max(0, citation.evidence_path.final_score * 100))}%` }"
-                :class="getScoreClass(citation.evidence_path.final_score)"
-              ></div>
-            </div>
-            <span class="score-value" :class="getScoreClass(citation.evidence_path.final_score, true)">
-              {{ (citation.evidence_path.final_score * 100).toFixed(1) }}%
-            </span>
-          </div>
-        </div>
-
-        <div class="quote-container">
-          <div v-if="citation.thumbnail_url" class="visual-preview">
-            <img :src="citation.thumbnail_url" :alt="citation.section_title || citation.document_title || 'visual evidence'" />
-          </div>
-          <el-collapse class="custom-collapse">
-            <el-collapse-item name="1">
-              <template #title>
-                <div class="collapse-title">
-                  <el-icon><Reading /></el-icon> 展开引用原文
+        </template>
+        
+        <div class="citation-grid">
+          <article v-for="(citation, index) in citations" :key="citation.unit_id || index" class="source-card">
+            <div class="source-card-header">
+              <span class="source-index">{{ index + 1 }}</span>
+              <div class="source-title-group">
+                <h4 class="source-title">{{ citation.section_title || citation.document_title || '未命名片段' }}</h4>
+                <div class="source-meta">
+                  <span v-if="citation.document_title && citation.section_title" class="meta-doc" :title="citation.document_title">
+                    {{ citation.document_title }}
+                  </span>
+                  <span class="meta-divider" v-if="citation.document_title">·</span>
+                  <span class="meta-tag">{{ citation.corpus_type || mode }}</span>
+                  <span class="meta-tag" v-if="citation.page_number">第 {{ citation.page_number }} 页</span>
                 </div>
-              </template>
-              <p class="quote"><mark class="highlight">{{ citation.quote }}</mark></p>
-            </el-collapse-item>
-          </el-collapse>
+              </div>
+              <a :href="documentPath(citation)" target="_blank" class="source-link" title="查看原文">
+                <el-icon><Document /></el-icon>
+              </a>
+            </div>
+            
+            <div class="source-content" v-if="citation.quote">
+              <div class="quote-text">{{ citation.quote }}</div>
+              
+              <div class="source-footer" v-if="citation.evidence_path?.final_score !== undefined">
+                <div class="relevance-indicator">
+                  <div class="relevance-track">
+                    <div 
+                      class="relevance-fill" 
+                      :style="{ width: `${Math.min(100, Math.max(0, citation.evidence_path.final_score * 100))}%` }"
+                      :class="getScoreClass(citation.evidence_path.final_score)"
+                    ></div>
+                  </div>
+                  <span class="relevance-text">{{ (citation.evidence_path.final_score * 100).toFixed(1) }}% 相关</span>
+                </div>
+              </div>
+            </div>
+          </article>
         </div>
-      </article>
-    </div>
+      </el-collapse-item>
+    </el-collapse>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Document, Reading, Files, Location, Picture } from '@element-plus/icons-vue';
+import { ref } from 'vue';
+import { Document, Reading } from '@element-plus/icons-vue';
 
 interface CitationItem {
   unit_id: string;
@@ -89,269 +82,277 @@ interface CitationItem {
   };
 }
 
-defineProps<{
+const props = defineProps<{
   citations: CitationItem[];
   title?: string;
   mode: 'kb';
 }>();
 
+const activeNames = ref<string[]>([]);
+
 const documentPath = (citation: CitationItem) => `/workspace/kb/documents/${citation.document_id}`;
 
-const getScoreClass = (score: number, textOnly = false) => {
-  if (score >= 0.8) return textOnly ? 'text-high' : 'score-high';
-  if (score >= 0.5) return textOnly ? 'text-medium' : 'score-medium';
-  return textOnly ? 'text-low' : 'score-low';
+const getScoreClass = (score: number) => {
+  if (score >= 0.8) return 'fill-high';
+  if (score >= 0.5) return 'fill-medium';
+  return 'fill-low';
 };
 </script>
 
 <style scoped>
-.citation-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.citation-container {
+  margin-top: 12px;
+  max-width: 100%;
 }
 
-.citation-header {
+.citation-collapse {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  overflow: hidden;
+  transition: all var(--transition-base);
+}
+
+.citation-collapse:hover {
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.citation-collapse :deep(.el-collapse-item__header) {
+  height: auto;
+  line-height: 1.5;
+  padding: 12px 16px;
+  background: transparent;
+  border-bottom: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.citation-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+  background: transparent;
+}
+
+.citation-collapse :deep(.el-collapse-item__content) {
+  padding: 0 16px 16px;
+}
+
+.citation-summary {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
 }
 
-.citation-title {
-  margin: 0;
-  font-size: var(--text-body, 0.9375rem);
-  font-weight: 600;
-  color: var(--text-primary);
+.citation-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--blue-600);
 }
 
-.citation-count {
-  font-size: var(--text-caption, 0.75rem);
-  color: var(--text-muted);
+.summary-text {
   font-weight: 500;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.citation-avatars {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: -4px;
+}
+
+.citation-mini-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--bg-panel-muted);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  position: relative;
+  margin-right: 4px;
+}
+
+.citation-more {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
 }
 
 .citation-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-top: 8px;
+}
+
+.source-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.citation-card {
-  padding: 16px 18px;
-  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  background: var(--bg-panel);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  overflow: hidden;
 }
 
-.citation-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
-.citation-card-head {
+.source-card-header {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.4);
+  border-bottom: 1px solid var(--border-color);
 }
 
-.citation-title-area {
+.source-index {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.citation-index {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  background: var(--bg-panel-muted);
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--blue-50);
+  color: var(--blue-600);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.source-title-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+.source-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
   color: var(--text-muted);
-  border-radius: var(--radius-xs);
-  font-size: 12px;
-  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta-doc {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta-divider {
+  color: var(--border-strong);
+}
+
+.meta-tag {
+  padding: 1px 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
   font-family: var(--font-mono);
 }
 
-.citation-info strong {
-  display: block;
-  font-size: 1.05rem;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-}
-
-.citation-info p {
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.document-link {
-  display: inline-flex;
+.source-link {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-xs);
-  background: var(--bg-panel-muted);
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  color: var(--blue-600);
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
 }
 
-.document-link:hover {
+.source-link:hover {
+  color: var(--blue-600);
+  border-color: var(--blue-200);
   background: var(--blue-50);
 }
 
-.citation-meta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px dashed var(--border-color);
+.source-content {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-regular);
 }
 
-.score-indicator {
+.quote-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  position: relative;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 16px;
+  color: var(--text-secondary);
+}
+
+.quote-text::before {
+  content: '"';
+  color: var(--border-strong);
+  font-family: serif;
+  font-size: 28px;
+  position: absolute;
+  left: -2px;
+  top: -8px;
+  opacity: 0.5;
+}
+
+.source-footer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-color);
+}
+
+.relevance-indicator {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
 }
 
-.score-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.score-bar-bg {
-  width: 100px;
-  height: 6px;
+.relevance-track {
+  flex: 1;
+  height: 4px;
   background: var(--border-color);
   border-radius: 999px;
   overflow: hidden;
 }
 
-.score-bar-fill {
+.relevance-fill {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.5s ease;
 }
 
-.score-high {
-  background: #10b981;
-}
+.fill-high { background: #10b981; }
+.fill-medium { background: #f59e0b; }
+.fill-low { background: #94a3b8; }
 
-.score-medium {
-  background: #f59e0b;
-}
-
-.score-low {
-  background: #94a3b8;
-}
-
-.text-high {
-  color: #10b981;
-}
-
-.text-medium {
-  color: #f59e0b;
-}
-
-.text-low {
-  color: #ef4444;
-}
-
-.score-value {
-  font-size: 12px;
+.relevance-text {
+  font-size: 11px;
   font-family: var(--font-mono);
-  font-weight: 500;
-  color: var(--text-primary);
-  min-width: 44px;
-  text-align: right;
-}
-
-.quote-container {
-  display: grid;
-  gap: 12px;
-}
-
-.visual-preview {
-  width: min(240px, 100%);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  background: var(--bg-panel-muted);
-}
-
-.visual-preview img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.custom-collapse {
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-top: none;
-  border-bottom: none;
-}
-
-.custom-collapse :deep(.el-collapse-item__header) {
-  background: var(--bg-panel-muted);
-  border-bottom: none;
-  height: 44px;
-  line-height: 44px;
-  padding: 0 16px;
-  color: var(--text-secondary);
-}
-
-.custom-collapse :deep(.el-collapse-item__wrap) {
-  border-bottom: none;
-  background: transparent;
-}
-
-.custom-collapse :deep(.el-collapse-item__content) {
-  padding: 0;
-}
-
-.collapse-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.quote {
-  padding: 16px;
-  background: var(--bg-panel);
-  border-top: 1px dashed var(--border-color);
-  color: var(--text-regular);
-  line-height: 1.75;
-  font-size: 14px;
-}
-
-@media (max-width: 768px) {
-  .citation-card-head {
-    flex-direction: column;
-  }
-
-  .score-indicator {
-    margin-left: 0;
-    width: 100%;
-    margin-top: 8px;
-  }
-
-  .citation-meta {
-    flex-wrap: wrap;
-  }
+  color: var(--text-muted);
 }
 </style>
