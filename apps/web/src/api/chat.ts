@@ -5,6 +5,8 @@ export interface ChatScope {
   corpus_ids: string[];
   document_ids: string[];
   allow_common_knowledge: boolean;
+  agent_profile_id?: string;
+  prompt_template_id?: string;
 }
 
 export interface WorkflowRun {

@@ -141,6 +141,12 @@ const getScoreClass = (score: number, textOnly = false) => {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.citation-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .citation-card-head {

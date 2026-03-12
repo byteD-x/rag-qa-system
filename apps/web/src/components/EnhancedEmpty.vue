@@ -105,6 +105,11 @@ const iconColor = computed(() => {
   border-radius: var(--radius-md);
   background: var(--bg-panel-muted);
   border: 1px solid var(--border-color);
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.default-illustration:hover {
+  transform: scale(1.05) rotate(2deg);
 }
 
 .empty-content {
