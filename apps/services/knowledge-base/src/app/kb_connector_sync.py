@@ -9,6 +9,7 @@ from uuid import uuid4
 from shared.auth import CurrentUser
 
 from .db import to_json
+from .kb_version_assist import build_version_assist
 from .vector_store import delete_document_vectors
 
 
@@ -126,6 +127,20 @@ def plan_connector_sync(
     return plan
 
 
+def _load_version_assist_documents(*, base_id: str, cur: Any) -> list[dict[str, Any]]:
+    cur.execute(
+        """
+        SELECT *
+        FROM kb_documents
+        WHERE base_id = %s
+          AND source_deleted_at IS NULL
+        ORDER BY is_current_version DESC, version_number DESC, created_at DESC
+        """,
+        (base_id,),
+    )
+    return cur.fetchall()
+
+
 def execute_connector_sync(
     *,
     base_id: str,
@@ -149,6 +164,27 @@ def execute_connector_sync(
             existing_documents = load_existing_connector_documents(base_id=base_id, source_type=source_type, cur=cur)
     plan = plan_connector_sync(candidates=candidates, existing_documents=existing_documents, delete_missing=delete_missing)
     if dry_run:
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                version_assist_documents = _load_version_assist_documents(base_id=base_id, cur=cur)
+        candidate_map = {candidate.source_uri: candidate for candidate in candidates}
+        plan_items: list[dict[str, Any]] = []
+        for item in plan:
+            payload = dict(item.__dict__)
+            if item.action == "create":
+                candidate = candidate_map.get(item.source_uri)
+                if candidate is not None:
+                    payload["version_assist"] = build_version_assist(
+                        candidate={
+                            "file_name": candidate.file_name,
+                            "relative_path": candidate.relative_path,
+                            "source_uri": candidate.source_uri,
+                            "source_updated_at": candidate.source_updated_at,
+                            "source_metadata": candidate.source_metadata,
+                        },
+                        existing_documents=version_assist_documents,
+                    )
+            plan_items.append(payload)
         return {
             "base_id": base_id,
             "source_path": source_path,
@@ -161,7 +197,7 @@ def execute_connector_sync(
                 "skip": sum(1 for item in plan if item.action == "skip"),
                 "soft_delete": sum(1 for item in plan if item.action == "soft_delete"),
             },
-            "items": [item.__dict__ for item in plan],
+            "items": plan_items,
             **dict(extra_result or {}),
         }
 
@@ -171,6 +207,7 @@ def execute_connector_sync(
     with db.connect() as conn:
         with conn.cursor() as cur:
             existing_documents = load_existing_connector_documents(base_id=base_id, source_type=source_type, cur=cur)
+            version_assist_documents = _load_version_assist_documents(base_id=base_id, cur=cur)
             for item in plan:
                 if item.action == "skip":
                     existing = existing_documents.get(item.source_uri) or {}
@@ -245,6 +282,20 @@ def execute_connector_sync(
                 create_new_version = item.action == "create" or item.reason == "content_changed"
                 document_id = str(uuid4()) if create_new_version else str(existing.get("id") or uuid4())
                 job_id = str(uuid4())
+                version_assist = (
+                    build_version_assist(
+                        candidate={
+                            "file_name": candidate.file_name,
+                            "relative_path": candidate.relative_path,
+                            "source_uri": candidate.source_uri,
+                            "source_updated_at": candidate.source_updated_at,
+                            "source_metadata": candidate.source_metadata,
+                        },
+                        existing_documents=[row for row in version_assist_documents if str(row.get("id") or "") != str(existing.get("id") or "")],
+                    )
+                    if item.action == "create"
+                    else {}
+                )
                 storage_key = storage.build_storage_key(
                     service=storage_service,
                     document_id=document_id,
@@ -264,6 +315,46 @@ def execute_connector_sync(
                 if category.strip():
                     next_stats["category"] = category.strip()
                 next_stats["connector_sync"] = source_type
+                if version_assist:
+                    next_stats["version_assist"] = version_assist
+                elif item.action == "create":
+                    next_stats.pop("version_assist", None)
+                create_version_family_key = document_id
+                create_version_label = "v1"
+                create_version_number = 1
+                create_supersedes_document_id = None
+                if item.action == "create" and version_assist and bool(version_assist.get("auto_apply")):
+                    matched_document_id = str(version_assist.get("matched_document_id") or version_assist.get("suggested_supersedes_document_id") or "").strip()
+                    matched_document = next(
+                        (row for row in version_assist_documents if str(row.get("id") or "").strip() == matched_document_id),
+                        None,
+                    )
+                    if matched_document is not None:
+                        create_version_family_key = str(
+                            version_assist.get("suggested_version_family_key")
+                            or matched_document.get("version_family_key")
+                            or matched_document_id
+                        )
+                        create_version_number = int(matched_document.get("version_number") or 1) + 1
+                        create_version_label = str(version_assist.get("suggested_version_label") or "") or f"v{create_version_number}"
+                        create_supersedes_document_id = str(
+                            version_assist.get("suggested_supersedes_document_id") or matched_document_id
+                        ) or None
+                        cur.execute(
+                            """
+                            UPDATE kb_documents
+                            SET is_current_version = FALSE,
+                                version_status = CASE
+                                    WHEN version_status = 'active' THEN 'superseded'
+                                    ELSE version_status
+                                END,
+                                updated_at = NOW()
+                            WHERE base_id = %s
+                              AND version_family_key = %s
+                              AND is_current_version = TRUE
+                            """,
+                            (base_id, create_version_family_key),
+                        )
                 if item.action == "create":
                     cur.execute(
                         """
@@ -295,10 +386,11 @@ def execute_connector_sync(
                             candidate.source_uri,
                             candidate.source_updated_at,
                             to_json(candidate.source_metadata),
-                            document_id,
-                            "v1",
-                            1,
+                            create_version_family_key,
+                            create_version_label,
+                            create_version_number,
                             candidate.source_updated_at,
+                            create_supersedes_document_id,
                         ),
                     )
                 elif item.reason == "content_changed":
@@ -426,8 +518,24 @@ def execute_connector_sync(
                         "file_name": candidate.file_name,
                         "relative_path": candidate.relative_path,
                         "reason": item.reason,
+                        "version_assist": version_assist,
                     }
                 )
+                if item.action == "create":
+                    version_assist_documents.insert(
+                        0,
+                        {
+                            "id": document_id,
+                            "file_name": candidate.file_name,
+                            "source_uri": candidate.source_uri,
+                            "source_updated_at": candidate.source_updated_at,
+                            "source_metadata_json": candidate.source_metadata,
+                            "version_family_key": create_version_family_key,
+                            "version_number": create_version_number,
+                            "updated_at": candidate.source_updated_at,
+                            "is_current_version": True,
+                        },
+                    )
         conn.commit()
     for document_id in soft_deleted_ids:
         delete_document_vectors(document_id)

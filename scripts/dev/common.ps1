@@ -676,6 +676,7 @@ function Write-ProjectSummary {
     Write-Host "Commands:"
     Write-Host "  Start:         .\scripts\dev\up.ps1"
     Write-Host "  Stop:          .\scripts\dev\down.ps1"
+    Write-Host "  Frontend unit: cd apps\web && npm run test:unit"
     Write-Host "  Build frontend: cd apps\web && npm run build"
     Write-Host "  Compose check: docker compose config --quiet"
     Write-Host ""

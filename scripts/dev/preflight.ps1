@@ -20,6 +20,9 @@ try {
     Write-Info "Building frontend..."
     Invoke-ExternalCommand -Command "npm" -Arguments @("run", "build") -WorkingDirectory (Join-Path $repoRoot "apps/web")
 
+    Write-Info "Running frontend unit tests..."
+    Invoke-ExternalCommand -Command "npm" -Arguments @("run", "test:unit") -WorkingDirectory (Join-Path $repoRoot "apps/web")
+
     Write-Info "Compiling Python services..."
     Invoke-ExternalCommand -Command "python" -Arguments @("-m", "compileall", "packages/python", "apps/services/api-gateway", "apps/services/knowledge-base")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,9 @@ from shared.auth import CurrentUser
 
 from .kb_api_support import audit_event, can_manage_everything
 from .kb_runtime import VISUAL_ASSET_URL_EXPIRES_SECONDS, db, storage
+
+
+VISUAL_REGION_TITLE_RE = re.compile(r"^Page\s+\d+\s+(.+)$", re.IGNORECASE)
 
 
 def fetch_base_documents(base_id: str, *, user: CurrentUser, cur=None) -> list[dict[str, Any]]:
@@ -287,6 +291,54 @@ def list_document_visual_assets(document_id: str, *, user: CurrentUser) -> list[
     return [serialize_visual_asset(row) for row in rows]
 
 
+def list_visual_asset_regions(asset_id: str, *, user: CurrentUser) -> list[dict[str, Any]]:
+    asset = load_visual_asset(asset_id, user=user, action="kb.visual_asset.regions")
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    id::text AS region_id,
+                    asset_id::text AS asset_id,
+                    document_id::text AS document_id,
+                    region_index,
+                    page_number,
+                    region_label,
+                    layout_hints_json,
+                    bbox_json,
+                    confidence,
+                    summary,
+                    ocr_text
+                FROM kb_visual_asset_regions
+                WHERE asset_id = %s::uuid
+                ORDER BY region_index ASC
+                """,
+                (asset_id,),
+            )
+            rows = cur.fetchall()
+            if rows:
+                return [_serialize_stored_visual_region(row, asset=asset) for row in rows]
+            cur.execute(
+                """
+                SELECT
+                    sections.id::text AS region_id,
+                    sections.title,
+                    sections.summary,
+                    sections.text,
+                    sections.page_number,
+                    COALESCE(sections.asset_id::text, '') AS asset_id,
+                    sections.section_index
+                FROM kb_sections sections
+                WHERE sections.asset_id = %s::uuid
+                  AND sections.source_kind = 'visual_region'
+                ORDER BY sections.section_index ASC
+                """,
+                (asset_id,),
+            )
+            rows = cur.fetchall()
+    return [_serialize_visual_region(row, asset=asset) for row in rows]
+
+
 def list_visual_storage_keys_for_documents(document_ids: list[str], *, cur=None) -> list[str]:
     if not document_ids:
         return []
@@ -321,3 +373,66 @@ def serialize_visual_asset(row: dict[str, Any]) -> dict[str, Any]:
         if storage_key
         else "",
     }
+
+
+def _serialize_visual_region(row: dict[str, Any], *, asset: dict[str, Any]) -> dict[str, Any]:
+    title = str(row.get("title") or "").strip()
+    layout_hints, ocr_text = _split_visual_region_text(str(row.get("text") or ""))
+    match = VISUAL_REGION_TITLE_RE.match(title)
+    region_label = str(match.group(1) if match else title).strip() or "region"
+    summary = str(row.get("summary") or "").strip() or ocr_text[:180].strip()
+    return {
+        "region_id": str(row.get("region_id") or ""),
+        "asset_id": str(row.get("asset_id") or asset.get("id") or ""),
+        "document_id": str(asset.get("document_id") or ""),
+        "page_number": int(row.get("page_number") or asset.get("page_number") or 0) or None,
+        "region_label": region_label,
+        "layout_hints": layout_hints,
+        "bbox": [],
+        "confidence": None,
+        "summary": summary,
+        "ocr_text": ocr_text,
+        "thumbnail_url": f"/api/v1/kb/visual-assets/{str(asset.get('id') or '')}/thumbnail" if str(asset.get("id") or "") else "",
+    }
+
+
+def _split_visual_region_text(text: str) -> tuple[list[str], str]:
+    lines = [str(line).strip() for line in str(text or "").splitlines() if str(line).strip()]
+    layout_hints: list[str] = []
+    if lines and lines[0].lower().startswith("layout:"):
+        layout_hints = [part.strip() for part in lines.pop(0).split(":", 1)[-1].split(",") if part.strip()]
+    if lines and lines[0].lower().startswith("region:"):
+        lines.pop(0)
+    return layout_hints, "\n".join(lines).strip()
+
+
+def _serialize_stored_visual_region(row: dict[str, Any], *, asset: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "region_id": str(row.get("region_id") or ""),
+        "asset_id": str(row.get("asset_id") or asset.get("id") or ""),
+        "document_id": str(row.get("document_id") or asset.get("document_id") or ""),
+        "page_number": int(row.get("page_number") or asset.get("page_number") or 0) or None,
+        "region_label": str(row.get("region_label") or "").strip() or "region",
+        "layout_hints": _json_list(row.get("layout_hints_json")),
+        "bbox": _json_number_list(row.get("bbox_json")),
+        "confidence": float(row.get("confidence")) if row.get("confidence") is not None else None,
+        "summary": str(row.get("summary") or "").strip(),
+        "ocr_text": str(row.get("ocr_text") or "").strip(),
+        "thumbnail_url": f"/api/v1/kb/visual-assets/{str(asset.get('id') or '')}/thumbnail" if str(asset.get("id") or "") else "",
+    }
+
+
+def _json_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _json_number_list(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        return []
+    result: list[float] = []
+    for item in value[:4]:
+        if isinstance(item, (int, float)):
+            result.append(float(item))
+    return result

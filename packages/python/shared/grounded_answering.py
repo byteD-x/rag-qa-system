@@ -157,6 +157,9 @@ def evidence_prompt_lines(evidence: list[dict[str, Any]]) -> str:
                     f"char_range={item.get('char_range')}",
                     f"page_number={item.get('page_number')}",
                     f"evidence_kind={item.get('evidence_kind') or 'text'}",
+                    f"region_label={item.get('region_label') or ''}",
+                    f"confidence={item.get('confidence')}",
+                    f"bbox={item.get('bbox') or []}",
                     (
                         f"score={evidence_path.get('final_score', 0)} "
                         f"structure={evidence_path.get('structure_hit', False)} "
@@ -223,6 +226,13 @@ def kb_documents_to_prompt_payload(documents: list[Document], *, corpus_id: str)
     payload: list[dict[str, Any]] = []
     for index, item in enumerate(documents, start=1):
         metadata = dict(item.metadata or {})
+        source_kind = str(metadata.get("source_kind") or "text")
+        if source_kind == "visual_region":
+            evidence_kind = "visual_region"
+        elif source_kind.startswith("visual"):
+            evidence_kind = "image_asset"
+        else:
+            evidence_kind = "document_chunk"
         payload.append(
             {
                 "unit_id": str(metadata.get("unit_id") or ""),
@@ -237,11 +247,14 @@ def kb_documents_to_prompt_payload(documents: list[Document], *, corpus_id: str)
                 "corpus_id": corpus_id,
                 "corpus_type": "kb",
                 "service_type": "kb",
-                "evidence_kind": "visual_ocr" if str(metadata.get("source_kind") or "").startswith("visual") else "text",
-                "source_kind": str(metadata.get("source_kind") or "text"),
+                "evidence_kind": evidence_kind,
+                "source_kind": source_kind,
                 "page_number": int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
+                "region_label": str(metadata.get("region_label") or ""),
                 "asset_id": str(metadata.get("asset_id") or ""),
                 "thumbnail_url": str(metadata.get("thumbnail_url") or ""),
+                "bbox": [float(item) for item in list(metadata.get("bbox") or []) if isinstance(item, (int, float))][:4],
+                "confidence": float(metadata.get("confidence")) if metadata.get("confidence") is not None else None,
                 "signal_scores": dict(metadata.get("signal_scores") or {}),
                 "evidence_path": dict(metadata.get("evidence_path") or {"final_rank": index, "final_score": 0.0}),
             }

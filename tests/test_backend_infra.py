@@ -3,10 +3,12 @@
 import asyncio
 import importlib
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from pydantic import ValidationError
@@ -1639,6 +1641,332 @@ def test_kb_analytics_dashboard_payload_aggregates_ingest_health(monkeypatch) ->
     assert payload["ingest_health"]["document_status_distribution"][0]["key"] == "ready"
 
 
+def test_kb_governance_payload_aggregates_enterprise_queues(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="user-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    now = datetime(2026, 3, 20, tzinfo=timezone.utc)
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._rows = []
+            self._row = None
+
+        def execute(self, query, params=None):
+            if "COALESCE(NULLIF(d.stats_json->>'review_status', ''), '') = 'approved'" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-approved",
+                        "base_id": "base-1",
+                        "base_name": "Ops KB",
+                        "file_name": "policy-approved.pdf",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "ops-policy",
+                        "version_label": "2026-Q3",
+                        "version_number": 5,
+                        "version_status": "draft",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 0,
+                        "owner_user_id": "owner-1",
+                        "review_status": "approved",
+                        "reviewer_note": "approved by kb admin",
+                        "reviewed_at": now,
+                        "reviewed_by_user_id": "reviewer-1",
+                        "reviewed_by_email": "reviewer@local",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "COALESCE(NULLIF(d.stats_json->>'review_status', ''), '') = 'rejected'" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-rejected",
+                        "base_id": "base-1",
+                        "base_name": "Ops KB",
+                        "file_name": "policy-rejected.pdf",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "ops-policy",
+                        "version_label": "2026-Q0",
+                        "version_number": 1,
+                        "version_status": "draft",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 0,
+                        "owner_user_id": "owner-2",
+                        "review_status": "rejected",
+                        "reviewer_note": "missing rollback steps",
+                        "reviewed_at": now,
+                        "reviewed_by_user_id": "reviewer-2",
+                        "reviewed_by_email": "rejector@local",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "COALESCE(d.version_status, '') = 'draft'" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-draft",
+                        "base_id": "base-1",
+                        "base_name": "Ops KB",
+                        "file_name": "policy-draft.pdf",
+                        "status": "uploaded",
+                        "enhancement_status": "visual_pending",
+                        "version_family_key": "ops-policy",
+                        "version_label": "v3-draft",
+                        "version_number": 3,
+                        "version_status": "draft",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 2,
+                        "owner_user_id": "owner-3",
+                        "review_status": "review_pending",
+                        "reviewer_note": "need owner signoff",
+                        "reviewed_at": now,
+                        "reviewed_by_user_id": "",
+                        "reviewed_by_email": "",
+                        "total_count": 2,
+                    },
+                    {
+                        "document_id": "doc-scheduled",
+                        "base_id": "base-1",
+                        "base_name": "Ops KB",
+                        "file_name": "policy-q2.pdf",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "ops-policy",
+                        "version_label": "2026-Q2",
+                        "version_number": 4,
+                        "version_status": "active",
+                        "is_current_version": True,
+                        "effective_from": datetime(2026, 4, 1, tzinfo=timezone.utc),
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 0,
+                        "owner_user_id": "owner-3",
+                        "review_status": "",
+                        "reviewer_note": "",
+                        "reviewed_at": None,
+                        "reviewed_by_user_id": "",
+                        "reviewed_by_email": "",
+                        "total_count": 2,
+                    },
+                ]
+                self._row = None
+            elif "d.effective_to IS NOT NULL AND d.effective_to < NOW()" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-expired",
+                        "base_id": "base-2",
+                        "base_name": "HR KB",
+                        "file_name": "handbook-2024.pdf",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "employee-handbook",
+                        "version_label": "2024",
+                        "version_number": 2,
+                        "version_status": "superseded",
+                        "is_current_version": False,
+                        "effective_from": datetime(2024, 1, 1, tzinfo=timezone.utc),
+                        "effective_to": datetime(2025, 12, 31, tzinfo=timezone.utc),
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 0,
+                        "owner_user_id": "owner-4",
+                        "review_status": "approved",
+                        "reviewer_note": "",
+                        "reviewed_at": now,
+                        "reviewed_by_user_id": "reviewer-3",
+                        "reviewed_by_email": "approver@local",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "NOT IN ('visual_ready', 'summary_vectors_ready', 'chunk_vectors_ready')" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-visual",
+                        "base_id": "base-3",
+                        "base_name": "Infra KB",
+                        "file_name": "terminal-shot.png",
+                        "status": "enhancing",
+                        "enhancement_status": "visual_pending",
+                        "version_family_key": "",
+                        "version_label": "",
+                        "version_number": None,
+                        "version_status": "active",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 3,
+                        "owner_user_id": "owner-5",
+                        "review_status": "",
+                        "reviewer_note": "",
+                        "reviewed_at": None,
+                        "reviewed_by_user_id": "",
+                        "reviewed_by_email": "",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "region.confidence <" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-visual-low-confidence",
+                        "base_id": "base-3",
+                        "base_name": "Infra KB",
+                        "file_name": "terminal-shot.png",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "",
+                        "version_label": "",
+                        "version_number": None,
+                        "version_status": "active",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 3,
+                        "low_confidence_region_count": 2,
+                        "low_confidence_asset_id": "asset-visual-1",
+                        "low_confidence_region_id": "region-low-1",
+                        "low_confidence_region_label": "terminal config",
+                        "low_confidence_region_confidence": 0.42,
+                        "low_confidence_region_bbox": [0.1, 0.2, 0.8, 0.6],
+                        "owner_user_id": "owner-5",
+                        "review_status": "",
+                        "reviewer_note": "",
+                        "reviewed_at": None,
+                        "reviewed_by_user_id": "",
+                        "reviewed_by_email": "",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "d.supersedes_document_id IS NOT NULL" in query:
+                self._rows = [
+                    {
+                        "document_id": "doc-missing-family",
+                        "base_id": "base-4",
+                        "base_name": "Finance KB",
+                        "file_name": "expense-v2.pdf",
+                        "status": "ready",
+                        "enhancement_status": "chunk_vectors_ready",
+                        "version_family_key": "",
+                        "version_label": "v2",
+                        "version_number": 2,
+                        "version_status": "active",
+                        "is_current_version": False,
+                        "effective_from": None,
+                        "effective_to": None,
+                        "created_at": now,
+                        "updated_at": now,
+                        "visual_asset_count": 0,
+                        "owner_user_id": "owner-6",
+                        "review_status": "",
+                        "reviewer_note": "",
+                        "reviewed_at": None,
+                        "reviewed_by_user_id": "",
+                        "reviewed_by_email": "",
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            elif "HAVING COUNT(*) FILTER (WHERE d.is_current_version = TRUE) > 1" in query:
+                self._rows = [
+                    {
+                        "base_id": "base-5",
+                        "base_name": "Support KB",
+                        "version_family_key": "faq",
+                        "current_version_count": 2,
+                        "active_version_count": 2,
+                        "total_versions": 3,
+                        "latest_version_number": 5,
+                        "current_document_ids": ["doc-a", "doc-b"],
+                        "current_labels": ["2026-Q1", "2026-Q2"],
+                        "total_count": 1,
+                    }
+                ]
+                self._row = None
+            else:
+                raise AssertionError(f"unexpected query: {query}")
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_analytics.db, "connect", lambda: _Connection())
+
+    payload = kb_analytics._governance_payload(user, view="personal", limit=5)
+
+    assert isinstance(payload["generated_at"], str) and payload["generated_at"]
+    assert payload["summary"]["pending_review"] == 2
+    assert payload["summary"]["approved_ready"] == 1
+    assert payload["summary"]["rejected_documents"] == 1
+    assert payload["summary"]["expired_documents"] == 1
+    assert payload["summary"]["visual_attention"] == 1
+    assert payload["summary"]["visual_low_confidence"] == 1
+    assert payload["summary"]["missing_version_family"] == 1
+    assert payload["summary"]["version_conflicts"] == 1
+    assert payload["queues"]["pending_review"][0]["reason"] == "review_pending"
+    assert payload["queues"]["pending_review"][1]["reason"] == "scheduled_publish"
+    assert payload["queues"]["pending_review"][0]["review_status"] == "review_pending"
+    assert payload["queues"]["pending_review"][0]["owner_user_id"] == "owner-3"
+    assert payload["queues"]["approved_ready"][0]["reason"] == "approved_ready"
+    assert payload["queues"]["approved_ready"][0]["reviewed_by_email"] == "reviewer@local"
+    assert payload["queues"]["rejected_documents"][0]["reason"] == "rejected_review"
+    assert payload["queues"]["rejected_documents"][0]["reviewer_note"] == "missing rollback steps"
+    assert payload["queues"]["rejected_documents"][0]["reviewed_by_user_id"] == "reviewer-2"
+    assert payload["queues"]["expired_documents"][0]["effective_now"] is False
+    assert payload["queues"]["visual_attention"][0]["reason"] == "visual_pipeline_visual_pending"
+    assert payload["queues"]["visual_low_confidence"][0]["reason"] == "visual_pipeline_low_confidence"
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_region_count"] == 2
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_asset_id"] == "asset-visual-1"
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_region_id"] == "region-low-1"
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_region_label"] == "terminal config"
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_region_confidence"] == 0.42
+    assert payload["queues"]["visual_low_confidence"][0]["low_confidence_region_bbox"] == [0.1, 0.2, 0.8, 0.6]
+    assert payload["queues"]["missing_version_family"][0]["reason"] == "version_metadata_without_family"
+    assert payload["queues"]["version_conflicts"][0]["current_document_ids"] == ["doc-a", "doc-b"]
+
+
 def test_gateway_qa_quality_stats_handles_empty_window(monkeypatch) -> None:
     gateway_analytics = _load_gateway_module("app.gateway_analytics_routes")
     user = auth_module.AuthUser(
@@ -1669,6 +1997,18 @@ def test_gateway_qa_quality_stats_handles_empty_window(monkeypatch) -> None:
                     "low_quality_answers": 0,
                 }
                 self._rows = []
+            elif "COUNT(*) AS clarification_runs" in query:
+                self._row = {
+                    "clarification_runs": 0,
+                    "clarification_completed_runs": 0,
+                    "clarification_pending_runs": 0,
+                    "clarification_with_free_text_runs": 0,
+                    "clarification_with_selection_runs": 0,
+                }
+                self._rows = []
+            elif "workflow_state_json #>> '{retrieval,aggregate,clarification_kind}'" in query:
+                self._rows = []
+                self._row = None
             elif "COALESCE(NULLIF(answer_mode, ''), 'unknown')" in query or "COALESCE(NULLIF(evidence_status, ''), 'unknown')" in query:
                 self._rows = []
                 self._row = None
@@ -1704,8 +2044,11 @@ def test_gateway_qa_quality_stats_handles_empty_window(monkeypatch) -> None:
     assert payload["summary"]["assistant_answers"] == 0
     assert payload["zero_hit"]["selected_candidates_zero_rate"] == 0.0
     assert payload["low_quality"]["rate"] == 0.0
+    assert payload["clarification"]["triggered_runs"] == 0
+    assert payload["clarification"]["completion_rate"] == 0.0
     assert payload["answer_mode_distribution"] == []
     assert payload["evidence_status_distribution"] == []
+    assert payload["clarification"]["kind_distribution"] == []
 
 
 def test_gateway_dashboard_route_returns_extended_payload(monkeypatch) -> None:
@@ -1745,6 +2088,15 @@ def test_gateway_dashboard_route_returns_extended_payload(monkeypatch) -> None:
             "evidence_status_distribution": [{"key": "grounded", "count": 7}],
             "zero_hit": {"selected_candidates_zero": 1, "selected_candidates_zero_rate": 0.1, "missing_citations": 2, "missing_citations_rate": 0.2},
             "low_quality": {"count": 2, "rate": 0.2, "score_threshold": 0.5, "reason_breakdown": [{"key": "partial_evidence", "count": 2}]},
+            "clarification": {
+                "triggered_runs": 3,
+                "completed_runs": 2,
+                "pending_runs": 1,
+                "completion_rate": 0.6667,
+                "free_text_runs": 1,
+                "selection_runs": 2,
+                "kind_distribution": [{"key": "version_conflict", "count": 2}, {"key": "visual_ambiguity", "count": 1}],
+            },
         },
     )
 
@@ -1782,6 +2134,7 @@ def test_gateway_dashboard_route_returns_extended_payload(monkeypatch) -> None:
     assert payload["funnel"]["knowledge_bases_created"] == 2
     assert payload["funnel"]["questions_asked"] == 11
     assert payload["qa_quality"]["zero_hit"]["selected_candidates_zero"] == 1
+    assert payload["qa_quality"]["clarification"]["triggered_runs"] == 3
     assert payload["ingest_health"]["summary"]["ready_documents"] == 4
     assert payload["data_quality"]["unsupported_fields"] == []
 
@@ -1835,6 +2188,25 @@ def test_kb_analytics_dashboard_route_requires_kb_read_permission(monkeypatch) -
 
     client = TestClient(kb_main.app)
     response = client.get("/api/v1/kb/analytics/dashboard", headers=_auth_headers(user))
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
+
+
+def test_kb_governance_route_requires_kb_manage_permission(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_api_support = importlib.import_module("app.kb_api_support")
+    monkeypatch.setattr(kb_api_support, "audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(kb_main.app)
+    response = client.get("/api/v1/kb/analytics/governance", headers=_auth_headers(user))
 
     assert response.status_code == 403
     payload = response.json()
@@ -1989,6 +2361,7 @@ def test_worker_merge_ingest_stats_combines_visual_counts() -> None:
     assert merged["section_count"] == 3
     assert merged["chunk_count"] == 5
     assert merged["visual_asset_count"] == 4
+    assert merged["visual_region_low_confidence_count"] == 0
     assert merged["visual_provider"] == "local-http"
 
 
@@ -2025,10 +2398,179 @@ def test_retrieve_merge_documents_include_visual_metadata() -> None:
     )
 
     item = results["chunk-1"]
-    assert item.evidence_kind == "visual_ocr"
+    assert item.evidence_kind == "image_asset"
     assert item.page_number == 3
     assert item.asset_id == "asset-1"
     assert item.thumbnail_url == "/api/v1/kb/visual-assets/asset-1/thumbnail"
+
+
+def test_retrieve_merge_documents_marks_visual_region_evidence() -> None:
+    kb_retrieve = _load_kb_module("app.retrieve")
+    results: dict[str, object] = {}
+    signal_lists: dict[str, list[str]] = {}
+
+    kb_retrieve._merge_documents(
+        results,
+        signal_lists,
+        [
+            Document(
+                page_content="region: terminal config\nset FOO=bar",
+                metadata={
+                    "unit_id": "chunk-region-1",
+                    "document_id": "doc-1",
+                    "document_title": "Runbook",
+                    "section_title": "Page 2 terminal config",
+                    "region_label": "terminal config",
+                    "source_kind": "visual_region",
+                    "page_number": 2,
+                    "asset_id": "asset-2",
+                    "thumbnail_url": "/api/v1/kb/visual-assets/asset-2/thumbnail",
+                    "bbox": [0.1, 0.2, 0.9, 0.7],
+                    "confidence": 0.72,
+                    "char_range": "0-30",
+                    "quote": "set FOO=bar",
+                    "raw_text": "region: terminal config\nset FOO=bar",
+                    "base_id": "base-1",
+                    "signal_scores": {"fts": 0.91},
+                    "evidence_path": {"fts_rank": 1},
+                },
+            )
+        ],
+        "fts",
+    )
+
+    item = results["chunk-region-1"]
+    assert item.evidence_kind == "visual_region"
+    assert item.source_kind == "visual_region"
+    assert item.region_label == "terminal config"
+    assert item.bbox == [0.1, 0.2, 0.9, 0.7]
+    assert item.confidence == 0.72
+
+
+def test_list_visual_asset_regions_parses_layout_and_region_text(monkeypatch) -> None:
+    kb_store = _load_kb_module("app.kb_resource_store")
+    user = auth_module.AuthUser(user_id="owner-1", email="owner@local", role="kb_editor", permissions=auth_module.permissions_for_role("kb_editor"))
+
+    monkeypatch.setattr(
+        kb_store,
+        "load_visual_asset",
+        lambda asset_id, **kwargs: {"id": asset_id, "document_id": "doc-1", "page_number": 3},
+    )
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._rows = []
+
+        def execute(self, query, params=None):
+            if "FROM kb_visual_asset_regions" in query:
+                self._rows = []
+            else:
+                self._rows = [
+                    {
+                        "region_id": "section-1",
+                        "title": "Page 3 terminal config",
+                        "summary": "",
+                        "text": "layout: terminal, config\nregion: terminal config\nset FOO=bar\nset BAZ=qux",
+                        "page_number": 3,
+                        "asset_id": "asset-1",
+                        "section_index": 6,
+                    }
+                ]
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_store.db, "connect", lambda: _Connection())
+
+    items = kb_store.list_visual_asset_regions("asset-1", user=user)
+
+    assert len(items) == 1
+    assert items[0]["region_label"] == "terminal config"
+    assert items[0]["layout_hints"] == ["terminal", "config"]
+    assert items[0]["ocr_text"] == "set FOO=bar\nset BAZ=qux"
+    assert items[0]["thumbnail_url"] == "/api/v1/kb/visual-assets/asset-1/thumbnail"
+    assert items[0]["bbox"] == []
+    assert items[0]["confidence"] is None
+
+
+def test_list_visual_asset_regions_prefers_stored_region_metadata(monkeypatch) -> None:
+    kb_store = _load_kb_module("app.kb_resource_store")
+    user = auth_module.AuthUser(user_id="owner-1", email="owner@local", role="kb_editor", permissions=auth_module.permissions_for_role("kb_editor"))
+
+    monkeypatch.setattr(
+        kb_store,
+        "load_visual_asset",
+        lambda asset_id, **kwargs: {"id": asset_id, "document_id": "doc-1", "page_number": 5},
+    )
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._rows = []
+
+        def execute(self, query, params=None):
+            if "FROM kb_visual_asset_regions" in query:
+                self._rows = [
+                    {
+                        "region_id": "region-1",
+                        "asset_id": "asset-9",
+                        "document_id": "doc-1",
+                        "region_index": 1,
+                        "page_number": 5,
+                        "region_label": "red box config",
+                        "layout_hints_json": ["terminal", "highlight"],
+                        "bbox_json": [0.1, 0.2, 0.8, 0.6],
+                        "confidence": 0.91,
+                        "summary": "需要修改环境变量配置。",
+                        "ocr_text": "export FOO=bar",
+                    }
+                ]
+            else:
+                raise AssertionError("fallback query should not run when stored region rows exist")
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_store.db, "connect", lambda: _Connection())
+
+    items = kb_store.list_visual_asset_regions("asset-9", user=user)
+
+    assert len(items) == 1
+    assert items[0]["region_label"] == "red box config"
+    assert items[0]["layout_hints"] == ["terminal", "highlight"]
+    assert items[0]["bbox"] == [0.1, 0.2, 0.8, 0.6]
+    assert items[0]["confidence"] == 0.91
 
 
 def test_resolve_document_ids_defaults_to_current_active_effective_versions(monkeypatch) -> None:
@@ -2147,6 +2689,260 @@ def test_update_document_request_rejects_non_active_current_version() -> None:
         assert "current version must use active status" in str(exc)
     else:
         raise AssertionError("expected invalid current version status to raise ValidationError")
+
+
+def test_update_document_request_normalizes_review_fields() -> None:
+    kb_schemas = _load_kb_module("app.kb_schemas")
+
+    payload = kb_schemas.UpdateDocumentRequest(
+        owner_user_id=" owner-1 ",
+        review_status=" APPROVED ",
+        reviewer_note="  ship it  ",
+    )
+
+    assert payload.owner_user_id == "owner-1"
+    assert payload.review_status == "approved"
+    assert payload.reviewer_note == "ship it"
+
+
+def test_batch_update_documents_request_normalizes_ids_and_patch() -> None:
+    kb_schemas = _load_kb_module("app.kb_schemas")
+
+    payload = kb_schemas.BatchUpdateDocumentsRequest(
+        document_ids=[" doc-1 ", "doc-1", "doc-2 "],
+        task_id=" task-1 ",
+        retry_of_task_id=" task-0 ",
+        patch=kb_schemas.UpdateDocumentRequest(review_status=" APPROVED ", reviewer_note=" ok "),
+    )
+
+    assert payload.document_ids == ["doc-1", "doc-2"]
+    assert payload.task_id == "task-1"
+    assert payload.retry_of_task_id == "task-0"
+    assert payload.patch.review_status == "approved"
+    assert payload.patch.reviewer_note == "ok"
+
+
+def test_batch_update_documents_request_rejects_empty_patch() -> None:
+    kb_schemas = _load_kb_module("app.kb_schemas")
+
+    try:
+        kb_schemas.BatchUpdateDocumentsRequest(document_ids=["doc-1"], patch=kb_schemas.UpdateDocumentRequest())
+    except ValidationError as exc:
+        assert "patch must contain at least one field" in str(exc)
+    else:
+        raise AssertionError("expected empty patch to raise ValidationError")
+
+
+def test_batch_update_documents_route_returns_partial_results(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_base_routes = importlib.import_module("app.kb_base_routes")
+    audit_calls: list[dict[str, object]] = []
+
+    def fake_apply_document_update(document_id: str, payload, *, request, user):
+        assert payload.review_status == "approved"
+        if document_id == "doc-2":
+            raise HTTPException(status_code=400, detail={"detail": "document locked", "code": "document_locked"})
+        return {"id": document_id, "file_name": f"{document_id}.pdf"}
+
+    monkeypatch.setattr(kb_base_routes, "_apply_document_update", fake_apply_document_update)
+    monkeypatch.setattr(kb_base_routes, "audit_event", lambda **kwargs: audit_calls.append(kwargs))
+
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/v1/kb/documents/batch-update",
+        json={
+            "document_ids": ["doc-1", "doc-2"],
+            "patch": {"review_status": "approved"},
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task_id"]
+    assert payload["status"] == "completed"
+    assert payload["summary"] == {"total": 2, "succeeded": 1, "failed": 1}
+    assert payload["items"][0]["ok"] is True
+    assert payload["items"][0]["document"]["id"] == "doc-1"
+    assert payload["items"][1]["ok"] is False
+    assert payload["items"][1]["code"] == "document_locked"
+    assert payload["items"][1]["status_code"] == 400
+    assert audit_calls[-1]["action"] == "kb.document.batch_update"
+    assert audit_calls[-1]["outcome"] == "partial_success"
+    assert audit_calls[-1]["resource_id"] == payload["task_id"]
+    assert audit_calls[-1]["details"]["task_id"] == payload["task_id"]
+    assert audit_calls[-1]["details"]["patch"] == {"review_status": "approved"}
+    assert audit_calls[-1]["details"]["success_document_ids"] == ["doc-1"]
+    assert audit_calls[-1]["details"]["failed_items"][0]["document_id"] == "doc-2"
+    assert audit_calls[-1]["details"]["failed_items"][0]["code"] == "document_locked"
+
+
+def test_governance_batch_events_payload_filters_personal_and_action(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    captured: dict[str, object] = {}
+    user = auth_module.AuthUser(
+        user_id="owner-1",
+        email="owner@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    def fake_list_audit_events(**kwargs):
+        captured.update(kwargs)
+        return [{"id": "evt-1", "action": "kb.document.batch_update", "details": {"failed": 1}}]
+
+    monkeypatch.setattr(kb_analytics, "list_audit_events", fake_list_audit_events)
+
+    payload = kb_analytics._governance_batch_events_payload(user, view="personal", limit=6)
+
+    assert payload["view"] == "personal"
+    assert payload["limit"] == 6
+    assert payload["items"][0]["id"] == "evt-1"
+    assert captured["actor_user_id"] == "owner-1"
+    assert captured["resource_type"] == "document_batch"
+    assert captured["action"] == "kb.document.batch_update"
+
+
+def test_governance_batch_event_detail_payload_includes_retry_timeline(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="owner-1",
+        email="owner@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    def fake_list_audit_events(**kwargs):
+        resource_id = kwargs.get("resource_id")
+        if resource_id == "task-2":
+            return [
+                {
+                    "id": "evt-2",
+                    "resource_id": "task-2",
+                    "action": "kb.document.batch_update",
+                    "created_at": "2026-03-20T09:00:00+00:00",
+                    "details": {"task_id": "task-2", "retry_of_task_id": "task-1", "failed": 0},
+                }
+            ]
+        return [
+            {
+                "id": "evt-2",
+                "resource_id": "task-2",
+                "action": "kb.document.batch_update",
+                "created_at": "2026-03-20T09:00:00+00:00",
+                "details": {"task_id": "task-2", "retry_of_task_id": "task-1", "failed": 0},
+            },
+            {
+                "id": "evt-1",
+                "resource_id": "task-1",
+                "action": "kb.document.batch_update",
+                "created_at": "2026-03-20T08:00:00+00:00",
+                "details": {"task_id": "task-1", "failed": 1},
+            },
+            {
+                "id": "evt-3",
+                "resource_id": "task-3",
+                "action": "kb.document.batch_update",
+                "created_at": "2026-03-20T10:00:00+00:00",
+                "details": {"task_id": "task-3", "retry_of_task_id": "task-2", "failed": 0},
+            },
+        ]
+
+    monkeypatch.setattr(kb_analytics, "list_audit_events", fake_list_audit_events)
+
+    payload = kb_analytics._governance_batch_event_detail_payload(
+        user,
+        view="personal",
+        task_id="task-2",
+        timeline_limit=10,
+        timeline_offset=0,
+        timeline_filter="all",
+    )
+
+    assert payload["task_id"] == "task-2"
+    assert payload["item"]["resource_id"] == "task-2"
+    assert payload["retry_summary"]["parent_task_id"] == "task-1"
+    assert payload["retry_summary"]["retry_count"] == 1
+    assert payload["retry_summary"]["latest_retry_task_id"] == "task-3"
+    assert payload["timeline"]["items"][0]["resource_id"] == "task-3"
+    assert payload["timeline"]["items"][1]["resource_id"] == "task-2"
+    assert payload["timeline"]["items"][2]["resource_id"] == "task-1"
+    assert payload["timeline"]["total"] == 3
+    assert payload["timeline"]["has_more"] is False
+
+
+def test_governance_batch_event_detail_payload_supports_filter_and_pagination(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="owner-1",
+        email="owner@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    def fake_list_audit_events(**kwargs):
+        resource_id = kwargs.get("resource_id")
+        if resource_id == "task-2":
+            return [
+                {
+                    "id": "evt-task-2",
+                    "resource_id": "task-2",
+                    "created_at": "2026-03-20T09:00:00+00:00",
+                    "details": {"retry_of_task_id": "task-1", "failed": 1, "succeeded": 2},
+                    "outcome": "partial_success",
+                }
+            ]
+        return [
+            {
+                "id": "evt-task-1",
+                "resource_id": "task-1",
+                "created_at": "2026-03-20T08:00:00+00:00",
+                "details": {"failed": 2, "succeeded": 0},
+                "outcome": "partial_success",
+            },
+            {
+                "id": "evt-task-3",
+                "resource_id": "task-3",
+                "created_at": "2026-03-20T10:00:00+00:00",
+                "details": {"retry_of_task_id": "task-2", "failed": 1, "succeeded": 1},
+                "outcome": "partial_success",
+            },
+            {
+                "id": "evt-task-4",
+                "resource_id": "task-4",
+                "created_at": "2026-03-20T11:00:00+00:00",
+                "details": {"retry_of_task_id": "task-2", "failed": 0, "succeeded": 1},
+                "outcome": "success",
+            },
+        ]
+
+    monkeypatch.setattr(kb_analytics, "list_audit_events", fake_list_audit_events)
+
+    payload = kb_analytics._governance_batch_event_detail_payload(
+        user,
+        view="personal",
+        task_id="task-2",
+        timeline_limit=1,
+        timeline_offset=1,
+        timeline_filter="retries",
+    )
+
+    assert payload["retry_summary"]["retry_count"] == 2
+    assert payload["retry_summary"]["failed_retry_count"] == 1
+    assert payload["retry_summary"]["latest_retry_task_id"] == "task-4"
+    assert payload["timeline"]["filter"] == "retries"
+    assert payload["timeline"]["total"] == 3
+    assert payload["timeline"]["offset"] == 1
+    assert payload["timeline"]["limit"] == 1
+    assert payload["timeline"]["has_more"] is True
+    assert [item["resource_id"] for item in payload["timeline"]["items"]] == ["task-4"]
 
 
 def test_build_version_diff_payload_summarizes_changes() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from functools import lru_cache
 from typing import Any, TypedDict
 
@@ -25,6 +26,15 @@ FUSION_WEIGHTS = {
     "fts": 1.0,
     "vector": 0.9,
 }
+
+
+def _evidence_kind_from_source_kind(source_kind: str) -> str:
+    cleaned = str(source_kind or "").strip().lower()
+    if cleaned == "visual_region":
+        return "visual_region"
+    if cleaned.startswith("visual"):
+        return "image_asset"
+    return "document_chunk"
 
 
 class RetrievalGraphState(TypedDict, total=False):
@@ -62,10 +72,20 @@ class StructureRetriever(BaseRetriever):
                         d.base_id::text AS base_id,
                         c.document_id,
                         d.file_name AS document_title,
+                        d.version_family_key,
+                        d.version_label,
+                        d.version_number,
+                        d.version_status,
+                        d.is_current_version,
+                        d.effective_from,
+                        d.effective_to,
                         s.title AS section_title,
+                        COALESCE(vr.region_label, '') AS region_label,
                         c.source_kind,
                         c.page_number,
                         c.asset_id::text AS asset_id,
+                        COALESCE(vr.bbox_json, '[]'::jsonb) AS bbox_json,
+                        vr.confidence,
                         c.char_start,
                         c.char_end,
                         c.text_content,
@@ -77,6 +97,17 @@ class StructureRetriever(BaseRetriever):
                     FROM kb_chunks c
                     JOIN kb_sections s ON s.id = c.section_id
                     JOIN kb_documents d ON d.id = c.document_id
+                    LEFT JOIN LATERAL (
+                        SELECT region_label, bbox_json, confidence
+                        FROM kb_visual_asset_regions region
+                        WHERE c.source_kind = 'visual_region'
+                          AND region.document_id = c.document_id
+                          AND region.asset_id = c.asset_id
+                          AND COALESCE(region.page_number, c.page_number) = c.page_number
+                          AND lower(region.region_label) = lower(regexp_replace(s.title, '^Page\\s+\\d+\\s+', ''))
+                        ORDER BY region.region_index ASC
+                        LIMIT 1
+                    ) vr ON TRUE
                     WHERE d.base_id = %s
                       AND d.query_ready = TRUE
                       AND c.disabled = FALSE
@@ -128,10 +159,20 @@ class FTSRetriever(BaseRetriever):
                         d.base_id::text AS base_id,
                         c.document_id,
                         d.file_name AS document_title,
+                        d.version_family_key,
+                        d.version_label,
+                        d.version_number,
+                        d.version_status,
+                        d.is_current_version,
+                        d.effective_from,
+                        d.effective_to,
                         s.title AS section_title,
+                        COALESCE(vr.region_label, '') AS region_label,
                         c.source_kind,
                         c.page_number,
                         c.asset_id::text AS asset_id,
+                        COALESCE(vr.bbox_json, '[]'::jsonb) AS bbox_json,
+                        vr.confidence,
                         c.char_start,
                         c.char_end,
                         c.text_content,
@@ -139,6 +180,17 @@ class FTSRetriever(BaseRetriever):
                     FROM kb_chunks c
                     JOIN kb_sections s ON s.id = c.section_id
                     JOIN kb_documents d ON d.id = c.document_id
+                    LEFT JOIN LATERAL (
+                        SELECT region_label, bbox_json, confidence
+                        FROM kb_visual_asset_regions region
+                        WHERE c.source_kind = 'visual_region'
+                          AND region.document_id = c.document_id
+                          AND region.asset_id = c.asset_id
+                          AND COALESCE(region.page_number, c.page_number) = c.page_number
+                          AND lower(region.region_label) = lower(regexp_replace(s.title, '^Page\\s+\\d+\\s+', ''))
+                        ORDER BY region.region_index ASC
+                        LIMIT 1
+                    ) vr ON TRUE
                     JOIN query ON TRUE
                     WHERE d.base_id = %s
                       AND d.query_ready = TRUE
@@ -289,7 +341,15 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
             EvidenceBlock(
                 unit_id=block.unit_id,
                 document_id=block.document_id,
-                document_title=block.document_title,
+            document_title=block.document_title,
+            region_label=block.region_label,
+            version_family_key=block.version_family_key,
+            version_label=block.version_label,
+            version_number=block.version_number,
+                version_status=block.version_status,
+                is_current_version=block.is_current_version,
+                effective_from=block.effective_from,
+                effective_to=block.effective_to,
                 section_title=block.section_title,
                 chapter_title=block.chapter_title,
                 scene_index=block.scene_index,
@@ -334,6 +394,13 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 unit_id=block.unit_id,
                 document_id=block.document_id,
                 document_title=block.document_title,
+                version_family_key=block.version_family_key,
+                version_label=block.version_label,
+                version_number=block.version_number,
+                version_status=block.version_status,
+                is_current_version=block.is_current_version,
+                effective_from=block.effective_from,
+                effective_to=block.effective_to,
                 section_title=block.section_title,
                 chapter_title=block.chapter_title,
                 scene_index=block.scene_index,
@@ -345,11 +412,13 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 service_type=block.service_type,
                 evidence_kind=block.evidence_kind,
                 source_kind=block.source_kind,
-                page_number=block.page_number,
-                asset_id=block.asset_id,
-                thumbnail_url=block.thumbnail_url,
-                signal_scores=signal_scores,
-                evidence_path=EvidencePath(
+            page_number=block.page_number,
+            asset_id=block.asset_id,
+            thumbnail_url=block.thumbnail_url,
+            bbox=list(block.bbox),
+            confidence=block.confidence,
+            signal_scores=signal_scores,
+            evidence_path=EvidencePath(
                     structure_hit=block.evidence_path.structure_hit,
                     fts_rank=block.evidence_path.fts_rank,
                     vector_rank=block.evidence_path.vector_rank,
@@ -428,6 +497,14 @@ def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -
             "unit_id": str(row["unit_id"]),
             "document_id": str(row["document_id"]),
             "document_title": str(row.get("document_title") or ""),
+            "region_label": str(row.get("region_label") or ""),
+            "version_family_key": str(row.get("version_family_key") or ""),
+            "version_label": str(row.get("version_label") or ""),
+            "version_number": int(row.get("version_number") or 0),
+            "version_status": str(row.get("version_status") or ""),
+            "is_current_version": bool(row.get("is_current_version")),
+            "effective_from": _serialize_timestamp(row.get("effective_from")),
+            "effective_to": _serialize_timestamp(row.get("effective_to")),
             "section_title": str(row.get("section_title") or ""),
             "chapter_title": "",
             "scene_index": 0,
@@ -439,6 +516,8 @@ def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -
             "page_number": int(row["page_number"]) if row.get("page_number") is not None else None,
             "asset_id": asset_id,
             "thumbnail_url": _thumbnail_url_from_asset_id(asset_id),
+            "bbox": [float(item) for item in list(row.get("bbox_json") or []) if isinstance(item, (int, float))][:4],
+            "confidence": float(row.get("confidence")) if row.get("confidence") is not None else None,
             "signal_scores": {signal_name: score},
             "evidence_path": {"structure_hit": signal_name == "structure"},
         },
@@ -470,6 +549,14 @@ def _merge_documents(
             unit_id=unit_id,
             document_id=str(metadata.get("document_id") or ""),
             document_title=str(metadata.get("document_title") or ""),
+            region_label=str(metadata.get("region_label") or ""),
+            version_family_key=str(metadata.get("version_family_key") or ""),
+            version_label=str(metadata.get("version_label") or ""),
+            version_number=int(metadata.get("version_number") or 0),
+            version_status=str(metadata.get("version_status") or ""),
+            is_current_version=bool(metadata.get("is_current_version")),
+            effective_from=str(metadata.get("effective_from") or ""),
+            effective_to=str(metadata.get("effective_to") or ""),
             section_title=str(metadata.get("section_title") or ""),
             chapter_title=str(metadata.get("chapter_title") or ""),
             scene_index=int(metadata.get("scene_index") or 0),
@@ -479,11 +566,13 @@ def _merge_documents(
             corpus_id=str(metadata.get("base_id") or (existing.corpus_id if existing else "")),
             corpus_type="kb",
             service_type="kb",
-            evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "").startswith("visual") else "text",
+            evidence_kind=_evidence_kind_from_source_kind(str(metadata.get("source_kind") or "")),
             source_kind=str(metadata.get("source_kind") or "text"),
             page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
             asset_id=str(metadata.get("asset_id") or ""),
             thumbnail_url=str(metadata.get("thumbnail_url") or ""),
+            bbox=[float(item) for item in list(metadata.get("bbox") or []) if isinstance(item, (int, float))][:4],
+            confidence=float(metadata.get("confidence")) if metadata.get("confidence") is not None else None,
             signal_scores=signal_scores,
             evidence_path=EvidencePath(
                 structure_hit=bool(evidence_path.get("structure_hit") or False),
@@ -505,3 +594,9 @@ def _thumbnail_url_from_asset_id(asset_id: str) -> str:
     if not cleaned:
         return ""
     return f"/api/v1/kb/visual-assets/{cleaned}/thumbnail"
+
+
+def _serialize_timestamp(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value or "")

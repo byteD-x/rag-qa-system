@@ -28,6 +28,7 @@ from .kb_upload_store import (
     serialize_upload_session,
     update_upload_status,
 )
+from .kb_version_assist import build_version_assist
 
 
 router = APIRouter()
@@ -222,6 +223,49 @@ def complete_upload(upload_id: str, payload: CompleteUploadRequest, request: Req
             raise_api_error(400, "document_version_current_future_effective", "future-effective version cannot be marked current yet")
         with db.connect() as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM kb_documents
+                    WHERE base_id = %s
+                      AND source_deleted_at IS NULL
+                    ORDER BY is_current_version DESC, version_number DESC, created_at DESC
+                    """,
+                    (session["base_id"],),
+                )
+                version_assist_documents = cur.fetchall()
+                version_assist = {}
+                if not supersedes_document_id and not str(session.get("version_family_key") or "").strip():
+                    version_assist = build_version_assist(
+                        candidate={
+                            "file_name": session.get("file_name"),
+                            "relative_path": session.get("file_name"),
+                            "source_uri": "",
+                            "source_updated_at": None,
+                            "source_metadata": {},
+                        },
+                        existing_documents=version_assist_documents,
+                        explicit_version_family_key=str(session.get("version_family_key") or ""),
+                        explicit_version_label=str(session.get("version_label") or ""),
+                        explicit_supersedes_document_id=str(session.get("supersedes_document_id") or ""),
+                    )
+                if version_assist and bool(version_assist.get("auto_apply")):
+                    matched_document_id = str(version_assist.get("matched_document_id") or version_assist.get("suggested_supersedes_document_id") or "").strip()
+                    matched_document = next(
+                        (row for row in version_assist_documents if str(row.get("id") or "").strip() == matched_document_id),
+                        None,
+                    )
+                    if matched_document is not None:
+                        version_family_key = str(
+                            version_assist.get("suggested_version_family_key")
+                            or matched_document.get("version_family_key")
+                            or matched_document_id
+                        )
+                        supersedes_document_id = str(
+                            version_assist.get("suggested_supersedes_document_id") or matched_document_id
+                        ) or None
+                        version_number = int(matched_document.get("version_number") or 1) + 1
+                        version_label = str(version_assist.get("suggested_version_label") or "") or f"v{version_number}"
                 if bool(is_current_version):
                     cur.execute(
                         """
@@ -263,7 +307,12 @@ def complete_upload(upload_id: str, payload: CompleteUploadRequest, request: Req
                         session["storage_key"],
                         int(object_meta.get("ContentLength") or session["size_bytes"]),
                         user.user_id,
-                        to_json({"category": session.get("category", "")}),
+                        to_json(
+                            {
+                                "category": session.get("category", ""),
+                                **({"version_assist": version_assist} if version_assist else {}),
+                            }
+                        ),
                         upload_id,
                         version_family_key,
                         version_label,
@@ -315,6 +364,8 @@ def complete_upload(upload_id: str, payload: CompleteUploadRequest, request: Req
             details={"document_id": document_id, "base_id": str(session.get("base_id") or "")},
         )
         result = complete_payload(document_id=document_id, upload_id=upload_id)
+        if version_assist:
+            result["version_assist"] = version_assist
     except Exception as exc:
         fail_idempotency(state, user, exc)
         KB_UPLOAD_REQUESTS_TOTAL.labels("complete_error").inc()

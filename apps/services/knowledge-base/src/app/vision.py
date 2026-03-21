@@ -488,11 +488,14 @@ def _normalize_regions(value: Any) -> list[dict[str, Any]]:
         label = str(item.get("label") or "region").strip() or "region"
         bbox = item.get("bbox")
         normalized_bbox = bbox if isinstance(bbox, list) else []
+        confidence_raw = item.get("confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else None
         regions.append(
             {
                 "label": label[:80],
                 "text": text,
                 "bbox": normalized_bbox[:4] if normalized_bbox else [],
+                "confidence": confidence,
             }
         )
     return regions[:16]

@@ -172,6 +172,12 @@
               <el-tag :type="statusMeta(doc.status).type" size="small" effect="plain">
                 {{ statusMeta(doc.status).label }}
               </el-tag>
+              <div v-if="doc.stats_json?.version_assist?.suggested_version_family_key" class="version-assist-card">
+                <strong>版本建议</strong>
+                <span>建议家族：{{ doc.stats_json.version_assist.suggested_version_family_key }}</span>
+                <span v-if="doc.stats_json.version_assist.suggested_version_label">建议标签：{{ doc.stats_json.version_assist.suggested_version_label }}</span>
+                <span v-if="doc.stats_json.version_assist.confidence !== undefined">置信度：{{ (Number(doc.stats_json.version_assist.confidence) * 100).toFixed(0) }}%</span>
+              </div>
               <div class="doc-actions">
                 <el-button text type="primary" size="small" @click.stop="openInChat(doc.id)">提问</el-button>
                 <el-button text type="danger" size="small" :disabled="!canWrite" @click.stop="handleDeleteDocument(doc)">删除</el-button>
@@ -741,6 +747,22 @@ onBeforeUnmount(clearPoller);
 .doc-actions {
   display: flex;
   gap: 10px;
+}
+
+.version-assist-card {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fbff;
+  border: 1px solid #dbe7fb;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.version-assist-card strong {
+  color: #275dad;
 }
 
 .collapse-title {

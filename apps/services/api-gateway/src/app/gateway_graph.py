@@ -106,6 +106,7 @@ def _payload_model(payload: dict[str, Any]) -> SendMessageRequest:
         question=str(payload.get("question") or ""),
         scope=scope_model,
         execution_mode=payload.get("execution_mode"),
+        focus_hint=dict(payload.get("focus_hint") or {}),
     )
 
 
@@ -133,7 +134,55 @@ def _deserialize_prepared(prepared: dict[str, Any]) -> dict[str, Any]:
     return restored
 
 
+def _normalize_selected_option_ids(response: dict[str, Any]) -> list[str]:
+    selected = response.get("selected_option_ids")
+    if isinstance(selected, list):
+        return [str(item).strip() for item in selected if str(item).strip()][:8]
+    single = str(response.get("selected_option_id") or "").strip()
+    return [single] if single else []
+
+
+def _apply_prompt_option_patches(*, next_payload: dict[str, Any], prompt: dict[str, Any], response: dict[str, Any]) -> None:
+    options = {
+        str(item.get("id") or ""): dict(item)
+        for item in list(prompt.get("options") or [])
+        if str(item.get("id") or "").strip()
+    }
+    selected_ids = _normalize_selected_option_ids(response)
+    if not selected_ids:
+        return
+    scope = dict(next_payload.get("scope") or {})
+    for selected_id in selected_ids:
+        option = options.get(selected_id)
+        if not option:
+            continue
+        patch = dict(option.get("patch") or {})
+        if patch.get("allow_common_knowledge") is not None:
+            scope["allow_common_knowledge"] = bool(patch.get("allow_common_knowledge"))
+        document_ids = list(patch.get("document_ids") or [])
+        if document_ids:
+            scope["document_ids"] = [str(item).strip() for item in document_ids if str(item).strip()]
+        scope_override = dict(patch.get("scope_override") or {})
+        if scope_override:
+            scope.update(scope_override)
+        question_suffix = str(patch.get("question_suffix") or "").strip()
+        if question_suffix:
+            current_question = str(next_payload.get("question") or "").strip()
+            if question_suffix not in current_question:
+                next_payload["question"] = f"{current_question}\n{question_suffix}".strip()
+        focus_hint = dict(patch.get("focus_hint") or {})
+        if focus_hint:
+            next_focus_hint = dict(next_payload.get("focus_hint") or {})
+            next_focus_hint.update({key: value for key, value in focus_hint.items() if value not in {None, "", []}})
+            next_payload["focus_hint"] = next_focus_hint
+    if scope:
+        next_payload["scope"] = scope
+
+
 def _build_human_review(prepared: dict[str, Any]) -> dict[str, Any]:
+    clarification = dict(prepared.get("clarification") or {})
+    if clarification:
+        return clarification
     aggregate = dict(((prepared.get("retrieval_meta") or {}).get("aggregate") or {}))
     scope_snapshot = dict(prepared.get("scope_snapshot") or {})
     if bool(aggregate.get("empty_scope")):
@@ -187,6 +236,7 @@ def _build_workflow_state(state: ChatGraphState, *, stage: str, interrupt_payloa
         "answer_mode": str(prepared.get("answer_mode") or response_payload.get("answer_mode") or ""),
         "scope_snapshot": dict(prepared.get("scope_snapshot") or {}),
         "retrieval": dict(prepared.get("retrieval_meta") or response_payload.get("retrieval") or {}),
+        "clarification": dict(prepared.get("clarification") or {}),
         "verification": dict(state.get("verification") or {}),
         "step_events": list(state.get("step_events") or []),
         "interrupt": dict(interrupt_payload or {}),
@@ -257,14 +307,32 @@ def build_gateway_chat_graph(*, deps: GatewayGraphDependencies, checkpointer: An
 
     def human_review_turn(state: ChatGraphState) -> dict[str, Any]:
         prompt = dict(state.get("human_review") or {})
-        response = interrupt(prompt)
+        response = dict(interrupt(prompt) or {})
         next_payload = dict(state.get("payload") or {})
+        _apply_prompt_option_patches(next_payload=next_payload, prompt=prompt, response=response)
         if str(response.get("question") or "").strip():
             next_payload["question"] = str(response.get("question") or "").strip()
+        elif str(response.get("free_text") or "").strip():
+            next_payload["question"] = str(response.get("free_text") or "").strip()
         if response.get("allow_common_knowledge") is not None:
             scope = dict(next_payload.get("scope") or {})
             scope["allow_common_knowledge"] = bool(response.get("allow_common_knowledge"))
             next_payload["scope"] = scope
+        if list(response.get("target_version_ids") or []):
+            scope = dict(next_payload.get("scope") or {})
+            scope["document_ids"] = [str(item).strip() for item in list(response.get("target_version_ids") or []) if str(item).strip()]
+            next_payload["scope"] = scope
+        if response.get("override_scope"):
+            override_scope = response.get("override_scope")
+            if hasattr(override_scope, "model_dump"):
+                next_payload["scope"] = override_scope.model_dump(exclude_none=True)
+            elif isinstance(override_scope, dict):
+                next_payload["scope"] = dict(override_scope)
+        if str(response.get("effective_at") or "").strip():
+            current_question = str(next_payload.get("question") or "").strip()
+            time_hint = f"请按 {str(response.get('effective_at') or '').strip()} 时有效的版本回答。"
+            if time_hint not in current_question:
+                next_payload["question"] = f"{current_question}\n{time_hint}".strip()
         return {
             "payload": next_payload,
             "human_review": {},

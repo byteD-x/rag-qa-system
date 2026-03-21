@@ -1,8 +1,8 @@
 # RAG-QA 2.0
 
-[![CI](https://img.shields.io/github/actions/workflow/status/icefunicu/rag-qa-system/ci.yml?branch=main&label=CI)](https://github.com/icefunicu/rag-qa-system/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/icefunicu/rag-qa-system)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/icefunicu/rag-qa-system?style=social)](https://github.com/icefunicu/rag-qa-system/stargazers)
+[![CI](https://img.shields.io/github/actions/workflow/status/byteD-x/rag-qa-system/ci.yml?branch=main&label=CI)](https://github.com/byteD-x/rag-qa-system/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/byteD-x/rag-qa-system)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/byteD-x/rag-qa-system?style=social)](https://github.com/byteD-x/rag-qa-system/stargazers)
 
 ![Vue](https://img.shields.io/badge/Vue%203-4FC08D?logo=vuedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -1880,6 +1880,7 @@ docs/reference/         API 文档
 
 ```powershell
 python scripts/quality/check-encoding.py
+cd apps/web && npm run test:unit
 docker compose config --quiet
 ```
 
@@ -1887,6 +1888,7 @@ docker compose config --quiet
 
 ```powershell
 python scripts/quality/check-encoding.py
+cd apps/web && npm run test:unit
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 python -m pytest tests -q
@@ -1912,3 +1914,14 @@ powershell -File scripts/quality/ci-check.ps1
 - 贡献说明：[CONTRIBUTING.md](/E:/Project/rag-qa-system/CONTRIBUTING.md)
 - 安全说明：[SECURITY.md](/E:/Project/rag-qa-system/SECURITY.md)
 - 开源协议：[LICENSE](/E:/Project/rag-qa-system/LICENSE)
+## 企业聊天 v2 补充说明
+
+当前仓库已经接入第一阶段企业级澄清闭环，重点覆盖多版本文档与截图区域场景。
+
+- 聊天网关会在版本歧义、版本冲突、截图区域歧义、范围为空、证据不足时主动中断并补问。
+- 补问选项现在带有 `badges`、`meta`、`subject`，前端可以直接展示版本标签、页码、区域与置信度，不需要自行猜测。
+- 恢复请求支持 `focus_hint`，检索与重排会优先使用用户确认的版本或截图区域。
+- 最终回答会附带 `answer_basis`，比较模式下会先给出版本差异摘要，再输出结论。
+- 上传完成与连接器同步结果都可能返回 `version_assist`；高置信连续版本会自动应用，低置信建议则写入 `stats_json.version_assist` 供人工确认。
+
+更完整的接口与载荷说明见 [docs/reference/enterprise-chat-v2.md](/E:/Project/rag-qa-system/docs/reference/enterprise-chat-v2.md)

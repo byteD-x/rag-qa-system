@@ -74,6 +74,7 @@ async def retrieve_scope_evidence(
     scope_snapshot: dict[str, Any],
     question: str,
     history: list[dict[str, Any]],
+    focus_hint: dict[str, Any] | None = None,
     fetch_corpus_documents_fn: Any,
     kb_service_url: str,
     request_service_json_fn: Any = request_service_json,
@@ -148,7 +149,32 @@ async def retrieve_scope_evidence(
         )
     if failed_services and not evidence:
         raise_api_error(502, "all_retrieval_services_failed", "all retrieval services failed for the selected scope")
-    evidence.sort(key=lambda item: float(((item.get("evidence_path") or {}).get("final_score") or 0.0)), reverse=True)
+    normalized_focus_hint = dict(focus_hint or {})
+
+    def _focus_bonus(item: dict[str, Any]) -> float:
+        bonus = 0.0
+        target_documents = [str(entry).strip() for entry in list(normalized_focus_hint.get("document_ids") or []) if str(entry).strip()]
+        if target_documents and str(item.get("document_id") or "") in target_documents:
+            bonus += 1.2
+        if str(normalized_focus_hint.get("primary_document_id") or "").strip() and str(item.get("document_id") or "") == str(normalized_focus_hint.get("primary_document_id") or "").strip():
+            bonus += 0.6
+        if str(normalized_focus_hint.get("region_id") or "").strip() and str(item.get("unit_id") or "") == str(normalized_focus_hint.get("region_id") or "").strip():
+            bonus += 2.4
+        if str(normalized_focus_hint.get("asset_id") or "").strip() and str(item.get("asset_id") or "") == str(normalized_focus_hint.get("asset_id") or "").strip():
+            bonus += 1.0
+        if str(normalized_focus_hint.get("version_family_key") or "").strip() and str(item.get("version_family_key") or "") == str(normalized_focus_hint.get("version_family_key") or "").strip():
+            bonus += 0.5
+        if str(normalized_focus_hint.get("version_label") or "").strip() and str(item.get("version_label") or "") == str(normalized_focus_hint.get("version_label") or "").strip():
+            bonus += 0.4
+        return bonus
+
+    evidence.sort(
+        key=lambda item: (
+            float(((item.get("evidence_path") or {}).get("final_score") or 0.0)) + _focus_bonus(item),
+            float(((item.get("evidence_path") or {}).get("final_score") or 0.0)),
+        ),
+        reverse=True,
+    )
     filtered: list[dict[str, Any]] = []
     by_corpus: dict[str, int] = {}
     by_document: dict[str, int] = {}
@@ -184,5 +210,6 @@ async def retrieve_scope_evidence(
         "max_service_retrieval_ms": round(max((float(item.get("retrieval", {}).get("retrieval_ms", 0.0) or 0.0) for item in retrieval_services), default=0.0), 3),
         "rewrite_tags": list(dict.fromkeys(tag for item in retrieval_services for tag in list(item.get("retrieval", {}).get("rewrite_tags", []) or []) if tag)),
         "expansion_terms": list(dict.fromkeys(term for item in retrieval_services for term in list(item.get("retrieval", {}).get("expansion_terms", []) or []) if term)),
+        "focus_hint_applied": bool(normalized_focus_hint),
     }
     return filtered, contextualized_question, {"services": retrieval_services, "aggregate": aggregate}

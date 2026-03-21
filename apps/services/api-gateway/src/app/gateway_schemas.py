@@ -61,6 +61,7 @@ class SendMessageRequest(BaseModel):
     question: str = Field(min_length=1, max_length=12000)
     scope: ChatScopePayload | None = None
     execution_mode: str | None = Field(default=None, max_length=32)
+    focus_hint: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("execution_mode")
     @classmethod
@@ -83,12 +84,23 @@ class RetryWorkflowRunRequest(BaseModel):
 
 class SubmitInterruptRequest(BaseModel):
     question: str = Field(default="", max_length=12000)
+    free_text: str = Field(default="", max_length=12000)
     allow_common_knowledge: bool | None = None
+    selected_option_ids: list[str] = Field(default_factory=list, max_length=8)
+    target_version_ids: list[str] = Field(default_factory=list, max_length=8)
+    effective_at: str = Field(default="", max_length=64)
+    override_scope: ChatScopePayload | None = None
+    focus_hint: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("question")
+    @field_validator("question", "free_text", "effective_at")
     @classmethod
     def normalize_question(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("selected_option_ids", "target_version_ids")
+    @classmethod
+    def normalize_selected_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))[:8]
 
 
 class MessageFeedbackRequest(BaseModel):
@@ -242,5 +254,5 @@ class AnalyticsDashboardResponse(BaseModel):
     usage: dict[str, Any] = Field(description="Assistant token and estimated cost usage summary with day-level trend.")
     funnel: dict[str, Any] = Field(description="Core funnel metrics spanning KB creation, ingest progress, Q&A turns, answer outcomes, and user feedback.")
     ingest_health: dict[str, Any] | None = Field(default=None, description="Knowledge-base ingest health snapshot. Null when KB analytics data is temporarily unavailable.")
-    qa_quality: dict[str, Any] = Field(description="Answer-mode, evidence-status, zero-hit, and low-quality aggregates for front-end quality dashboards.")
+    qa_quality: dict[str, Any] = Field(description="Answer-mode, evidence-status, zero-hit, low-quality, and clarification completion aggregates for front-end quality dashboards.")
     data_quality: dict[str, Any] = Field(description="Unsupported fields or degraded sections. Frontend should inspect this section to handle null analytics values.")

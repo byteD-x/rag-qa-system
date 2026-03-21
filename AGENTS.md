@@ -62,13 +62,14 @@
 在仓库根目录执行：
 
 - `python scripts/quality/check-encoding.py`
+- `cd apps/web && npm run test:unit`
 - `cd apps/web && npm run build`
 - `python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base`
 - `docker compose config --quiet`
 
 说明：
 - 文档类改动至少执行编码检查与 `docker compose config --quiet`
-- 涉及前端时补跑 `cd apps/web && npm run build`
+- 涉及前端时补跑 `cd apps/web && npm run test:unit` 与 `cd apps/web && npm run build`
 - 涉及 Python 后端时补跑 `python -m compileall ...` 或对应服务测试
 
 ## 8. 任务记录规范

@@ -29,15 +29,29 @@
                   </span>
                   <span class="meta-divider" v-if="citation.document_title">·</span>
                   <span class="meta-tag">{{ citation.corpus_type || mode }}</span>
+                  <span class="meta-tag" v-if="citation.version_label">{{ citation.version_label }}</span>
+                  <span class="meta-tag" v-if="citation.is_current_version">当前生效</span>
+                  <span class="meta-tag" v-if="citation.version_status">{{ citation.version_status }}</span>
+                  <span class="meta-tag" v-if="evidenceKindLabel(citation)">{{ evidenceKindLabel(citation) }}</span>
                   <span class="meta-tag" v-if="citation.page_number">第 {{ citation.page_number }} 页</span>
+                  <span class="meta-tag" v-if="regionLabel(citation)">{{ regionLabel(citation) }}</span>
+                  <span class="meta-tag" v-if="typeof citation.confidence === 'number'">置信度 {{ (citation.confidence * 100).toFixed(1) }}%</span>
                 </div>
               </div>
               <a :href="documentPath(citation)" target="_blank" class="source-link" title="查看原文">
                 <el-icon><Document /></el-icon>
               </a>
             </div>
+
+            <a v-if="citation.thumbnail_url && isVisualCitation(citation)" :href="documentPath(citation)" target="_blank" class="source-preview">
+              <img :src="citation.thumbnail_url" alt="citation preview" class="source-thumbnail" />
+            </a>
             
             <div class="source-content" v-if="citation.quote">
+              <div v-if="citation.effective_from || citation.effective_to" class="source-timeline">
+                <span v-if="citation.effective_from">生效自 {{ citation.effective_from }}</span>
+                <span v-if="citation.effective_to">失效于 {{ citation.effective_to }}</span>
+              </div>
               <div class="quote-text">{{ citation.quote }}</div>
               
               <div class="source-footer" v-if="citation.evidence_path?.final_score !== undefined">
@@ -72,11 +86,19 @@ interface CitationItem {
   char_range: string;
   quote: string;
   corpus_type?: 'kb';
-  evidence_kind?: 'text' | 'visual_ocr';
+  version_label?: string;
+  version_status?: string;
+  is_current_version?: boolean;
+  effective_from?: string;
+  effective_to?: string;
+  evidence_kind?: 'document_chunk' | 'image_asset' | 'visual_region' | string;
   source_kind?: string;
   page_number?: number | null;
+  region_label?: string;
   asset_id?: string;
   thumbnail_url?: string;
+  bbox?: number[];
+  confidence?: number | null;
   evidence_path?: {
     final_score?: number;
   };
@@ -90,7 +112,42 @@ const props = defineProps<{
 
 const activeNames = ref<string[]>([]);
 
-const documentPath = (citation: CitationItem) => `/workspace/kb/documents/${citation.document_id}`;
+const documentPath = (citation: CitationItem) => {
+  const basePath = `/workspace/kb/documents/${citation.document_id}`;
+  const search = new URLSearchParams();
+  search.set('versionId', String(citation.document_id));
+  if (isVisualCitation(citation) && citation.asset_id) {
+    search.set('assetId', String(citation.asset_id));
+    if (citation.source_kind === 'visual_region' && citation.unit_id) {
+      search.set('regionId', String(citation.unit_id));
+    }
+  }
+  const query = search.toString();
+  return query ? `${basePath}?${query}` : basePath;
+};
+
+const isVisualCitation = (citation: CitationItem) => ['image_asset', 'visual_region'].includes(String(citation.evidence_kind || ''));
+
+const regionLabel = (citation: CitationItem) => {
+  if (citation.source_kind !== 'visual_region') {
+    return '';
+  }
+  const explicitLabel = String(citation.region_label || '').trim();
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+  const title = String(citation.section_title || '').trim();
+  const match = title.match(/^Page\s+\d+\s+(.+)$/i);
+  return (match?.[1] || title).trim();
+};
+
+const evidenceKindLabel = (citation: CitationItem) => {
+  const value = String(citation.evidence_kind || '').trim();
+  if (value === 'visual_region') return '截图区域';
+  if (value === 'image_asset') return '截图证据';
+  if (value === 'document_chunk') return '文档片段';
+  return '';
+};
 
 const getScoreClass = (score: number) => {
   if (score >= 0.8) return 'fill-high';
@@ -289,11 +346,34 @@ const getScoreClass = (score: number) => {
   background: var(--blue-50);
 }
 
+.source-preview {
+  padding: 12px 14px 0;
+}
+
+.source-thumbnail {
+  display: block;
+  width: 100%;
+  max-height: 132px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+}
+
 .source-content {
   padding: 12px 14px;
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-regular);
+}
+
+.source-timeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .quote-text {

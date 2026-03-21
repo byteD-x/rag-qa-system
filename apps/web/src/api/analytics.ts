@@ -65,6 +65,15 @@ export interface DashboardQaQuality {
     score_threshold: number;
     reason_breakdown: { key: string; count: number }[];
   };
+  clarification?: {
+    triggered_runs: number;
+    completed_runs: number;
+    pending_runs: number;
+    completion_rate: number;
+    free_text_runs: number;
+    selection_runs: number;
+    kind_distribution: { key: string; count: number }[];
+  };
 }
 
 export interface DashboardDataQuality {

@@ -165,6 +165,65 @@
                   <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.refusal_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
                 </div>
               </div>
+              <div v-if="dashboardData.qa_quality.clarification" class="clarification-panel">
+                <div class="clarification-panel__header">
+                  <div class="clarification-panel__heading">
+                    <span class="clarification-panel__title">补问闭环</span>
+                    <el-tooltip :content="clarificationPanelTooltip" placement="top" effect="light">
+                      <el-icon class="clarification-panel__info"><InfoFilled /></el-icon>
+                    </el-tooltip>
+                  </div>
+                  <span class="clarification-panel__hint">观察版本确认、截图确认等补问是否顺利完成</span>
+                  <div class="clarification-panel__meta">
+                    <span>统计窗口：最近 {{ days }} 天</span>
+                    <span>待处理表示当前仍停留在补问中断态</span>
+                  </div>
+                </div>
+                <div class="metric-row clarification-metrics">
+                  <div class="metric-box">
+                    <div class="m-val">{{ dashboardData.qa_quality.clarification.triggered_runs }}</div>
+                    <div class="m-label">触发补问</div>
+                  </div>
+                  <div class="metric-box">
+                    <div class="m-val">{{ dashboardData.qa_quality.clarification.completed_runs }}</div>
+                    <div class="m-label">已完成</div>
+                  </div>
+                  <div class="metric-box" :class="{ 'warning-bg': dashboardData.qa_quality.clarification.pending_runs > 0 }">
+                    <div class="m-val">{{ dashboardData.qa_quality.clarification.pending_runs }}</div>
+                    <div class="m-label">待处理</div>
+                  </div>
+                </div>
+                <div class="q-bar-row">
+                  <span class="q-label">补问完成率</span>
+                  <div class="q-track"><div class="q-fill info" :style="{ width: percentByRate(dashboardData.qa_quality.clarification.completion_rate) }"></div></div>
+                  <span class="q-percent">{{ percentByRate(dashboardData.qa_quality.clarification.completion_rate) }}</span>
+                </div>
+                <div class="clarification-detail-row">
+                  <span>结构化选择 {{ dashboardData.qa_quality.clarification.selection_runs }}</span>
+                  <span>自由补充 {{ dashboardData.qa_quality.clarification.free_text_runs }}</span>
+                </div>
+                <div class="clarification-kind-list">
+                  <span class="kind-list__label">补问类型分布</span>
+                  <div class="kind-list__tags">
+                    <el-tooltip
+                      v-for="item in dashboardData.qa_quality.clarification.kind_distribution"
+                      :key="item.key"
+                      :content="clarificationKindDescription(item.key)"
+                      placement="top"
+                      effect="light"
+                    >
+                      <el-tag
+                        size="small"
+                        effect="plain"
+                        class="clarification-kind-tag"
+                      >
+                        {{ clarificationKindLabel(item.key) }} {{ item.count }}
+                      </el-tag>
+                    </el-tooltip>
+                    <span v-if="!dashboardData.qa_quality.clarification.kind_distribution.length" class="empty-text">暂无补问数据</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -295,7 +354,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled } from '@element-plus/icons-vue';
+import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listKnowledgeBases } from '@/api/kb';
@@ -321,7 +380,28 @@ const percent = (part: number, total: number) => {
   if (!total) return '0%';
   return Math.round((part / total) * 100) + '%';
 };
+const percentByRate = (rate: number) => `${Math.round((Number(rate || 0) || 0) * 100)}%`;
 const loadingDashboard = ref(true);
+
+const clarificationPanelTooltip = '已完成表示补问后成功恢复并继续完成回答；待处理表示当前仍停留在 interrupted 状态。';
+
+const clarificationKindLabel = (value: string) => {
+  if (value === 'time_ambiguity') return '时间歧义';
+  if (value === 'version_conflict') return '版本冲突';
+  if (value === 'visual_ambiguity') return '截图歧义';
+  if (value === 'scope_ambiguity') return '范围确认';
+  if (value === 'insufficient_evidence') return '证据不足';
+  return value || '未知类型';
+};
+
+const clarificationKindDescription = (value: string) => {
+  if (value === 'time_ambiguity') return '检索结果跨越多个时间点或版本区间，系统需要先确认你关心的是哪个时间范围。';
+  if (value === 'version_conflict') return '同一文档家族命中了多个版本，系统需要先确认是看当前版、历史版，还是先比较差异。';
+  if (value === 'visual_ambiguity') return '问题涉及截图，但命中了多个区域或页面，系统需要先确认具体截图位置。';
+  if (value === 'scope_ambiguity') return '当前提问缺少明确的文档范围或对象，系统需要先缩小检索范围。';
+  if (value === 'insufficient_evidence') return '现有证据不足以稳定作答，系统会先请求更多上下文，避免直接给出不可靠答案。';
+  return '该类型暂未配置额外说明。';
+};
 
 const loadDashboard = async () => {
   loadingDashboard.value = true;
@@ -808,6 +888,7 @@ const go = (path: string) => {
 .q-fill.success { background: var(--success-color, #67c23a); }
 .q-fill.warning { background: var(--warning-color, #e6a23c); }
 .q-fill.danger { background: var(--danger-color, #f56c6c); }
+.q-fill.info { background: var(--blue-600); }
 .q-percent {
   width: 40px;
   font-size: 12px;
@@ -815,5 +896,81 @@ const go = (path: string) => {
   font-weight: 500;
   text-align: right;
   flex-shrink: 0;
+}
+
+.clarification-panel {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border-color);
+  display: grid;
+  gap: 12px;
+}
+
+.clarification-panel__header {
+  display: grid;
+  gap: 4px;
+}
+
+.clarification-panel__heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clarification-panel__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.clarification-panel__info {
+  color: var(--blue-600);
+  cursor: help;
+}
+
+.clarification-panel__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.clarification-panel__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.clarification-metrics {
+  margin-bottom: 0;
+}
+
+.clarification-detail-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.clarification-kind-list {
+  display: grid;
+  gap: 8px;
+}
+
+.kind-list__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.kind-list__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clarification-kind-tag {
+  cursor: help;
 }
 </style>

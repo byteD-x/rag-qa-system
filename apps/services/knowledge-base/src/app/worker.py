@@ -346,6 +346,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
         }
 
     asset_rows: list[dict[str, Any]] = []
+    region_rows: list[dict[str, Any]] = []
     section_rows: list[KBSection] = []
     chunk_rows: list[KBChunk] = []
     section_index = _next_section_index(document_id)
@@ -430,6 +431,13 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
             ocr_result=ocr_result,
             start_section_index=section_index,
         )
+        region_rows.extend(
+            _build_visual_region_rows(
+                document_id=document_id,
+                asset=asset,
+                ocr_result=ocr_result,
+            )
+        )
         section_rows.extend(region_sections)
         chunk_rows.extend(region_chunks)
         layout_section_count += len(region_sections)
@@ -475,6 +483,35 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
                         for item in asset_rows
                     ],
                 )
+            if region_rows:
+                cur.executemany(
+                    """
+                    INSERT INTO kb_visual_asset_regions (
+                        id, asset_id, document_id, region_index, page_number, region_label,
+                        layout_hints_json, bbox_json, confidence, summary, ocr_text
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s,
+                        %s::jsonb, %s::jsonb, %s, %s, %s
+                    )
+                    """,
+                    [
+                        (
+                            item["id"],
+                            item["asset_id"],
+                            item["document_id"],
+                            item["region_index"],
+                            item["page_number"],
+                            item["region_label"],
+                            json.dumps(item["layout_hints"]),
+                            json.dumps(item["bbox"]),
+                            item["confidence"],
+                            item["summary"],
+                            item["ocr_text"],
+                        )
+                        for item in region_rows
+                    ],
+                )
             _insert_sections(cur, document_id, section_rows)
             _insert_chunks(cur, document_id, chunk_rows)
         conn.commit()
@@ -485,6 +522,8 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
         "visual_ocr_section_count": len([item for item in section_rows if item.source_kind == "visual_ocr"]),
         "visual_layout_chunk_count": layout_chunk_count,
         "visual_layout_section_count": layout_section_count,
+        "visual_region_count": len(region_rows),
+        "visual_region_low_confidence_count": len([item for item in region_rows if item.get("confidence") is not None and float(item.get("confidence") or 0.0) < 0.8]),
         "visual_provider": visual_provider,
         "section_preview": _fetch_section_preview(document_id),
     }
@@ -537,6 +576,48 @@ def _build_visual_region_units(
         chunk_rows.extend(chunks)
         next_index += 1
     return section_rows, chunk_rows
+
+
+def _build_visual_region_rows(
+    *,
+    document_id: str,
+    asset: Any,
+    ocr_result: Any,
+) -> list[dict[str, Any]]:
+    regions = list(getattr(ocr_result, "regions", []) or [])
+    if not regions:
+        return []
+    layout_hints = [str(item).strip() for item in list(getattr(ocr_result, "layout_hints", []) or []) if str(item).strip()]
+    rows: list[dict[str, Any]] = []
+    low_confidence_count = 0
+    for region_index, region in enumerate(regions, start=1):
+        text = str(region.get("text") or "").strip()
+        if not text:
+            continue
+        label = str(region.get("label") or f"region-{region_index}").strip() or f"region-{region_index}"
+        bbox_raw = region.get("bbox")
+        bbox = [float(item) for item in list(bbox_raw or [])[:4] if isinstance(item, (int, float))]
+        confidence_raw = region.get("confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, (int, float)) else None
+        if confidence is not None and confidence < 0.8:
+            low_confidence_count += 1
+        rows.append(
+            {
+                "id": str(uuid4()),
+                "asset_id": asset.id,
+                "document_id": document_id,
+                "region_index": region_index,
+                "page_number": asset.page_number,
+                "region_label": label[:80],
+                "layout_hints": layout_hints[:8],
+                "bbox": bbox,
+                "confidence": confidence,
+                "summary": _summary(text, 180),
+                "ocr_text": text,
+            }
+        )
+    setattr(ocr_result, "_low_confidence_region_count", low_confidence_count)
+    return rows
 
 
 def _cleanup_visual_assets(document_id: str) -> None:
@@ -823,6 +904,8 @@ def _merge_ingest_stats(text_stats: dict[str, Any], visual_stats: dict[str, Any]
     merged["visual_ocr_chunk_count"] = int(visual_stats.get("visual_ocr_chunk_count") or 0)
     merged["visual_layout_chunk_count"] = int(visual_stats.get("visual_layout_chunk_count") or 0)
     merged["visual_layout_section_count"] = int(visual_stats.get("visual_layout_section_count") or 0)
+    merged["visual_region_count"] = int(visual_stats.get("visual_region_count") or 0)
+    merged["visual_region_low_confidence_count"] = int(visual_stats.get("visual_region_low_confidence_count") or 0)
     merged["visual_provider"] = str(visual_stats.get("visual_provider") or "")
     if visual_stats.get("visual_ms") is not None:
         merged["visual_ms"] = float(visual_stats.get("visual_ms") or 0.0)

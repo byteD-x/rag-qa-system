@@ -70,6 +70,17 @@ const routes = [
         }
       },
       {
+        path: 'kb/governance',
+        name: 'KBGovernanceView',
+        component: () => import('@/views/kb/KBGovernanceView.vue'),
+        meta: {
+          requiresPermission: 'kb.manage',
+          title: '知识治理工作台',
+          subtitle: '',
+          breadcrumb: ['工作台', '知识治理工作台']
+        }
+      },
+      {
         path: 'kb/connectors',
         name: 'KBConnectorsView',
         component: () => import('@/views/kb/KBConnectorsView.vue'),

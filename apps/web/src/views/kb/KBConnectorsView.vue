@@ -95,6 +95,43 @@
         <el-button type="primary" :loading="saving" @click="saveConnector">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="syncResultVisible" title="同步结果" width="720px">
+      <div v-if="syncResult" class="sync-result">
+        <div class="sync-result__summary">
+          <span>新增 {{ syncResult.counts?.create || 0 }}</span>
+          <span>更新 {{ syncResult.counts?.update || 0 }}</span>
+          <span>跳过 {{ syncResult.counts?.skip || 0 }}</span>
+          <span>软删除 {{ syncResult.counts?.soft_delete || 0 }}</span>
+        </div>
+        <div v-if="syncResult.items?.length" class="sync-result__list">
+          <div
+            v-for="item in syncResult.items"
+            :key="`${item.action}-${item.document_id || item.relative_path || item.file_name}`"
+            class="sync-result__item"
+          >
+            <div class="sync-result__row">
+              <strong>{{ item.file_name || item.relative_path || item.document_id || '未命名文档' }}</strong>
+              <el-tag size="small" effect="plain">{{ item.action }}</el-tag>
+            </div>
+            <div v-if="item.reason" class="sync-result__reason">{{ item.reason }}</div>
+            <div v-if="item.version_assist?.suggested_version_family_key" class="sync-result__assist">
+              <div class="sync-result__assist-title">版本建议</div>
+              <div>family: {{ item.version_assist.suggested_version_family_key }}</div>
+              <div>label: {{ item.version_assist.suggested_version_label || '-' }}</div>
+              <div>supersedes: {{ item.version_assist.suggested_supersedes_document_id || '-' }}</div>
+              <div>confidence: {{ formatConfidence(item.version_assist.confidence) }}</div>
+            </div>
+          </div>
+        </div>
+        <EnhancedEmpty
+          v-else
+          variant="document"
+          title="暂无同步项"
+          description="本次同步没有产生新增、更新或删除项。"
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -109,6 +146,8 @@ import { listConnectors, createConnector, updateConnector, deleteConnector, sync
 const connectors = ref<any[]>([]);
 const bases = ref<any[]>([]);
 const loading = ref(false);
+const syncResultVisible = ref(false);
+const syncResult = ref<any | null>(null);
 
 const dialogVisible = ref(false);
 const saving = ref(false);
@@ -164,6 +203,11 @@ const getConnectorIcon = (type: string) => {
 
 const getConnectorIconClass = (type: string) => {
   return `icon-${type.replace('_', '-')}`;
+};
+
+const formatConfidence = (value: number | null | undefined) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+  return `${(value * 100).toFixed(1)}%`;
 };
 
 const openCreateDialog = () => {
@@ -241,7 +285,9 @@ const deleteConn = async (conn: any) => {
 
 const runSync = async (conn: any) => {
   try {
-    await syncConnector(connector_id(conn), false);
+    const response: any = await syncConnector(connector_id(conn), false);
+    syncResult.value = response?.result || response || null;
+    syncResultVisible.value = Boolean(syncResult.value);
     ElMessage.success('同步任务已提交');
   } catch (e) {
     ElMessage.error('同步提交失败');
@@ -327,5 +373,61 @@ onMounted(() => {
 
 .detail-item .label {
   color: var(--text-secondary);
+}
+
+.sync-result {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sync-result__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.sync-result__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sync-result__item {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--bg-panel);
+}
+
+.sync-result__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sync-result__reason {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.sync-result__assist {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-panel) 92%);
+  color: var(--text-secondary);
+  font-size: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.sync-result__assist-title {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 </style>

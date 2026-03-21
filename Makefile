@@ -43,6 +43,7 @@ ci:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/quality/ci-check.ps1
 
 test:
+	cd apps/web && npm run test:unit
 	python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 	cd apps/web && npm run build
 

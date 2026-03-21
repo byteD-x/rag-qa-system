@@ -16,6 +16,7 @@ ALLOWED_CONNECTOR_TYPES = {
     "sql_query",
 }
 ALLOWED_DOCUMENT_VERSION_STATUSES = {"active", "draft", "superseded", "archived"}
+ALLOWED_DOCUMENT_REVIEW_STATUSES = {"review_pending", "approved", "rejected"}
 
 
 def _normalize_optional_text(value: str | None, *, field_name: str, allow_blank: bool = False) -> str | None:
@@ -140,6 +141,9 @@ class UpdateDocumentRequest(BaseModel):
     effective_from: datetime | None = None
     effective_to: datetime | None = None
     supersedes_document_id: str | None = Field(default=None, max_length=64)
+    owner_user_id: str | None = Field(default=None, max_length=128)
+    review_status: str | None = Field(default=None, max_length=32)
+    reviewer_note: str | None = Field(default=None, max_length=1000)
 
     @field_validator("version_family_key")
     @classmethod
@@ -166,6 +170,30 @@ class UpdateDocumentRequest(BaseModel):
     def normalize_optional_supersedes_document_id(cls, value: str | None) -> str | None:
         return _normalize_optional_text(value, field_name="supersedes_document_id")
 
+    @field_validator("owner_user_id")
+    @classmethod
+    def normalize_optional_owner_user_id(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="owner_user_id", allow_blank=True)
+
+    @field_validator("review_status")
+    @classmethod
+    def validate_optional_review_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return ""
+        if normalized not in ALLOWED_DOCUMENT_REVIEW_STATUSES:
+            raise ValueError(f"unsupported review status: {normalized}")
+        return normalized
+
+    @field_validator("reviewer_note")
+    @classmethod
+    def normalize_optional_reviewer_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
     @model_validator(mode="after")
     def validate_document_version_window(self):
         if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
@@ -173,6 +201,36 @@ class UpdateDocumentRequest(BaseModel):
         if self.is_current_version and self.version_status and self.version_status != "active":
             raise ValueError("current version must use active status")
         return self
+
+
+class BatchUpdateDocumentsRequest(BaseModel):
+    document_ids: list[str] = Field(min_length=1, max_length=200)
+    patch: UpdateDocumentRequest
+    task_id: str | None = Field(default=None, max_length=64)
+    retry_of_task_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("document_ids")
+    @classmethod
+    def normalize_document_ids(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in value:
+            document_id = str(item or "").strip()
+            if not document_id:
+                raise ValueError("document_ids must not contain blank values")
+            if document_id not in normalized:
+                normalized.append(document_id)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_patch_has_changes(self):
+        if not self.patch.model_dump(exclude_none=True):
+            raise ValueError("patch must contain at least one field")
+        return self
+
+    @field_validator("task_id", "retry_of_task_id")
+    @classmethod
+    def normalize_task_ids(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value, field_name="task_id")
 
 
 class UpdateChunkRequest(BaseModel):
@@ -314,3 +372,79 @@ class KBAnalyticsDashboardResponse(BaseModel):
     funnel: dict[str, Any] = Field(description="Core KB funnel metrics for knowledge-base creation, document upload, and document ready transitions.")
     ingest_health: dict[str, Any] = Field(description="Current ingest health snapshot, status distributions, and upload-to-ready latency statistics.")
     data_quality: dict[str, Any] = Field(description="Unsupported or degraded KB analytics fields. Empty arrays mean full support for the current payload.")
+
+
+class KBGovernanceDocumentItem(BaseModel):
+    document_id: str = Field(description="Document identifier.")
+    base_id: str = Field(description="Knowledge base identifier.")
+    base_name: str = Field(description="Knowledge base display name.")
+    file_name: str = Field(description="Document file name.")
+    status: str = Field(description="Document ingest status.")
+    enhancement_status: str = Field(description="Visual or enhancement pipeline status.")
+    version_family_key: str = Field(description="Document version family key when provided.")
+    version_label: str = Field(description="Human readable version label.")
+    version_number: int | None = Field(default=None, description="Monotonic version number if present.")
+    version_status: str = Field(description="Version governance status.")
+    is_current_version: bool = Field(description="Whether the document is marked as the current version.")
+    effective_from: datetime | None = Field(default=None, description="Effective window start timestamp.")
+    effective_to: datetime | None = Field(default=None, description="Effective window end timestamp.")
+    effective_now: bool = Field(description="Whether the version is currently effective.")
+    visual_asset_count: int = Field(default=0, ge=0, description="Detected visual asset count from OCR or visual extraction.")
+    low_confidence_region_count: int = Field(default=0, ge=0, description="How many stored visual regions are below the governance confidence threshold.")
+    low_confidence_asset_id: str = Field(description="Representative asset id for the first low-confidence visual region.")
+    low_confidence_region_id: str = Field(description="Representative low-confidence region id for deep links.")
+    low_confidence_region_label: str = Field(description="Representative low-confidence region label.")
+    low_confidence_region_confidence: float | None = Field(default=None, description="Confidence score of the representative low-confidence region.")
+    low_confidence_region_bbox: list[float] = Field(default_factory=list, description="Bounding box of the representative low-confidence region in normalized coordinates.")
+    created_at: datetime | None = Field(default=None, description="Document creation timestamp.")
+    updated_at: datetime | None = Field(default=None, description="Last update timestamp.")
+    owner_user_id: str = Field(description="Responsible owner user id for governance follow-up.")
+    review_status: str = Field(description="Review workflow status stored for governance triage.")
+    reviewer_note: str = Field(description="Latest reviewer note or rejection reason.")
+    reviewed_at: datetime | None = Field(default=None, description="Timestamp of the latest review action.")
+    reviewed_by_user_id: str = Field(description="User id of the latest reviewer.")
+    reviewed_by_email: str = Field(description="Email of the latest reviewer.")
+    reason: str = Field(description="Governance queue reason for surfacing this document.")
+
+
+class KBGovernanceVersionConflictItem(BaseModel):
+    base_id: str = Field(description="Knowledge base identifier.")
+    base_name: str = Field(description="Knowledge base display name.")
+    version_family_key: str = Field(description="Conflicting version family key.")
+    current_version_count: int = Field(ge=0, description="How many documents are marked as current within the family.")
+    active_version_count: int = Field(ge=0, description="How many documents are active within the family.")
+    total_versions: int = Field(ge=0, description="Total document versions found in the family.")
+    latest_version_number: int | None = Field(default=None, description="Highest observed version number in the family.")
+    current_document_ids: list[str] = Field(default_factory=list, description="Current-version document ids involved in the conflict.")
+    current_labels: list[str] = Field(default_factory=list, description="Current-version labels involved in the conflict.")
+
+
+class KBGovernanceQueues(BaseModel):
+    pending_review: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Draft or scheduled documents waiting for review or publish.")
+    approved_ready: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Approved documents waiting to be published or switched current.")
+    rejected_documents: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Rejected documents that need author follow-up.")
+    expired_documents: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Documents whose effective window has ended.")
+    visual_attention: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Documents with visual assets that still require enhancement or remediation.")
+    visual_low_confidence: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Documents that contain low-confidence visual regions requiring manual review.")
+    missing_version_family: list[KBGovernanceDocumentItem] = Field(default_factory=list, description="Documents with partial version metadata but no version family key.")
+    version_conflicts: list[KBGovernanceVersionConflictItem] = Field(default_factory=list, description="Version families that currently have multiple current versions.")
+
+
+class KBGovernanceSummary(BaseModel):
+    pending_review: int = Field(default=0, ge=0)
+    approved_ready: int = Field(default=0, ge=0)
+    rejected_documents: int = Field(default=0, ge=0)
+    expired_documents: int = Field(default=0, ge=0)
+    visual_attention: int = Field(default=0, ge=0)
+    visual_low_confidence: int = Field(default=0, ge=0)
+    missing_version_family: int = Field(default=0, ge=0)
+    version_conflicts: int = Field(default=0, ge=0)
+
+
+class KBAnalyticsGovernanceResponse(BaseModel):
+    view: str = Field(description="Governance scope. personal only includes the caller's KB resources; admin includes all visible resources.")
+    limit: int = Field(description="Maximum number of records returned per governance queue.", ge=1, le=50)
+    generated_at: datetime = Field(description="Payload generation timestamp in UTC.")
+    summary: KBGovernanceSummary = Field(description="Top-level governance queue counts for the full result set, not only returned items.")
+    queues: KBGovernanceQueues = Field(description="Governance queue samples for operator triage.")
+    data_quality: dict[str, Any] = Field(description="Unsupported or degraded governance analytics fields. Empty arrays mean full support for the current payload.")

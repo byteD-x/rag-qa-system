@@ -79,6 +79,7 @@ def serialize_chat_message(row: dict[str, Any], *, feedback: dict[str, Any] | No
         "latency": dict(meta_payload.get("latency") or {}),
         "cost": dict(meta_payload.get("cost") or {}),
         "llm_trace": dict(meta_payload.get("llm_trace") or {}),
+        "answer_basis": dict(meta_payload.get("answer_basis") or {}),
         "feedback": feedback,
         "created_at": row.get("created_at"),
     }
@@ -319,6 +320,7 @@ def persist_chat_turn(
                             latency=dict(response_payload.get("latency") or {}),
                             cost=dict(response_payload.get("cost") or {}),
                             llm_trace=dict(response_payload.get("llm_trace") or {}),
+                            answer_basis=dict(response_payload.get("answer_basis") or {}),
                         )
                     ),
                 ),
@@ -347,6 +349,7 @@ def persist_chat_turn(
                 latency=dict(response_payload.get("latency") or {}),
                 cost=dict(response_payload.get("cost") or {}),
                 llm_trace=dict(response_payload.get("llm_trace") or {}),
+                answer_basis=dict(response_payload.get("answer_basis") or {}),
             ),
             "created_at": None,
         },

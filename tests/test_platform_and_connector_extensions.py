@@ -48,6 +48,8 @@ def _load_gateway_module(module_name: str):
         "app.gateway_platform_store",
         "app.gateway_scope",
         "app.gateway_schemas",
+        "app.db",
+        "app.gateway_runtime",
         "app",
     ):
         sys.modules.pop(name, None)

@@ -3,15 +3,18 @@ import { ref, computed, nextTick } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   createChatSession,
+  createChatRunV2,
   deleteChatSession,
   defaultChatScope,
+  getChatRunV2,
   listChatCorpora,
   listChatCorpusDocuments,
   listChatMessages,
   listChatSessions,
-  streamChatMessage,
-  updateChatSession,
+  listWorkflowRuns,
+  resumeChatRunV2,
   submitMessageFeedback,
+  updateChatSession,
   type ChatScope
 } from '@/api/chat';
 import { createIdempotencyKey, isAbortRequestError, isHandledRequestError } from '@/api/request';
@@ -73,7 +76,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function attachMessageSafety(message: any) {
-    if (!message || message.role !== 'assistant') {
+    if (!message || message.role !== 'assistant' || message.message_kind === 'interrupt') {
       return message;
     }
     return {
@@ -85,6 +88,72 @@ export const useChatStore = defineStore('chat', () => {
         safety: message.safety
       })
     };
+  }
+
+  function buildInterruptMessage(run: any, interrupt: any) {
+    const payload = interrupt?.payload || run?.workflow_state?.interrupt || {};
+    return {
+      id: `interrupt-${String(run?.id || interrupt?.run_id || Date.now())}`,
+      role: 'assistant',
+      message_kind: 'interrupt',
+      content: '',
+      answer: '',
+      answer_mode: 'clarification',
+      execution_mode: String(run?.execution_mode || executionMode.value || 'grounded'),
+      workflow_run: run || null,
+      interrupt: {
+        id: String(interrupt?.id || run?.interrupt_id || ''),
+        run_id: String(run?.id || interrupt?.run_id || ''),
+        kind: String(payload.kind || ''),
+        title: String(payload.title || '需要补充信息'),
+        detail: String(payload.detail || ''),
+        question: String(payload.question || ''),
+        options: Array.isArray(payload.options) ? payload.options.map((option: any) => ({
+          ...option,
+          badges: Array.isArray(option?.badges) ? option.badges : [],
+          meta: option?.meta || {}
+        })) : [],
+        recommended_option_id: String(payload.recommended_option_id || ''),
+        allow_free_text: Boolean(payload.allow_free_text),
+        fallback_prompt: String(payload.fallback_prompt || ''),
+        subject: payload?.subject || null
+      },
+      submitting: false,
+      resolved: false
+    };
+  }
+
+  function buildAssistantMessage(result: any) {
+    const message = {
+      ...(result?.message || {}),
+      role: String(result?.message?.role || 'assistant'),
+      content: String(result?.message?.content || result?.message?.answer || result?.answer || ''),
+      answer: String(result?.message?.answer || result?.answer || result?.message?.content || ''),
+      workflow_run: result?.run || null
+    };
+    return attachMessageSafety(message);
+  }
+
+  function appendPendingInterrupt(run: any, interrupt: any) {
+    const nextMessage = buildInterruptMessage(run, interrupt);
+    const existingIndex = messages.value.findIndex((item: any) => item.id === nextMessage.id);
+    if (existingIndex >= 0) {
+      messages.value[existingIndex] = nextMessage;
+      return;
+    }
+    messages.value.push(nextMessage);
+  }
+
+  function resolveInterruptMessage(runId: string) {
+    const interruptId = `interrupt-${runId}`;
+    const index = messages.value.findIndex((item: any) => item.id === interruptId);
+    if (index >= 0) {
+      messages.value[index] = {
+        ...messages.value[index],
+        submitting: false,
+        resolved: true
+      };
+    }
   }
 
   async function loadCorpora() {
@@ -108,6 +177,20 @@ export const useChatStore = defineStore('chat', () => {
     });
   }
 
+  async function hydratePendingInterrupt(sessionId: string) {
+    const workflowRes: any = await listWorkflowRuns(sessionId);
+    const runs = Array.isArray(workflowRes?.items) ? workflowRes.items : [];
+    const pendingRun = [...runs].reverse().find((item: any) => item.status === 'interrupted' && item.interrupt_id);
+    if (!pendingRun) {
+      return;
+    }
+    const detail: any = await getChatRunV2(String(pendingRun.id));
+    if (detail?.run?.status !== 'interrupted' || !detail?.interrupt?.payload) {
+      return;
+    }
+    appendPendingInterrupt(detail.run, detail.interrupt);
+  }
+
   function stopStreaming() {
     currentController?.abort();
     currentController = null;
@@ -125,6 +208,7 @@ export const useChatStore = defineStore('chat', () => {
     await ensureDocuments(selectedCorpusIds.value);
     const res: any = await listChatMessages(activeSessionId.value);
     messages.value = (res.items || []).map((item: any) => attachMessageSafety(item));
+    await hydratePendingInterrupt(activeSessionId.value);
   }
 
   function startDraftSession() {
@@ -147,15 +231,14 @@ export const useChatStore = defineStore('chat', () => {
         inputValue: currentTitle,
         confirmButtonText: '保存',
         cancelButtonText: '取消',
-        inputPattern: /\\S+/,
+        inputPattern: /\S+/,
         inputErrorMessage: '标题不能为空'
       });
       value = promptResult.value;
     } catch {
       return;
     }
-    const nextTitle = value.trim();
-    await updateChatSession(activeSessionId.value, { title: nextTitle });
+    await updateChatSession(activeSessionId.value, { title: value.trim() });
     await loadSessions();
     ElMessage.success('已更新');
   }
@@ -166,7 +249,7 @@ export const useChatStore = defineStore('chat', () => {
       return;
     }
     try {
-      await ElMessageBox.confirm('删除后对话记录将不可恢复。', '确认删除?', {
+      await ElMessageBox.confirm('删除后对话记录将不可恢复。', '确认删除', {
         type: 'warning',
         confirmButtonText: '删除',
         cancelButtonText: '取消'
@@ -231,19 +314,11 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function updateStreamingAssistant(messageId: string, updater: (current: any) => any) {
-    const index = messages.value.findIndex((item: any) => item.id === messageId);
-    if (index < 0) {
-      return;
-    }
-    messages.value[index] = attachMessageSafety(updater({ ...messages.value[index] }));
-  }
-
   async function ask(currentQuestion: string, onScrollRequest: (smooth: boolean) => void) {
     if (asking.value || !currentQuestion.trim()) return;
 
     if (scopeMode.value !== 'all' && !selectedCorpusIds.value.length) {
-      ElMessage.warning('请先选择知识库范围');
+      ElMessage.warning('请先选择知识范围');
       return;
     }
 
@@ -251,7 +326,7 @@ export const useChatStore = defineStore('chat', () => {
     asking.value = true;
     try {
       const sessionId = await ensureSession();
-      const streamMessageId = `local-assistant-${Date.now()}`;
+      const pendingMessageId = `local-assistant-${Date.now()}`;
 
       messages.value.push({
         id: `local-user-${Date.now()}`,
@@ -260,7 +335,7 @@ export const useChatStore = defineStore('chat', () => {
       });
 
       messages.value.push(attachMessageSafety({
-        id: streamMessageId,
+        id: pendingMessageId,
         session_id: sessionId,
         role: 'assistant',
         content: '',
@@ -280,96 +355,28 @@ export const useChatStore = defineStore('chat', () => {
         usage: {},
         safety: null,
         streaming: true,
-        isRetrieving: true // Use to distinguish between retrieval and generation phase
+        isRetrieving: true
       }));
 
       await nextTick();
       onScrollRequest(true);
 
-      const idempotencyKey = createIdempotencyKey(`chat:${sessionId}`);
-      const controller = new AbortController();
-      currentController = controller;
-
-      await streamChatMessage(sessionId, {
+      const result: any = await createChatRunV2(sessionId, {
         question: currentQuestion,
         scope: buildScope(),
         execution_mode: executionMode.value
       }, {
-        idempotencyKey,
-        signal: controller.signal,
-        onEvent: (event) => {
-          if (!event.data || typeof event.data !== 'object') return;
-          const payload = event.data as Record<string, any>;
-          const eventName = event.event;
-
-          if (eventName === 'metadata') {
-            updateStreamingAssistant(streamMessageId, (current) => ({
-              ...current,
-              answer_mode: String(payload.answer_mode || current.answer_mode || ''),
-              execution_mode: String(payload.execution_mode || current.execution_mode || ''),
-              evidence_status: String(payload.evidence_status || current.evidence_status || ''),
-              grounding_score: Number(payload.grounding_score ?? current.grounding_score ?? 0),
-              refusal_reason: String(payload.refusal_reason || current.refusal_reason || ''),
-              safety: payload.safety ?? current.safety ?? null,
-              retrieval: payload.retrieval || current.retrieval || null,
-              strategy_used: String(payload.strategy_used || current.strategy_used || ''),
-              workflow_run: payload.workflow_run || current.workflow_run || null,
-              isRetrieving: false // Switch state once we have metadata
-            }));
-          } else if (eventName === 'citation') {
-            updateStreamingAssistant(streamMessageId, (current) => {
-              const citations = Array.isArray(current.citations) ? [...current.citations] : [];
-              const citationKey = `${String(payload.unit_id || '')}:${String(payload.char_range || '')}`;
-              const exists = citations.some((item: any) => `${String(item.unit_id || '')}:${String(item.char_range || '')}` === citationKey);
-              if (!exists) citations.push(payload);
-              return { ...current, citations, isRetrieving: false };
-            });
-          } else if (eventName === 'answer') {
-            updateStreamingAssistant(streamMessageId, (current) => ({
-              ...current,
-              content: String(payload.answer || current.content || ''),
-              answer: String(payload.answer || current.answer || ''),
-              grounding_score: Number(payload.grounding_score ?? current.grounding_score ?? 0),
-              refusal_reason: String(payload.refusal_reason || current.refusal_reason || ''),
-              safety: payload.safety ?? current.safety ?? null,
-              isRetrieving: false
-            }));
-            onScrollRequest(false);
-          } else if (eventName === 'message') {
-            updateStreamingAssistant(streamMessageId, (current) => ({
-              ...current,
-              ...payload,
-              id: String(payload.id || current.id),
-              content: String(payload.content || payload.answer || current.content || ''),
-              answer: String(payload.answer || current.answer || ''),
-              citations: Array.isArray(payload.citations) ? payload.citations : (current.citations || []),
-              safety: payload.safety ?? current.safety ?? null,
-              retrieval: payload.retrieval || current.retrieval || null,
-              latency: payload.latency || current.latency || null,
-              cost: payload.cost || current.cost || null,
-              usage: payload.usage || current.usage || {},
-              workflow_run: payload.workflow_run || current.workflow_run || null,
-              streaming: false,
-              isRetrieving: false
-            }));
-            onScrollRequest(true);
-          } else if (eventName === 'done') {
-            updateStreamingAssistant(streamMessageId, (current) => ({
-              ...current,
-              streaming: false,
-              isRetrieving: false
-            }));
-          } else if (eventName === 'error') {
-            updateStreamingAssistant(streamMessageId, (current) => ({
-              ...current,
-              streaming: false,
-              isRetrieving: false
-            }));
-            throw new Error(String(payload.detail || 'stream chat failed'));
-          }
-        }
+        idempotencyKey: createIdempotencyKey(`chat:${sessionId}`)
       });
+
+      messages.value = messages.value.filter((item: any) => item.id !== pendingMessageId);
+      if (result?.status === 'interrupted' && result?.run) {
+        appendPendingInterrupt(result.run, result.interrupt);
+      } else {
+        messages.value.push(buildAssistantMessage(result));
+      }
       await loadSessions();
+      onScrollRequest(true);
     } catch (error: any) {
       if (isAbortRequestError(error)) return;
       messages.value = messages.value.filter((item: any) => !(item?.streaming && item.role === 'assistant' && !String(item.content || item.answer || '').trim()));
@@ -382,8 +389,45 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function resumeInterrupt(message: any, payload: {
+    selected_option_ids?: string[];
+    free_text?: string;
+    question?: string;
+    allow_common_knowledge?: boolean;
+    target_version_ids?: string[];
+    effective_at?: string;
+  }, onScrollRequest?: (smooth: boolean) => void) {
+    const runId = String(message?.interrupt?.run_id || message?.workflow_run?.id || '');
+    if (!runId || asking.value) return;
+    asking.value = true;
+    message.submitting = true;
+    try {
+      const result: any = await resumeChatRunV2(runId, payload, {
+        idempotencyKey: createIdempotencyKey(`chat-resume:${runId}`)
+      });
+      if (result?.status === 'interrupted' && result?.run) {
+        appendPendingInterrupt(result.run, result.interrupt);
+      } else {
+        resolveInterruptMessage(runId);
+        messages.value.push(buildAssistantMessage(result));
+      }
+      await loadSessions();
+      if (onScrollRequest) {
+        onScrollRequest(true);
+      }
+    } catch (error: any) {
+      if (!isHandledRequestError(error)) {
+        ElMessage.error('补充信息提交失败，请重试');
+      }
+      throw error;
+    } finally {
+      message.submitting = false;
+      asking.value = false;
+    }
+  }
+
   async function handleFeedback(message: any, verdict: 'up' | 'down', feedbackData?: any) {
-    if (!activeSessionId.value || !message || !message.id || message.id.startsWith('temp-')) return;
+    if (!activeSessionId.value || !message || !message.id || message.id.startsWith('temp-') || message.message_kind === 'interrupt') return;
     const originalVerdict = message.feedback?.verdict;
     const newVerdict = originalVerdict === verdict && !feedbackData ? undefined : verdict;
 
@@ -398,7 +442,7 @@ export const useChatStore = defineStore('chat', () => {
         });
       }
       if (newVerdict === 'up') {
-        ElMessage.success('已提交好评，谢谢反馈！');
+        ElMessage.success('已提交好评，感谢反馈');
       } else if (feedbackData) {
         ElMessage.success('已提交详情，感谢帮助改进模型');
       }
@@ -439,6 +483,7 @@ export const useChatStore = defineStore('chat', () => {
     handleCorpusChange,
     stopStreaming,
     ask,
+    resumeInterrupt,
     handleFeedback
   };
 });

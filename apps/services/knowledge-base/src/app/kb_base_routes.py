@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from shared.api_errors import raise_api_error
 from shared.auth import CurrentUser
@@ -25,8 +25,14 @@ from .kb_resource_store import (
     list_visual_storage_keys_for_documents,
     serialize_ingest_job,
 )
-from .kb_runtime import KB_READ_PERMISSION, KB_WRITE_PERMISSION, db
-from .kb_schemas import ALLOWED_DOCUMENT_VERSION_STATUSES, CreateBaseRequest, UpdateBaseRequest, UpdateDocumentRequest
+from .kb_runtime import KB_READ_PERMISSION, KB_WRITE_PERMISSION, db, logger
+from .kb_schemas import (
+    ALLOWED_DOCUMENT_VERSION_STATUSES,
+    BatchUpdateDocumentsRequest,
+    CreateBaseRequest,
+    UpdateBaseRequest,
+    UpdateDocumentRequest,
+)
 from .kb_upload_store import cleanup_deleted_resources, list_base_upload_sessions, list_document_upload_sessions
 from .vector_store import delete_base_vectors, delete_document_vectors
 
@@ -139,6 +145,210 @@ def _build_version_diff_payload(
         },
         "diff_text": "\n".join(diff_lines).strip(),
     }
+
+
+def _serialize_document_payload(document_id: str, *, request: Request, user: CurrentUser) -> dict[str, Any]:
+    updated = load_document(document_id, user=user, request=request, action="kb.document.get")
+    latest_job = load_latest_ingest_job_for_document(document_id, user=user)
+    payload_out = dict(updated)
+    payload_out["latest_job"] = serialize_ingest_job(latest_job) if latest_job else None
+    return payload_out
+
+
+def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, request: Request, user: CurrentUser) -> dict[str, Any]:
+    document = load_document(document_id, user=user, request=request, action="kb.document.update")
+    next_file_name = payload.file_name.strip() if payload.file_name is not None else str(document.get("file_name") or "")
+    next_category = payload.category.strip() if payload.category is not None else str((document.get("stats_json") or {}).get("category") or "")
+    next_family_key = payload.version_family_key if payload.version_family_key is not None else str(document.get("version_family_key") or document_id)
+    next_version_label = payload.version_label if payload.version_label is not None else str(document.get("version_label") or "")
+    next_version_number = int(payload.version_number if payload.version_number is not None else int(document.get("version_number") or 1))
+    next_version_status = payload.version_status if payload.version_status is not None else str(document.get("version_status") or "active")
+    next_is_current_version = bool(payload.is_current_version if payload.is_current_version is not None else bool(document.get("is_current_version")))
+    next_effective_from = payload.effective_from if payload.effective_from is not None else document.get("effective_from")
+    next_effective_to = payload.effective_to if payload.effective_to is not None else document.get("effective_to")
+    next_supersedes_document_id = (
+        payload.supersedes_document_id
+        if payload.supersedes_document_id is not None
+        else (str(document.get("supersedes_document_id") or "") or None)
+    )
+    current_stats = dict(document.get("stats_json") or {})
+    current_owner_user_id = str(current_stats.get("owner_user_id") or document.get("created_by") or "")
+    next_owner_user_id = current_owner_user_id if payload.owner_user_id is None else str(payload.owner_user_id or "").strip()
+    current_review_status = str(current_stats.get("review_status") or "").strip().lower()
+    next_review_status = current_review_status if payload.review_status is None else str(payload.review_status or "").strip().lower()
+    next_reviewer_note = str(current_stats.get("reviewer_note") or "") if payload.reviewer_note is None else str(payload.reviewer_note or "").strip()
+    if next_version_status not in ALLOWED_DOCUMENT_VERSION_STATUSES:
+        raise_api_error(400, "document_version_status_invalid", f"unsupported version status: {next_version_status}")
+    if next_is_current_version and next_version_status != "active":
+        raise_api_error(400, "document_version_current_requires_active", "current version must use active status")
+    if next_is_current_version and isinstance(next_effective_from, datetime) and next_effective_from > datetime.now(timezone.utc):
+        raise_api_error(400, "document_version_current_future_effective", "future-effective version cannot be marked current yet")
+    if isinstance(next_effective_from, datetime) and isinstance(next_effective_to, datetime) and next_effective_to < next_effective_from:
+        raise_api_error(400, "document_version_window_invalid", "effective_to must be greater than or equal to effective_from")
+    if next_supersedes_document_id == document_id:
+        raise_api_error(400, "document_version_supersedes_self", "document cannot supersede itself")
+    if next_supersedes_document_id:
+        superseded = load_document(next_supersedes_document_id, user=user, request=request, action="kb.document.update")
+        if str(superseded.get("base_id") or "") != str(document.get("base_id") or ""):
+            raise_api_error(400, "document_version_cross_base", "superseded document must belong to the same knowledge base")
+    next_stats = current_stats
+    next_stats["category"] = next_category
+    if next_owner_user_id:
+        next_stats["owner_user_id"] = next_owner_user_id
+    else:
+        next_stats.pop("owner_user_id", None)
+    review_status_changed = next_review_status != current_review_status
+    if next_review_status:
+        next_stats["review_status"] = next_review_status
+        if review_status_changed:
+            reviewed_at = datetime.now(timezone.utc).isoformat()
+            next_stats["reviewed_at"] = reviewed_at
+            next_stats["reviewed_by_user_id"] = user.user_id
+            next_stats["reviewed_by_email"] = user.email
+        if next_review_status == "approved":
+            next_stats["approved_at"] = datetime.now(timezone.utc).isoformat()
+        elif "approved_at" in next_stats:
+            next_stats.pop("approved_at", None)
+    else:
+        next_stats.pop("review_status", None)
+        next_stats.pop("reviewed_at", None)
+        next_stats.pop("approved_at", None)
+        next_stats.pop("reviewed_by_user_id", None)
+        next_stats.pop("reviewed_by_email", None)
+    if next_reviewer_note:
+        next_stats["reviewer_note"] = next_reviewer_note
+    else:
+        next_stats.pop("reviewer_note", None)
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            if next_is_current_version:
+                cur.execute(
+                    """
+                    UPDATE kb_documents
+                    SET is_current_version = FALSE,
+                        version_status = CASE
+                            WHEN version_status = 'active' THEN 'superseded'
+                            ELSE version_status
+                        END,
+                        updated_at = NOW()
+                    WHERE base_id = %s
+                      AND version_family_key = %s
+                      AND id <> %s
+                      AND is_current_version = TRUE
+                    """,
+                    (document["base_id"], next_family_key, document_id),
+                )
+            cur.execute(
+                """
+                UPDATE kb_documents
+                SET file_name = %s,
+                    stats_json = %s::jsonb,
+                    version_family_key = %s,
+                    version_label = %s,
+                    version_number = %s,
+                    version_status = %s,
+                    is_current_version = %s,
+                    effective_from = %s,
+                    effective_to = %s,
+                    supersedes_document_id = %s,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (
+                    next_file_name,
+                    to_json(next_stats),
+                    next_family_key,
+                    next_version_label,
+                    next_version_number,
+                    next_version_status,
+                    next_is_current_version,
+                    next_effective_from,
+                    next_effective_to,
+                    next_supersedes_document_id,
+                    document_id,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE kb_upload_sessions
+                SET file_name = %s,
+                    category = %s,
+                    version_family_key = %s,
+                    version_label = %s,
+                    version_number = %s,
+                    version_status = %s,
+                    is_current_version = %s,
+                    effective_from = %s,
+                    effective_to = %s,
+                    supersedes_document_id = %s,
+                    updated_at = NOW()
+                WHERE document_id = %s OR id = %s
+                """,
+                (
+                    next_file_name,
+                    next_category,
+                    next_family_key,
+                    next_version_label,
+                    next_version_number,
+                    next_version_status,
+                    next_is_current_version,
+                    next_effective_from,
+                    next_effective_to,
+                    next_supersedes_document_id,
+                    document_id,
+                    document.get("upload_session_id"),
+                ),
+            )
+        conn.commit()
+    audit_event(
+        action="kb.document.update",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="document",
+        resource_id=document_id,
+        scope="owner" if str(document.get("created_by") or "") == user.user_id else "managed",
+    )
+    if next_owner_user_id != current_owner_user_id:
+        audit_event(
+            action="kb.document.owner.assign",
+            outcome="success",
+            request=request,
+            user=user,
+            resource_type="document",
+            resource_id=document_id,
+            scope="owner" if str(document.get("created_by") or "") == user.user_id else "managed",
+            details={"from_owner_user_id": current_owner_user_id, "to_owner_user_id": next_owner_user_id},
+        )
+    if review_status_changed:
+        audit_event(
+            action="kb.document.review",
+            outcome="success",
+            request=request,
+            user=user,
+            resource_type="document",
+            resource_id=document_id,
+            scope="owner" if str(document.get("created_by") or "") == user.user_id else "managed",
+            details={
+                "from_review_status": current_review_status,
+                "to_review_status": next_review_status,
+                "reviewer_note": next_reviewer_note,
+                "reviewed_by_user_id": user.user_id,
+                "reviewed_by_email": user.email,
+                "owner_user_id": next_owner_user_id,
+            },
+        )
+    return _serialize_document_payload(document_id, request=request, user=user)
+
+
+def _serialize_batch_update_error(exc: HTTPException) -> tuple[int, str, str]:
+    if isinstance(exc.detail, dict):
+        return (
+            int(exc.status_code),
+            str(exc.detail.get("code") or "http_error"),
+            str(exc.detail.get("detail") or "request failed"),
+        )
+    return int(exc.status_code), "http_error", str(exc.detail or "request failed")
 
 
 @router.post("/api/v1/kb/bases")
@@ -264,14 +474,75 @@ def list_base_documents(base_id: str, request: Request, user: CurrentUser) -> di
     return {"items": fetch_base_documents(base_id, user=user)}
 
 
+@router.post("/api/v1/kb/documents/batch-update")
+def batch_update_documents(payload: BatchUpdateDocumentsRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_kb_permission(request, user, KB_WRITE_PERMISSION, action="kb.document.batch_update", resource_type="document")
+    task_id = str(payload.task_id or uuid4())
+    retry_of_task_id = str(payload.retry_of_task_id or "").strip()
+    items: list[dict[str, Any]] = []
+    success_count = 0
+    succeeded_document_ids: list[str] = []
+    failed_items: list[dict[str, Any]] = []
+    for document_id in payload.document_ids:
+        try:
+            updated_document = _apply_document_update(document_id, payload.patch, request=request, user=user)
+            items.append({"document_id": document_id, "ok": True, "document": updated_document})
+            success_count += 1
+            succeeded_document_ids.append(document_id)
+        except HTTPException as exc:
+            status_code, code, detail = _serialize_batch_update_error(exc)
+            failed_item = {"document_id": document_id, "ok": False, "status_code": status_code, "code": code, "detail": detail}
+            items.append(failed_item)
+            failed_items.append({key: failed_item[key] for key in ("document_id", "status_code", "code", "detail")})
+        except Exception:
+            logger.exception("kb batch update failed document_id=%s", document_id)
+            failed_item = {
+                "document_id": document_id,
+                "ok": False,
+                "status_code": 500,
+                "code": "internal_error",
+                "detail": "internal server error",
+            }
+            items.append(failed_item)
+            failed_items.append({key: failed_item[key] for key in ("document_id", "status_code", "code", "detail")})
+    failed_count = len(items) - success_count
+    audit_event(
+        action="kb.document.batch_update",
+        outcome="success" if failed_count == 0 else "partial_success",
+        request=request,
+        user=user,
+        resource_type="document_batch",
+        resource_id=task_id,
+        scope="managed",
+        details={
+            "task_id": task_id,
+            "retry_of_task_id": retry_of_task_id,
+            "document_ids": payload.document_ids,
+            "total": len(payload.document_ids),
+            "succeeded": success_count,
+            "failed": failed_count,
+            "patch": payload.patch.model_dump(mode="json", exclude_none=True),
+            "success_document_ids": succeeded_document_ids,
+            "failed_items": failed_items,
+        },
+    )
+    return {
+        "task_id": task_id,
+        "retry_of_task_id": retry_of_task_id or None,
+        "status": "completed",
+        "items": items,
+        "summary": {
+            "total": len(payload.document_ids),
+            "succeeded": success_count,
+            "failed": failed_count,
+        },
+    }
+
+
 @router.get("/api/v1/kb/documents/{document_id}")
 def get_document(document_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.document.get", resource_type="document", resource_id=document_id)
-    document = load_document(document_id, user=user, request=request, action="kb.document.get")
-    latest_job = load_latest_ingest_job_for_document(document_id, user=user)
-    payload = dict(document)
-    payload["latest_job"] = serialize_ingest_job(latest_job) if latest_job else None
-    return payload
+    return _serialize_document_payload(document_id, request=request, user=user)
 
 
 @router.get("/api/v1/kb/documents/{document_id}/versions")
@@ -327,132 +598,7 @@ def get_document_version_diff(
 @router.patch("/api/v1/kb/documents/{document_id}")
 def update_document(document_id: str, payload: UpdateDocumentRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_WRITE_PERMISSION, action="kb.document.update", resource_type="document", resource_id=document_id)
-    document = load_document(document_id, user=user, request=request, action="kb.document.update")
-    next_file_name = payload.file_name.strip() if payload.file_name is not None else str(document.get("file_name") or "")
-    next_category = payload.category.strip() if payload.category is not None else str((document.get("stats_json") or {}).get("category") or "")
-    next_family_key = payload.version_family_key if payload.version_family_key is not None else str(document.get("version_family_key") or document_id)
-    next_version_label = payload.version_label if payload.version_label is not None else str(document.get("version_label") or "")
-    next_version_number = int(payload.version_number if payload.version_number is not None else int(document.get("version_number") or 1))
-    next_version_status = payload.version_status if payload.version_status is not None else str(document.get("version_status") or "active")
-    next_is_current_version = bool(payload.is_current_version if payload.is_current_version is not None else bool(document.get("is_current_version")))
-    next_effective_from = payload.effective_from if payload.effective_from is not None else document.get("effective_from")
-    next_effective_to = payload.effective_to if payload.effective_to is not None else document.get("effective_to")
-    next_supersedes_document_id = (
-        payload.supersedes_document_id
-        if payload.supersedes_document_id is not None
-        else (str(document.get("supersedes_document_id") or "") or None)
-    )
-    if next_version_status not in ALLOWED_DOCUMENT_VERSION_STATUSES:
-        raise_api_error(400, "document_version_status_invalid", f"unsupported version status: {next_version_status}")
-    if next_is_current_version and next_version_status != "active":
-        raise_api_error(400, "document_version_current_requires_active", "current version must use active status")
-    if next_is_current_version and isinstance(next_effective_from, datetime) and next_effective_from > datetime.now(timezone.utc):
-        raise_api_error(400, "document_version_current_future_effective", "future-effective version cannot be marked current yet")
-    if isinstance(next_effective_from, datetime) and isinstance(next_effective_to, datetime) and next_effective_to < next_effective_from:
-        raise_api_error(400, "document_version_window_invalid", "effective_to must be greater than or equal to effective_from")
-    if next_supersedes_document_id == document_id:
-        raise_api_error(400, "document_version_supersedes_self", "document cannot supersede itself")
-    if next_supersedes_document_id:
-        superseded = load_document(next_supersedes_document_id, user=user, request=request, action="kb.document.update")
-        if str(superseded.get("base_id") or "") != str(document.get("base_id") or ""):
-            raise_api_error(400, "document_version_cross_base", "superseded document must belong to the same knowledge base")
-    next_stats = dict(document.get("stats_json") or {})
-    next_stats["category"] = next_category
-    with db.connect() as conn:
-        with conn.cursor() as cur:
-            if next_is_current_version:
-                cur.execute(
-                    """
-                    UPDATE kb_documents
-                    SET is_current_version = FALSE,
-                        version_status = CASE
-                            WHEN version_status = 'active' THEN 'superseded'
-                            ELSE version_status
-                        END,
-                        updated_at = NOW()
-                    WHERE base_id = %s
-                      AND version_family_key = %s
-                      AND id <> %s
-                      AND is_current_version = TRUE
-                    """,
-                    (document["base_id"], next_family_key, document_id),
-                )
-            cur.execute(
-                """
-                UPDATE kb_documents
-                SET file_name = %s,
-                    stats_json = %s::jsonb,
-                    version_family_key = %s,
-                    version_label = %s,
-                    version_number = %s,
-                    version_status = %s,
-                    is_current_version = %s,
-                    effective_from = %s,
-                    effective_to = %s,
-                    supersedes_document_id = %s,
-                    updated_at = NOW()
-                WHERE id = %s
-                """,
-                (
-                    next_file_name,
-                    to_json(next_stats),
-                    next_family_key,
-                    next_version_label,
-                    next_version_number,
-                    next_version_status,
-                    next_is_current_version,
-                    next_effective_from,
-                    next_effective_to,
-                    next_supersedes_document_id,
-                    document_id,
-                ),
-            )
-            cur.execute(
-                """
-                UPDATE kb_upload_sessions
-                SET file_name = %s,
-                    category = %s,
-                    version_family_key = %s,
-                    version_label = %s,
-                    version_number = %s,
-                    version_status = %s,
-                    is_current_version = %s,
-                    effective_from = %s,
-                    effective_to = %s,
-                    supersedes_document_id = %s,
-                    updated_at = NOW()
-                WHERE document_id = %s OR id = %s
-                """,
-                (
-                    next_file_name,
-                    next_category,
-                    next_family_key,
-                    next_version_label,
-                    next_version_number,
-                    next_version_status,
-                    next_is_current_version,
-                    next_effective_from,
-                    next_effective_to,
-                    next_supersedes_document_id,
-                    document_id,
-                    document.get("upload_session_id"),
-                ),
-            )
-        conn.commit()
-    audit_event(
-        action="kb.document.update",
-        outcome="success",
-        request=request,
-        user=user,
-        resource_type="document",
-        resource_id=document_id,
-        scope="owner" if str(document.get("created_by") or "") == user.user_id else "managed",
-    )
-    updated = load_document(document_id, user=user, request=request, action="kb.document.get")
-    latest_job = load_latest_ingest_job_for_document(document_id, user=user)
-    payload_out = dict(updated)
-    payload_out["latest_job"] = serialize_ingest_job(latest_job) if latest_job else None
-    return payload_out
+    return _apply_document_update(document_id, payload, request=request, user=user)
 
 
 @router.delete("/api/v1/kb/documents/{document_id}")

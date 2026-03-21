@@ -3,6 +3,7 @@
 param(
     [switch]$SkipEncodingCheck,
     [switch]$SkipBackendCompile,
+    [switch]$SkipFrontendUnitTests,
     [switch]$SkipFrontendBuild,
     [switch]$SkipDockerConfig,
     [switch]$SkipPytest,
@@ -73,6 +74,12 @@ if (-not $SkipBackendCompile) {
 if (-not $SkipFrontendBuild) {
     Invoke-Check "Frontend Build" {
         Invoke-RepoTool -Command "npm" -Arguments @("run", "build") -WorkingDirectory (Resolve-RepoPath -RelativePath "apps\web")
+    }
+}
+
+if (-not $SkipFrontendUnitTests) {
+    Invoke-Check "Frontend Unit Tests" {
+        Invoke-RepoTool -Command "npm" -Arguments @("run", "test:unit") -WorkingDirectory (Resolve-RepoPath -RelativePath "apps\web")
     }
 }
 

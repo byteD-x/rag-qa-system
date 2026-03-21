@@ -54,6 +54,7 @@ def usage_with_meta(
     latency: dict[str, Any],
     cost: dict[str, Any],
     llm_trace: dict[str, Any],
+    answer_basis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(usage or {})
     payload["_meta"] = {
@@ -62,5 +63,6 @@ def usage_with_meta(
         "latency": latency,
         "cost": cost,
         "llm_trace": dict(llm_trace or {}),
+        "answer_basis": dict(answer_basis or {}),
     }
     return payload

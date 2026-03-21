@@ -723,7 +723,63 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/dashboard?view=personal&d
 
 ```powershell
 python scripts/quality/check-encoding.py
+cd apps/web && npm run test:unit
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 docker compose config --quiet
 ```
+## 企业聊天 v2 补充字段
+
+这一节汇总了在原始 API 结构之外新增的第一阶段企业级澄清字段。
+
+### 聊天补问字段
+
+- `interrupt.payload.subject`
+  - `type`: `version_family | visual_region_group`
+  - `id`
+  - `summary`
+- `interrupt.payload.options[*].badges`
+  - 用于展示的扁平标签，例如 `current`、`effective`、`v2`、`p.3`、`72.0%`
+- `interrupt.payload.options[*].meta`
+  - 结构化展示元数据，例如 `version_label`、`page_number`、`region_id`、`confidence`
+- `resume` 与中断提交接口现在支持可选的 `focus_hint`
+  - `focus_hint.kind`: `single_version | compare_versions | visual_region`
+
+### 聊天回答字段
+
+- 同步聊天响应现在包含 `answer_basis`
+- 持久化后的助手消息也会暴露 `answer_basis`
+- 版本比较模式下可能包含：
+  - `answer_basis.kind = compare_versions`
+  - `answer_basis.version_labels`
+  - `answer_basis.compare_summary`
+- 截图区域澄清后的回答可能包含：
+  - `answer_basis.kind = visual_region`
+  - `answer_basis.asset_id`
+  - `answer_basis.region_id`
+
+### 分析看板中的补问字段
+
+- `GET /api/v1/analytics/dashboard` 现在包含 `qa_quality.clarification`
+- `qa_quality.clarification` 包含：
+  - `triggered_runs`
+  - `completed_runs`
+  - `pending_runs`
+  - `completion_rate`
+  - `free_text_runs`
+  - `selection_runs`
+  - `kind_distribution`
+
+### 上传与连接器字段
+
+- 上传完成响应可能包含 `version_assist`
+- 连接器同步结果项可能包含 `version_assist`
+- `version_assist` 包含：
+  - `suggested_version_family_key`
+  - `suggested_version_label`
+  - `suggested_supersedes_document_id`
+  - `confidence`
+  - `reasons[]`
+  - `auto_apply`
+
+更完整的交互说明见 [enterprise-chat-v2.md](/E:/Project/rag-qa-system/docs/reference/enterprise-chat-v2.md)。

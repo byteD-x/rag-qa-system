@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
@@ -26,6 +27,15 @@ from .runtime import db
 
 QDRANT_SETTINGS = load_qdrant_settings()
 METADATA_PREFIX = "metadata."
+
+
+def _evidence_kind_from_source_kind(source_kind: str) -> str:
+    cleaned = str(source_kind or "").strip().lower()
+    if cleaned == "visual_region":
+        return "visual_region"
+    if cleaned.startswith("visual"):
+        return "image_asset"
+    return "document_chunk"
 
 
 class KnowledgeBaseRetriever(BaseRetriever):
@@ -217,6 +227,14 @@ def _row_to_document(row: dict[str, Any], *, unit_type: str) -> Document:
         "base_id": str(row["base_id"]),
         "document_id": str(row["document_id"]),
         "document_title": str(row.get("document_title") or ""),
+        "region_label": str(row.get("region_label") or ""),
+        "version_family_key": str(row.get("version_family_key") or ""),
+        "version_label": str(row.get("version_label") or ""),
+        "version_number": int(row.get("version_number") or 0),
+        "version_status": str(row.get("version_status") or ""),
+        "is_current_version": bool(row.get("is_current_version")),
+        "effective_from": _serialize_timestamp(row.get("effective_from")),
+        "effective_to": _serialize_timestamp(row.get("effective_to")),
         "section_title": str(row.get("section_title") or ""),
         "chapter_title": str(row.get("chapter_title") or ""),
         "scene_index": int(row.get("scene_index") or 0),
@@ -227,6 +245,8 @@ def _row_to_document(row: dict[str, Any], *, unit_type: str) -> Document:
         "page_number": int(row["page_number"]) if row.get("page_number") is not None else None,
         "asset_id": asset_id,
         "thumbnail_url": _thumbnail_url_from_asset_id(asset_id),
+        "bbox": [float(item) for item in list(row.get("bbox_json") or []) if isinstance(item, (int, float))][:4],
+        "confidence": float(row.get("confidence")) if row.get("confidence") is not None else None,
         "signal_scores": {},
         "evidence_path": {},
     }
@@ -240,6 +260,14 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
         unit_id=str(metadata.get("unit_id") or ""),
         document_id=str(metadata.get("document_id") or ""),
         document_title=str(metadata.get("document_title") or ""),
+        region_label=str(metadata.get("region_label") or ""),
+        version_family_key=str(metadata.get("version_family_key") or ""),
+        version_label=str(metadata.get("version_label") or ""),
+        version_number=int(metadata.get("version_number") or 0),
+        version_status=str(metadata.get("version_status") or ""),
+        is_current_version=bool(metadata.get("is_current_version")),
+        effective_from=str(metadata.get("effective_from") or ""),
+        effective_to=str(metadata.get("effective_to") or ""),
         section_title=str(metadata.get("section_title") or ""),
         chapter_title=str(metadata.get("chapter_title") or ""),
         scene_index=int(metadata.get("scene_index") or 0),
@@ -249,11 +277,13 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
         corpus_id=str(metadata.get("base_id") or ""),
         corpus_type="kb",
         service_type="kb",
-        evidence_kind="visual_ocr" if str(metadata.get("source_kind") or "").startswith("visual") else "text",
+        evidence_kind=_evidence_kind_from_source_kind(str(metadata.get("source_kind") or "")),
         source_kind=str(metadata.get("source_kind") or "text"),
         page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
         asset_id=str(metadata.get("asset_id") or ""),
         thumbnail_url=str(metadata.get("thumbnail_url") or ""),
+        bbox=[float(item) for item in list(metadata.get("bbox") or []) if isinstance(item, (int, float))][:4],
+        confidence=float(metadata.get("confidence")) if metadata.get("confidence") is not None else None,
         signal_scores=dict(metadata.get("signal_scores") or {}),
         evidence_path=EvidencePath(
             structure_hit=bool(evidence_path.get("structure_hit") or False),
@@ -303,7 +333,15 @@ def _load_section_rows(document_id: str) -> list[dict[str, Any]]:
                     documents.base_id::text AS base_id,
                     sections.document_id::text AS document_id,
                     documents.file_name AS document_title,
+                    documents.version_family_key,
+                    documents.version_label,
+                    documents.version_number,
+                    documents.version_status,
+                    documents.is_current_version,
+                    documents.effective_from,
+                    documents.effective_to,
                     sections.title AS section_title,
+                    COALESCE(vr.region_label, '') AS region_label,
                     '' AS chapter_title,
                     0 AS scene_index,
                     CONCAT(sections.char_start, '-', sections.char_end) AS char_range,
@@ -312,9 +350,22 @@ def _load_section_rows(document_id: str) -> list[dict[str, Any]]:
                     COALESCE(sections.summary, sections.search_text, sections.title) AS embedding_text,
                     sections.source_kind,
                     sections.page_number,
-                    COALESCE(sections.asset_id::text, '') AS asset_id
+                    COALESCE(sections.asset_id::text, '') AS asset_id,
+                    COALESCE(vr.bbox_json, '[]'::jsonb) AS bbox_json,
+                    vr.confidence
                 FROM kb_sections sections
                 JOIN kb_documents documents ON documents.id = sections.document_id
+                LEFT JOIN LATERAL (
+                    SELECT region_label, bbox_json, confidence
+                    FROM kb_visual_asset_regions region
+                    WHERE sections.source_kind = 'visual_region'
+                      AND region.document_id = sections.document_id
+                      AND region.asset_id = sections.asset_id
+                      AND COALESCE(region.page_number, sections.page_number) = sections.page_number
+                      AND lower(region.region_label) = lower(regexp_replace(sections.title, '^Page\\s+\\d+\\s+', ''))
+                    ORDER BY region.region_index ASC
+                    LIMIT 1
+                ) vr ON TRUE
                 WHERE sections.document_id = %s::uuid
                   AND EXISTS (
                       SELECT 1
@@ -339,7 +390,15 @@ def _load_chunk_rows(document_id: str) -> list[dict[str, Any]]:
                     documents.base_id::text AS base_id,
                     chunks.document_id::text AS document_id,
                     documents.file_name AS document_title,
+                    documents.version_family_key,
+                    documents.version_label,
+                    documents.version_number,
+                    documents.version_status,
+                    documents.is_current_version,
+                    documents.effective_from,
+                    documents.effective_to,
                     sections.title AS section_title,
+                    COALESCE(vr.region_label, '') AS region_label,
                     '' AS chapter_title,
                     0 AS scene_index,
                     CONCAT(chunks.char_start, '-', chunks.char_end) AS char_range,
@@ -348,10 +407,23 @@ def _load_chunk_rows(document_id: str) -> list[dict[str, Any]]:
                     chunks.text_content AS embedding_text,
                     chunks.source_kind,
                     chunks.page_number,
-                    COALESCE(chunks.asset_id::text, '') AS asset_id
+                    COALESCE(chunks.asset_id::text, '') AS asset_id,
+                    COALESCE(vr.bbox_json, '[]'::jsonb) AS bbox_json,
+                    vr.confidence
                 FROM kb_chunks chunks
                 JOIN kb_sections sections ON sections.id = chunks.section_id
                 JOIN kb_documents documents ON documents.id = chunks.document_id
+                LEFT JOIN LATERAL (
+                    SELECT region_label, bbox_json, confidence
+                    FROM kb_visual_asset_regions region
+                    WHERE chunks.source_kind = 'visual_region'
+                      AND region.document_id = chunks.document_id
+                      AND region.asset_id = chunks.asset_id
+                      AND COALESCE(region.page_number, chunks.page_number) = chunks.page_number
+                      AND lower(region.region_label) = lower(regexp_replace(sections.title, '^Page\\s+\\d+\\s+', ''))
+                    ORDER BY region.region_index ASC
+                    LIMIT 1
+                ) vr ON TRUE
                 WHERE chunks.document_id = %s::uuid
                   AND chunks.disabled = FALSE
                 ORDER BY chunks.section_index ASC, chunks.chunk_index ASC
@@ -366,3 +438,9 @@ def _thumbnail_url_from_asset_id(asset_id: str) -> str:
     if not cleaned:
         return ""
     return f"/api/v1/kb/visual-assets/{cleaned}/thumbnail"
+
+
+def _serialize_timestamp(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value or "")

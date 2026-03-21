@@ -78,6 +78,7 @@ import ChatComposer from './components/ChatComposer.vue';
 import ChatTraceDrawer from './components/ChatTraceDrawer.vue';
 
 import { useChatStore } from '@/store/chat';
+import { resolveKbRoutePreset } from './chatRoutePresets';
 
 const route = useRoute();
 const chatStore = useChatStore();
@@ -157,16 +158,13 @@ function openTraceDrawer(workflowInfo: any) {
 }
 
 async function applyRoutePreset() {
-  const preset = String(route.query.preset || '');
-  const baseId = String(route.query.baseId || '');
-  const documentId = String(route.query.documentId || '');
-  if (preset === 'kb' && baseId) {
-    chatStore.applyScope({
-      mode: 'single',
-      corpus_ids: [`kb:${baseId}`],
-      document_ids: documentId ? [documentId] : []
-    });
+  const preset = resolveKbRoutePreset(route.query as Record<string, unknown>);
+  if (preset) {
+    chatStore.applyScope(preset.scope);
     await chatStore.handleScopeModeChange();
+    if (preset.question && composerRef.value) {
+      composerRef.value.setQuestion(preset.question);
+    }
   }
 }
 

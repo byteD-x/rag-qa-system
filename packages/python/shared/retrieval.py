@@ -19,6 +19,14 @@ class EvidenceBlock:
     document_id: str
     document_title: str
     section_title: str
+    region_label: str = ""
+    version_family_key: str = ""
+    version_label: str = ""
+    version_number: int = 0
+    version_status: str = ""
+    is_current_version: bool = False
+    effective_from: str = ""
+    effective_to: str = ""
     chapter_title: str = ""
     scene_index: int = 0
     char_range: str = ""
@@ -32,6 +40,8 @@ class EvidenceBlock:
     page_number: int | None = None
     asset_id: str = ""
     thumbnail_url: str = ""
+    bbox: list[float] = field(default_factory=list)
+    confidence: float | None = None
     signal_scores: dict[str, float] = field(default_factory=dict)
     evidence_path: EvidencePath = field(default_factory=EvidencePath)
 

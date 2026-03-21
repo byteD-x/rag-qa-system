@@ -231,6 +231,11 @@ const navItemsPrimary = [
     icon: Files
   },
   {
+    path: '/workspace/kb/governance',
+    label: '知识治理',
+    icon: Files
+  },
+  {
     path: '/workspace/kb/connectors',
     label: '多源同步',
     icon: Link
@@ -252,7 +257,11 @@ const navItemsPrimaryFiltered = computed(() =>
       return authStore.hasPermission('chat.use');
     }
     if (item.path === '/workspace/kb/upload') return authStore.hasPermission('kb.read');
-    if (item.path === '/workspace/kb/connectors' || item.path === '/workspace/kb/debugger') {
+    if (
+      item.path === '/workspace/kb/governance' ||
+      item.path === '/workspace/kb/connectors' ||
+      item.path === '/workspace/kb/debugger'
+    ) {
       return authStore.hasPermission('kb.manage');
     }
     return true;

@@ -61,8 +61,135 @@ export function updateKBDocument(documentId: string, data: {
   effective_from?: string | null;
   effective_to?: string | null;
   supersedes_document_id?: string | null;
+  owner_user_id?: string | null;
+  review_status?: string;
+  reviewer_note?: string;
 }) {
   return request.patch(`/kb/documents/${documentId}`, data);
+}
+
+export interface BatchUpdateKBDocumentsPayload {
+  document_ids: string[];
+  task_id?: string;
+  retry_of_task_id?: string;
+  patch: {
+    file_name?: string;
+    category?: string;
+    version_family_key?: string;
+    version_label?: string;
+    version_number?: number;
+    version_status?: string;
+    is_current_version?: boolean;
+    effective_from?: string | null;
+    effective_to?: string | null;
+    supersedes_document_id?: string | null;
+    owner_user_id?: string | null;
+    review_status?: string;
+    reviewer_note?: string;
+  };
+}
+
+export interface BatchUpdateKBDocumentsResultItem {
+  document_id: string;
+  ok: boolean;
+  document?: any;
+  status_code?: number;
+  code?: string;
+  detail?: string;
+}
+
+export interface BatchUpdateKBDocumentsResponse {
+  task_id: string;
+  retry_of_task_id?: string | null;
+  status: string;
+  items: BatchUpdateKBDocumentsResultItem[];
+  summary: {
+    total: number;
+    succeeded: number;
+    failed: number;
+  };
+}
+
+export function batchUpdateKBDocuments(data: BatchUpdateKBDocumentsPayload) {
+  return request.post<BatchUpdateKBDocumentsResponse>('/kb/documents/batch-update', data);
+}
+
+export interface KBGovernanceBatchEventItem {
+  id: string;
+  service: string;
+  actor_user_id: string;
+  actor_email: string;
+  actor_role: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  scope: string;
+  outcome: string;
+  trace_id: string;
+  request_path: string;
+  created_at: string | null;
+  details: {
+    task_id?: string;
+    retry_of_task_id?: string | null;
+    document_ids?: string[];
+    total?: number;
+    succeeded?: number;
+    failed?: number;
+    patch?: Record<string, unknown>;
+    success_document_ids?: string[];
+    failed_items?: Array<{
+      document_id: string;
+      status_code: number;
+      code: string;
+      detail: string;
+    }>;
+  };
+}
+
+export interface KBGovernanceBatchEventsResponse {
+  view: 'personal' | 'admin';
+  limit: number;
+  generated_at: string;
+  items: KBGovernanceBatchEventItem[];
+}
+
+export function getKBGovernanceBatchEvents(params: { view: 'personal' | 'admin'; limit?: number }) {
+  return request.get<KBGovernanceBatchEventsResponse>('/kb/analytics/governance/batch-events', { params });
+}
+
+export interface KBGovernanceBatchEventDetailResponse {
+  view: 'personal' | 'admin';
+  task_id: string;
+  generated_at: string;
+  status: string;
+  item: KBGovernanceBatchEventItem;
+  retry_summary: {
+    parent_task_id?: string | null;
+    retry_count: number;
+    failed_retry_count: number;
+    latest_retry_task_id?: string | null;
+    latest_retry_outcome?: string | null;
+    latest_retry_at?: string | null;
+    latest_retry_failed: number;
+    latest_retry_succeeded: number;
+  };
+  timeline: {
+    items: KBGovernanceBatchEventItem[];
+    total: number;
+    limit: number;
+    offset: number;
+    filter: 'all' | 'retries' | 'upstream' | string;
+    has_more: boolean;
+  };
+}
+
+export function getKBGovernanceBatchEventDetail(taskId: string, params: {
+  view: 'personal' | 'admin';
+  timeline_limit?: number;
+  timeline_offset?: number;
+  timeline_filter?: 'all' | 'retries' | 'upstream';
+}) {
+  return request.get<KBGovernanceBatchEventDetailResponse>(`/kb/analytics/governance/batch-events/${taskId}`, { params });
 }
 
 export function deleteKBDocument(documentId: string) {
@@ -75,6 +202,103 @@ export function getKBDocumentEvents(documentId: string) {
 
 export function getKBDocumentVisualAssets(documentId: string) {
   return request.get(`/kb/documents/${documentId}/visual-assets`);
+}
+
+export interface KBVisualAssetRegion {
+  region_id: string;
+  asset_id: string;
+  document_id: string;
+  page_number?: number | null;
+  region_label: string;
+  layout_hints: string[];
+  bbox: number[];
+  confidence?: number | null;
+  summary: string;
+  ocr_text: string;
+  thumbnail_url?: string;
+}
+
+export function getKBVisualAssetRegions(assetId: string) {
+  return request.get<{ items: KBVisualAssetRegion[] }>(`/kb/visual-assets/${assetId}/regions`);
+}
+
+export interface KBGovernanceDocumentItem {
+  document_id: string;
+  base_id: string;
+  base_name: string;
+  file_name: string;
+  status: string;
+  enhancement_status: string;
+  version_family_key: string;
+  version_label: string;
+  version_number: number | null;
+  version_status: string;
+  is_current_version: boolean;
+  effective_from: string | null;
+  effective_to: string | null;
+  effective_now: boolean;
+  visual_asset_count: number;
+  low_confidence_region_count: number;
+  low_confidence_asset_id: string;
+  low_confidence_region_id: string;
+  low_confidence_region_label: string;
+  low_confidence_region_confidence: number | null;
+  low_confidence_region_bbox: number[];
+  created_at: string | null;
+  updated_at: string | null;
+  owner_user_id: string;
+  review_status: string;
+  reviewer_note: string;
+  reviewed_at: string | null;
+  reviewed_by_user_id: string;
+  reviewed_by_email: string;
+  reason: string;
+}
+
+export interface KBGovernanceVersionConflictItem {
+  base_id: string;
+  base_name: string;
+  version_family_key: string;
+  current_version_count: number;
+  active_version_count: number;
+  total_versions: number;
+  latest_version_number: number | null;
+  current_document_ids: string[];
+  current_labels: string[];
+}
+
+export interface KBGovernanceResponse {
+  view: 'personal' | 'admin';
+  limit: number;
+  generated_at: string;
+  summary: {
+    pending_review: number;
+    approved_ready: number;
+    rejected_documents: number;
+    expired_documents: number;
+    visual_attention: number;
+    visual_low_confidence: number;
+    missing_version_family: number;
+    version_conflicts: number;
+  };
+  queues: {
+    pending_review: KBGovernanceDocumentItem[];
+    approved_ready: KBGovernanceDocumentItem[];
+    rejected_documents: KBGovernanceDocumentItem[];
+    expired_documents: KBGovernanceDocumentItem[];
+    visual_attention: KBGovernanceDocumentItem[];
+    visual_low_confidence: KBGovernanceDocumentItem[];
+    missing_version_family: KBGovernanceDocumentItem[];
+    version_conflicts: KBGovernanceVersionConflictItem[];
+  };
+  data_quality: {
+    unsupported_fields: string[];
+    degraded_sections: any[];
+  };
+}
+
+export function getKBGovernance(params: { view: 'personal' | 'admin'; limit?: number }) {
+  return request.get<KBGovernanceResponse>('/kb/analytics/governance', { params });
 }
 
 export function createKBUpload(data: {

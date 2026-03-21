@@ -42,6 +42,7 @@ async def run_agent_search(
     scope_snapshot: dict[str, Any],
     question: str,
     history: list[dict[str, Any]],
+    focus_hint: dict[str, Any] | None = None,
     agent_profile: dict[str, Any] | None = None,
     prompt_template: dict[str, Any] | None = None,
     retrieve_scope_evidence_fn: Any,
@@ -63,6 +64,7 @@ async def run_agent_search(
             scope_snapshot=scope_snapshot,
             question=question,
             history=history,
+            focus_hint=focus_hint,
         )
 
     tool_events: list[dict[str, Any]] = []
@@ -80,6 +82,7 @@ async def run_agent_search(
             scope_snapshot=scope_snapshot,
             question=search_question,
             history=history,
+            focus_hint=focus_hint,
         )
         total_retrieval_ms += round((time.perf_counter() - tool_started) * 1000.0, 3)
         _collect_evidence(evidence_by_unit, items, limit=limit)
@@ -393,6 +396,7 @@ async def run_agent_search(
             scope_snapshot=scope_snapshot,
             question=question,
             history=history,
+            focus_hint=focus_hint,
         )
         fallback_meta = dict(fallback_meta or {})
         aggregate = dict(fallback_meta.get("aggregate") or {})

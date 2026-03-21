@@ -33,6 +33,7 @@ def _load_gateway_module(module_name: str):
         "app.gateway_answering",
         "app.gateway_runtime",
         "app.gateway_schemas",
+        "app.db",
         "app",
     ):
         sys.modules.pop(name, None)
@@ -245,6 +246,135 @@ def test_gateway_graph_run_interrupts_and_resumes(monkeypatch) -> None:
     assert resumed["status"] == "completed"
     assert resumed["message"]["id"] == "message-2"
     assert interrupt_updates[-1]["status"] == "resolved"
+    assert run_updates[-1]["status"] == "completed"
+
+
+def test_gateway_graph_resume_applies_selected_option_patch(monkeypatch) -> None:
+    monkeypatch.setenv("GATEWAY_GRAPH_CHECKPOINTER", "memory")
+    gateway_graph = _load_gateway_module("app.gateway_graph")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    run_updates: list[dict[str, object]] = []
+
+    async def fake_prepare_chat_message(**kwargs):
+        scope = getattr(kwargs["payload"], "scope", None)
+        document_ids = list(getattr(scope, "document_ids", []) or []) if scope is not None else []
+        if document_ids == ["doc-v2"]:
+            return {
+                "session_id": "session-3",
+                "payload": kwargs["payload"],
+                "trace_id": "gateway-trace-3",
+                "scope_snapshot": {"mode": "single", "execution_mode": "grounded", "document_ids": ["doc-v2"]},
+                "execution_mode": "grounded",
+                "history": [],
+                "evidence": [{"unit_id": "chunk-3", "document_id": "doc-v2"}],
+                "contextualized_question": "2025 expense approval flow",
+                "retrieval_meta": {"aggregate": {"selected_candidates": 1}},
+                "answer_mode": "grounded",
+                "evidence_status": "grounded",
+                "grounding_score": 0.9,
+                "refusal_reason": "",
+                "safety": {"risk_level": "low", "reason_codes": []},
+                "clarification": {},
+                "settings_prompt_append": "",
+                "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0},
+            }
+        return {
+            "session_id": "session-3",
+            "payload": kwargs["payload"],
+            "trace_id": "gateway-trace-3",
+            "scope_snapshot": {"mode": "single", "execution_mode": "grounded", "allow_common_knowledge": False},
+            "execution_mode": "grounded",
+            "history": [],
+            "evidence": [],
+            "contextualized_question": "2025 expense approval flow",
+            "retrieval_meta": {"aggregate": {"selected_candidates": 0}},
+            "answer_mode": "refusal",
+            "evidence_status": "insufficient",
+            "grounding_score": 0.0,
+            "refusal_reason": "insufficient_evidence",
+            "safety": {"risk_level": "low", "reason_codes": []},
+            "clarification": {
+                "kind": "time_ambiguity",
+                "title": "Choose version",
+                "detail": "Multiple versions available",
+                "question": "2025 expense approval flow",
+                "options": [
+                    {
+                        "id": "document:doc-v2",
+                        "label": "Use v2",
+                        "description": "Current version",
+                        "patch": {"document_ids": ["doc-v2"]},
+                    }
+                ],
+                "recommended_option_id": "document:doc-v2",
+                "allow_free_text": True,
+            },
+            "settings_prompt_append": "",
+            "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0},
+        }
+
+    async def fake_generate_grounded_answer(**kwargs):
+        return {"answer": "Use [1]", "provider": "mock", "model": "mock-model", "usage": {"prompt_tokens": 5}, "llm_trace": {}}
+
+    def fake_finalize_chat_message(**kwargs):
+        payload = dict(kwargs["response_payload"])
+        payload["message"] = {"id": "message-3", "content": payload["answer"]}
+        return payload
+
+    monkeypatch.setattr(gateway_graph, "prepare_chat_message", fake_prepare_chat_message)
+    monkeypatch.setattr(gateway_graph, "generate_grounded_answer", fake_generate_grounded_answer)
+    monkeypatch.setattr(gateway_graph, "finalize_chat_message", fake_finalize_chat_message)
+    monkeypatch.setattr(
+        gateway_graph,
+        "create_workflow_run",
+        lambda **kwargs: {"id": "run-3", "session_id": kwargs["session_id"], "status": "running"},
+    )
+    monkeypatch.setattr(
+        gateway_graph,
+        "update_workflow_run",
+        lambda **kwargs: (run_updates.append(dict(kwargs)) or {"id": kwargs["run_id"], "session_id": "session-3", "status": kwargs["status"], "interrupt_id": kwargs.get("interrupt_id", "")}),
+    )
+    monkeypatch.setattr(
+        gateway_graph,
+        "create_graph_interrupt",
+        lambda **kwargs: {"id": "interrupt-3", "run_id": kwargs["run_id"], "session_id": kwargs["session_id"], "status": "pending", "payload": kwargs["payload"]},
+    )
+    monkeypatch.setattr(
+        gateway_graph,
+        "update_graph_interrupt",
+        lambda interrupt_id, **kwargs: {"id": interrupt_id, "status": kwargs["status"]},
+    )
+    monkeypatch.setattr(
+        gateway_graph,
+        "load_workflow_run_for_user",
+        lambda run_id, current_user: {"id": run_id, "session_id": "session-3", "status": "interrupted", "interrupt_id": "interrupt-3"},
+    )
+
+    interrupted = asyncio.run(
+        gateway_graph.run_gateway_graph_turn(
+            session_id="session-3",
+            payload={"question": "2025 expense approval flow", "scope": None, "execution_mode": "grounded"},
+            request_scope="chat.v2.run.create",
+            user=user,
+            request_path="/api/v2/chat/threads/session-3/runs",
+            deps=_graph_deps(gateway_graph),
+        )
+    )
+
+    assert interrupted["status"] == "interrupted"
+
+    resumed = asyncio.run(
+        gateway_graph.resume_gateway_graph_turn(
+            run_id="run-3",
+            user=user,
+            response_payload={"selected_option_ids": ["document:doc-v2"]},
+            deps=_graph_deps(gateway_graph),
+            interrupt_id="interrupt-3",
+        )
+    )
+
+    assert resumed["status"] == "completed"
+    assert resumed["message"]["id"] == "message-3"
     assert run_updates[-1]["status"] == "completed"
 
 

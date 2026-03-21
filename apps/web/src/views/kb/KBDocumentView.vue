@@ -15,7 +15,8 @@
         >
           重试
         </el-button>
-        <el-button type="primary" @click="goChat">提问</el-button>
+        <el-button type="primary" @click="goChat">按当前版本提问</el-button>
+        <el-button plain :disabled="!document" @click="goCompareChat(selectedVersionId || document?.id)">比较提问</el-button>
       </template>
     </PageHeaderCompact>
 
@@ -92,6 +93,7 @@
                 </div>
                 <div class="version-card__actions">
                   <el-button size="small" plain @click="inspectVersion(item)">查看内容</el-button>
+                  <el-button size="small" plain type="primary" @click="goChat(String(item.id || ''))">按此版本提问</el-button>
                   <el-button
                     v-if="String(item.id) !== String(document.id)"
                     size="small"
@@ -100,6 +102,14 @@
                     @click="inspectVersion(item, true)"
                   >
                     对比当前
+                  </el-button>
+                  <el-button
+                    v-if="String(item.id) !== String(document.id)"
+                    size="small"
+                    plain
+                    @click="goCompareChat(String(item.id || ''))"
+                  >
+                    比较提问
                   </el-button>
                 </div>
               </article>
@@ -181,20 +191,36 @@
               class="chunk-empty"
             />
             <div v-else class="visual-grid">
-              <article v-for="asset in visualAssets" :key="asset.asset_id" class="visual-card">
+              <article v-for="asset in visualAssets" :id="visualAssetDomId(asset.asset_id)" :key="asset.asset_id" class="visual-card" :class="{ 'visual-card--focused': isFocusedAsset(asset.asset_id) }">
                 <div class="visual-thumb-wrap">
                   <img
                     v-if="asset.thumbnail_url"
                     :src="asset.thumbnail_url"
                     :alt="asset.file_name || 'visual asset'"
                     class="visual-thumb"
+                    @click="focusVisualAsset(asset.asset_id)"
                   />
-                  <div v-else class="visual-thumb visual-thumb--empty">无预览</div>
+                  <div v-if="asset.thumbnail_url && focusedRegionForAsset(asset) && focusedRegionBoxStyle(asset).width" class="visual-region-box" :style="focusedRegionBoxStyle(asset)"></div>
+                  <div v-if="!asset.thumbnail_url" class="visual-thumb visual-thumb--empty">无预览</div>
                 </div>
                 <div class="visual-meta">
                   <strong>{{ asset.file_name || `截图 ${asset.asset_index || ''}` }}</strong>
                   <span>{{ asset.page_number ? `第 ${asset.page_number} 页` : '内嵌图片' }}</span>
                   <span>{{ asset.status || '-' }}</span>
+                  <span v-if="visualRegionsFor(asset).length">区域 {{ visualRegionsFor(asset).length }} 个</span>
+                </div>
+                <div v-if="visualRegionsFor(asset).length" class="visual-region-list">
+                  <article v-for="region in visualRegionsFor(asset)" :id="visualRegionDomId(region.region_id)" :key="region.region_id" class="visual-region-item" :class="{ 'visual-region-item--focused': isFocusedRegion(region.region_id) }" @click="focusVisualRegion(asset.asset_id, region.region_id)">
+                    <strong>{{ region.region_label }}</strong>
+                    <span v-if="region.layout_hints?.length">{{ region.layout_hints.join(' / ') }}</span>
+                    <span v-if="region.confidence !== null && region.confidence !== undefined">
+                      置信度 {{ (Number(region.confidence) * 100).toFixed(1) }}%
+                    </span>
+                    <span v-if="region.bbox?.length === 4">
+                      坐标 {{ region.bbox.map((item: number) => Number(item).toFixed(2)).join(', ') }}
+                    </span>
+                    <span>{{ region.summary || '无摘要' }}</span>
+                  </article>
                 </div>
               </article>
             </div>
@@ -270,7 +296,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Loading } from '@element-plus/icons-vue';
@@ -285,10 +311,12 @@ import {
   getKBDocumentVersionContent,
   getKBDocumentVersionDiff,
   getKBDocumentVersions,
+  getKBVisualAssetRegions,
   getKBDocumentVisualAssets,
   retryKBIngestJob,
   updateKBDocument
 } from '@/api/kb';
+import { buildKbChatRouteQuery } from '@/views/chat/chatRoutePresets';
 import { formatBytes } from '@/utils/format';
 import { statusMeta } from '@/utils/status';
 
@@ -299,6 +327,9 @@ const authStore = useAuthStore();
 const document = ref<any | null>(null);
 const events = ref<any[]>([]);
 const visualAssets = ref<any[]>([]);
+const visualRegionsByAsset = ref<Record<string, any[]>>({});
+const focusedVisualAssetId = ref('');
+const focusedVisualRegionId = ref('');
 const versionHistory = ref<any[]>([]);
 const selectedVersionId = ref('');
 const selectedVersionContent = ref<any | null>(null);
@@ -339,6 +370,118 @@ const syncDocumentForm = () => {
   documentForm.supersedes_document_id = String(document.value?.supersedes_document_id || '');
 };
 
+const visualRegionsFor = (asset: any) => {
+  const assetId = String(asset?.asset_id || '');
+  return visualRegionsByAsset.value[assetId] || [];
+};
+
+const visualAssetDomId = (assetId: string) => `visual-asset-${String(assetId || '').trim()}`;
+const visualRegionDomId = (regionId: string) => `visual-region-${String(regionId || '').trim()}`;
+const isFocusedAsset = (assetId: string) => String(assetId || '').trim() && String(assetId || '').trim() === focusedVisualAssetId.value;
+const isFocusedRegion = (regionId: string) => String(regionId || '').trim() && String(regionId || '').trim() === focusedVisualRegionId.value;
+const focusedRegionForAsset = (asset: any) => visualRegionsFor(asset).find((region: any) => isFocusedRegion(region.region_id)) || null;
+const focusedRegionBoxStyle = (asset: any) => {
+  const region = focusedRegionForAsset(asset);
+  const bbox = Array.isArray(region?.bbox) ? region.bbox : [];
+  if (bbox.length !== 4) {
+    return {};
+  }
+  const [left, top, right, bottom] = bbox.map((item: number) => Math.max(0, Math.min(1, Number(item))));
+  return {
+    left: `${left * 100}%`,
+    top: `${top * 100}%`,
+    width: `${Math.max(0, right - left) * 100}%`,
+    height: `${Math.max(0, bottom - top) * 100}%`,
+  };
+};
+
+const ensureVisualCollapseOpen = () => {
+  if (!activeCollapse.value.includes('visuals')) {
+    activeCollapse.value = [...activeCollapse.value, 'visuals'];
+  }
+};
+
+const scrollToVisualAnchor = async () => {
+  const targetId = focusedVisualRegionId.value
+    ? visualRegionDomId(focusedVisualRegionId.value)
+    : focusedVisualAssetId.value
+      ? visualAssetDomId(focusedVisualAssetId.value)
+      : '';
+  if (!targetId) {
+    return;
+  }
+  ensureVisualCollapseOpen();
+  await nextTick();
+  const target = globalThis.document?.getElementById(targetId)
+    || (focusedVisualAssetId.value ? globalThis.document?.getElementById(visualAssetDomId(focusedVisualAssetId.value)) : null);
+  target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+const syncVisualFocusFromRoute = async () => {
+  focusedVisualAssetId.value = String(route.query.assetId || '').trim();
+  focusedVisualRegionId.value = String(route.query.regionId || '').trim();
+  const routeVersionId = String(route.query.versionId || '').trim();
+  if (routeVersionId && routeVersionId !== selectedVersionId.value) {
+    const targetVersion = versionHistory.value.find((item: any) => String(item.id) === routeVersionId);
+    if (targetVersion) {
+      await inspectVersion(targetVersion, false);
+    }
+  }
+  if (focusedVisualAssetId.value || focusedVisualRegionId.value) {
+    await scrollToVisualAnchor();
+  }
+};
+
+const updateVisualFocusQuery = async (assetId: string, regionId: string = '') => {
+  const nextQuery = {
+    ...route.query,
+    assetId: assetId || undefined,
+    regionId: regionId || undefined,
+  };
+  await router.replace({ path: route.path, query: nextQuery });
+};
+
+const focusVisualAsset = async (assetId: string) => {
+  const normalizedAssetId = String(assetId || '').trim();
+  if (!normalizedAssetId) {
+    return;
+  }
+  focusedVisualAssetId.value = normalizedAssetId;
+  focusedVisualRegionId.value = '';
+  await updateVisualFocusQuery(normalizedAssetId);
+  await scrollToVisualAnchor();
+};
+
+const focusVisualRegion = async (assetId: string, regionId: string) => {
+  const normalizedAssetId = String(assetId || '').trim();
+  const normalizedRegionId = String(regionId || '').trim();
+  if (!normalizedAssetId || !normalizedRegionId) {
+    return;
+  }
+  focusedVisualAssetId.value = normalizedAssetId;
+  focusedVisualRegionId.value = normalizedRegionId;
+  await updateVisualFocusQuery(normalizedAssetId, normalizedRegionId);
+  await scrollToVisualAnchor();
+};
+
+const loadVisualRegions = async (assets: any[]) => {
+  const targets = assets.filter((item: any) => String(item?.asset_id || '').trim());
+  if (!targets.length) {
+    visualRegionsByAsset.value = {};
+    return;
+  }
+  const results: any[] = await Promise.all(
+    targets.map((asset: any) =>
+      getKBVisualAssetRegions(String(asset.asset_id)).catch(() => ({ items: [] }))
+    )
+  );
+  const nextMap: Record<string, any[]> = {};
+  targets.forEach((asset: any, index: number) => {
+    nextMap[String(asset.asset_id)] = (results[index]?.items || []) as any[];
+  });
+  visualRegionsByAsset.value = nextMap;
+};
+
 const load = async () => {
   const id = String(route.params.id || '');
   document.value = await getKBDocument(id);
@@ -349,12 +492,14 @@ const load = async () => {
   ]);
   events.value = eventsResult.items || [];
   visualAssets.value = visualResult.items || [];
+  await loadVisualRegions(visualAssets.value);
   versionHistory.value = versionsResult.items || [];
   const defaultVersion = versionHistory.value.find((item: any) => String(item.id) === String(document.value?.id || '')) || versionHistory.value[0];
   if (defaultVersion) {
     await inspectVersion(defaultVersion, false);
   }
   syncDocumentForm();
+  await syncVisualFocusFromRoute();
 };
 
 const inspectVersion = async (item: any, openDiff: boolean = false) => {
@@ -369,15 +514,26 @@ const inspectVersion = async (item: any, openDiff: boolean = false) => {
   selectedVersionDiff.value = diffResult || null;
 };
 
-const goChat = () => {
+const goChat = (documentId: string = '') => {
   if (!document.value) return;
   router.push({
     path: '/workspace/chat',
-    query: {
-      preset: 'kb',
-      baseId: document.value.base_id,
-      documentId: document.value.id
-    }
+    query: buildKbChatRouteQuery({
+      baseId: String(document.value.base_id || ''),
+      documentId: String(documentId || document.value.id || '')
+    })
+  });
+};
+
+const goCompareChat = (compareDocumentId: string = '') => {
+  if (!document.value) return;
+  router.push({
+    path: '/workspace/chat',
+    query: buildKbChatRouteQuery({
+      baseId: String(document.value.base_id || ''),
+      documentId: String(document.value.id || ''),
+      compareDocumentId
+    })
   });
 };
 
@@ -457,6 +613,13 @@ const formatDateTime = (value: string | Date | null | undefined) => {
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString('zh-CN', { hour12: false });
 };
+
+watch(
+  () => [route.query.assetId, route.query.regionId],
+  () => {
+    void syncVisualFocusFromRoute();
+  }
+);
 
 onMounted(() => void load());
 </script>
@@ -651,9 +814,17 @@ onMounted(() => void load());
   border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.visual-card--focused {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+  transform: translateY(-1px);
 }
 
 .visual-thumb-wrap {
+  position: relative;
   overflow: hidden;
   border-radius: 8px;
   background: var(--bg-panel-muted);
@@ -665,6 +836,16 @@ onMounted(() => void load());
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
+  cursor: pointer;
+}
+
+.visual-region-box {
+  position: absolute;
+  border: 2px solid #d92d20;
+  background: rgba(217, 45, 32, 0.14);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9) inset;
+  pointer-events: none;
 }
 
 .visual-thumb--empty {
@@ -681,6 +862,34 @@ onMounted(() => void load());
 }
 
 .visual-meta strong {
+  color: var(--text-primary);
+}
+
+.visual-region-list {
+  display: grid;
+  gap: 8px;
+}
+
+.visual-region-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel-muted);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.visual-region-item--focused {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
+  background: color-mix(in srgb, var(--el-color-primary-light-9, #ecf5ff) 70%, white);
+}
+
+.visual-region-item strong {
   color: var(--text-primary);
 }
 </style>

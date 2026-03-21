@@ -263,6 +263,72 @@ def _chat_funnel_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, 
     }
 
 
+def _clarification_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
+    clause, params = _scope_clause(user, view)
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS clarification_runs,
+                    COUNT(*) FILTER (WHERE status = 'completed') AS clarification_completed_runs,
+                    COUNT(*) FILTER (WHERE status = 'interrupted') AS clarification_pending_runs,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM chat_graph_interrupts interrupt_row
+                            WHERE interrupt_row.run_id = chat_workflow_runs.id
+                              AND COALESCE(NULLIF(interrupt_row.response_json->>'free_text', ''), '') <> ''
+                        )
+                    ) AS clarification_with_free_text_runs,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM chat_graph_interrupts interrupt_row
+                            WHERE interrupt_row.run_id = chat_workflow_runs.id
+                              AND jsonb_typeof(COALESCE(interrupt_row.response_json->'selected_option_ids', '[]'::jsonb)) = 'array'
+                              AND jsonb_array_length(COALESCE(interrupt_row.response_json->'selected_option_ids', '[]'::jsonb)) > 0
+                        )
+                    ) AS clarification_with_selection_runs
+                FROM chat_workflow_runs
+                WHERE {clause}
+                  AND created_at >= NOW() - (%s || ' days')::interval
+                  AND COALESCE(workflow_state_json #>> '{{retrieval,aggregate,clarification_required}}', 'false') = 'true'
+                """,
+                params + (days,),
+            )
+            summary_row = cur.fetchone() or {}
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(NULLIF(workflow_state_json #>> '{{retrieval,aggregate,clarification_kind}}', ''), 'unknown') AS key,
+                    COUNT(*) AS total_count
+                FROM chat_workflow_runs
+                WHERE {clause}
+                  AND created_at >= NOW() - (%s || ' days')::interval
+                  AND COALESCE(workflow_state_json #>> '{{retrieval,aggregate,clarification_required}}', 'false') = 'true'
+                GROUP BY key
+                ORDER BY total_count DESC, key ASC
+                """,
+                params + (days,),
+            )
+            kind_rows = cur.fetchall()
+    clarification_runs = int(summary_row.get("clarification_runs") or 0)
+    clarification_completed_runs = int(summary_row.get("clarification_completed_runs") or 0)
+    return {
+        "triggered_runs": clarification_runs,
+        "completed_runs": clarification_completed_runs,
+        "pending_runs": int(summary_row.get("clarification_pending_runs") or 0),
+        "completion_rate": round(float(clarification_completed_runs) / float(clarification_runs), 4) if clarification_runs > 0 else 0.0,
+        "free_text_runs": int(summary_row.get("clarification_with_free_text_runs") or 0),
+        "selection_runs": int(summary_row.get("clarification_with_selection_runs") or 0),
+        "kind_distribution": [
+            {"key": str(row.get("key") or ""), "count": int(row.get("total_count") or 0)}
+            for row in kind_rows
+        ],
+    }
+
+
 def _qa_quality_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
     clause, params = _scope_clause(user, view)
     with gateway_db.connect() as conn:
@@ -389,6 +455,7 @@ def _qa_quality_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, A
                 {"key": "partial_evidence", "count": int(summary_row.get("partial_evidence") or 0)},
             ],
         },
+        "clarification": _clarification_stats(user, view=view, days=days),
     }
 
 

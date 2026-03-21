@@ -27,6 +27,31 @@ export interface WorkflowRun {
   updated_at?: string;
 }
 
+export interface ChatInterruptOption {
+  id: string;
+  label: string;
+  description: string;
+  patch?: Record<string, any>;
+  badges?: string[];
+  meta?: Record<string, any>;
+}
+
+export interface ChatInterruptPayload {
+  kind: string;
+  title: string;
+  detail: string;
+  question?: string;
+  options?: ChatInterruptOption[];
+  recommended_option_id?: string;
+  allow_free_text?: boolean;
+  fallback_prompt?: string;
+  subject?: {
+    type: string;
+    id: string;
+    summary: string;
+  };
+}
+
 export function defaultChatScope(): ChatScope {
   return {
     mode: 'all',
@@ -106,6 +131,42 @@ export function retryWorkflowRun(runId: string, options: { idempotencyKey?: stri
   return request.post(`/chat/workflow-runs/${runId}/retry`, {}, {
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('workflow-retry')
+    }
+  });
+}
+
+export function createChatRunV2(
+  threadId: string,
+  data: { question: string; scope?: ChatScope; execution_mode?: 'grounded' | 'agent' },
+  options: { idempotencyKey?: string } = {}
+) {
+  return request.post(`/api/v2/chat/threads/${threadId}/runs`, data, {
+    headers: {
+      'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-v2-run')
+    }
+  });
+}
+
+export function getChatRunV2(runId: string) {
+  return request.get(`/api/v2/chat/runs/${runId}`);
+}
+
+export function resumeChatRunV2(
+  runId: string,
+  data: {
+    question?: string;
+    free_text?: string;
+    allow_common_knowledge?: boolean;
+    selected_option_ids?: string[];
+    target_version_ids?: string[];
+    effective_at?: string;
+    override_scope?: ChatScope;
+  },
+  options: { idempotencyKey?: string } = {}
+) {
+  return request.post(`/api/v2/chat/runs/${runId}/resume`, data, {
+    headers: {
+      'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-v2-resume')
     }
   });
 }
