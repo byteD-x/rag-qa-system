@@ -92,6 +92,17 @@ const routes = [
         }
       },
       {
+        path: 'kb/operations',
+        name: 'KBOperationsView',
+        component: () => import('@/views/kb/KBOperationsView.vue'),
+        meta: {
+          requiresPermission: 'kb.manage',
+          title: '知识库运维',
+          subtitle: '',
+          breadcrumb: ['工作台', '知识库运维']
+        }
+      },
+      {
         path: 'kb/debugger',
         name: 'RetrievalDebuggerView',
         component: () => import('@/views/kb/RetrievalDebuggerView.vue'),

@@ -301,6 +301,126 @@ export function getKBGovernance(params: { view: 'personal' | 'admin'; limit?: nu
   return request.get<KBGovernanceResponse>('/kb/analytics/governance', { params });
 }
 
+export interface KBOperationHealthCheck {
+  status: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
+export interface KBOperationsServiceHealth {
+  status: 'ok' | 'degraded' | 'failed' | string;
+  checks: Record<string, KBOperationHealthCheck>;
+}
+
+export interface KBOperationsRetryableJob {
+  job_id: string;
+  document_id: string;
+  base_id: string;
+  base_name: string;
+  file_name: string;
+  document_status: string;
+  enhancement_status: string;
+  job_status: string;
+  phase: string;
+  error_message: string;
+  last_error_code: string;
+  attempt_count: number;
+  max_attempts: number;
+  updated_at: string | null;
+  next_retry_at: string | null;
+  retryable: boolean;
+}
+
+export interface KBOperationsStalledDocument {
+  document_id: string;
+  base_id: string;
+  base_name: string;
+  file_name: string;
+  document_status: string;
+  enhancement_status: string;
+  job_id: string;
+  job_status: string;
+  phase: string;
+  error_message: string;
+  last_error_code: string;
+  last_activity_at: string | null;
+}
+
+export interface KBOperationsIngestOps {
+  summary: {
+    total_documents: number;
+    ready_documents: number;
+    queryable_documents: number;
+    failed_documents: number;
+    unfinished_documents: number;
+    stalled_documents: number;
+    dead_letter_documents: number;
+    in_progress_documents: number;
+    stalled_threshold_hours: number;
+  };
+  retryable_jobs: KBOperationsRetryableJob[];
+  stalled_documents: KBOperationsStalledDocument[];
+}
+
+export interface KBOperationsConnectorItem {
+  connector_id: string;
+  base_id: string;
+  base_name: string;
+  name: string;
+  connector_type: string;
+  status: string;
+  schedule_enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_run_outcome: string;
+  last_error: string;
+}
+
+export interface KBOperationsConnectorOps {
+  summary: {
+    total_connectors: number;
+    scheduled_connectors: number;
+    due_connectors: number;
+    recent_failed_runs: number;
+  };
+  items: KBOperationsConnectorItem[];
+}
+
+export interface KBOperationsIncidentItem {
+  id: string;
+  trace_id: string;
+  resource_type: string;
+  resource_id: string;
+  action: string;
+  outcome: string;
+  created_at: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface KBOperationsResponse {
+  view: 'personal' | 'admin';
+  days: number;
+  generated_at: string;
+  service_health: KBOperationsServiceHealth;
+  ingest_ops: KBOperationsIngestOps;
+  connector_ops: KBOperationsConnectorOps;
+  incident_feed: {
+    items: KBOperationsIncidentItem[];
+  };
+  data_quality: {
+    unsupported_fields: string[];
+    degraded_sections: Array<{
+      key: string;
+      detail: string;
+      error_type?: string;
+    }>;
+  };
+}
+
+export function getKBOperations(params: { view: 'personal' | 'admin'; days?: number }) {
+  return request.get<KBOperationsResponse>('/kb/analytics/operations', { params });
+}
+
 export function createKBUpload(data: {
   base_id: string;
   file_name: string;

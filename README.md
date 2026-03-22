@@ -1537,6 +1537,27 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 
 - `view=personal` 适合个人使用分析
 - `view=admin` 适合管理员看团队整体情况，需要管理员权限
+
+### 8. 知识库运维总览工作台
+
+面向知识库管理员，Web 端新增了 `/workspace/kb/operations` 运维值班页，优先解决“有信号、但不方便处置”的问题。
+
+该页面复用现有能力，不额外引入外部监控栈，当前聚合以下 4 类值班信息：
+
+- 服务健康：直接读取 KB `readyz` 依赖检查结果，展示 `database`、`storage`、`vector_store` 等状态
+- Ingest 风险队列：展示失败可重试 job、dead-letter 文档、长时间未推进文档
+- Connector 运行看板：展示连接器总数、启用调度数、当前到期数、最近失败情况
+- 事故事件流：展示最近失败、重试、降级相关审计事件，并附带 `trace_id`
+
+对应后端聚合接口：
+
+- `GET /api/v1/kb/analytics/operations?view=personal|admin&days=14`
+
+其中：
+
+- `view=personal` 仅返回当前用户范围内的知识库运维数据
+- `view=admin` 需要 `kb.manage` 或平台管理员权限
+- 页面中的“重试 ingest”“执行单个 connector”“执行所有到期 connector”均复用现有写接口，不新增破坏性运维入口
 - `LLM_MODEL_ROUTING_JSON`
 - `AI_MODEL_ROUTING_JSON`
 

@@ -14,6 +14,7 @@
         </el-select>
         <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
         <el-button plain @click="go('/workspace/kb/upload')">知识库治理</el-button>
+        <el-button v-if="authStore.hasPermission('kb.manage')" plain @click="go('/workspace/kb/operations')">知识库运维</el-button>
       </template>
     </PageHeaderCompact>
 
@@ -32,6 +33,15 @@
           <button type="button" class="action-btn" @click="go('/workspace/kb/upload')">
             <el-icon :size="22"><FolderOpened /></el-icon>
             <span>知识库管理</span>
+          </button>
+          <button
+            v-if="authStore.hasPermission('kb.manage')"
+            type="button"
+            class="action-btn"
+            @click="go('/workspace/kb/operations')"
+          >
+            <el-icon :size="22"><Monitor /></el-icon>
+            <span>运维值班</span>
           </button>
         </div>
       </section>
@@ -354,7 +364,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
+import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled, Monitor } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listKnowledgeBases } from '@/api/kb';

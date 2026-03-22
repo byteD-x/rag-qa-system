@@ -189,6 +189,7 @@ import {
   ChatDotRound,
   Files,
   Grid,
+  Monitor,
   Platform,
   SwitchButton,
   Tickets,
@@ -241,6 +242,11 @@ const navItemsPrimary = [
     icon: Link
   },
   {
+    path: '/workspace/kb/operations',
+    label: '知识库运维',
+    icon: Monitor
+  },
+  {
     path: '/workspace/kb/debugger',
     label: '检索测试',
     icon: Aim
@@ -259,6 +265,7 @@ const navItemsPrimaryFiltered = computed(() =>
     if (item.path === '/workspace/kb/upload') return authStore.hasPermission('kb.read');
     if (
       item.path === '/workspace/kb/governance' ||
+      item.path === '/workspace/kb/operations' ||
       item.path === '/workspace/kb/connectors' ||
       item.path === '/workspace/kb/debugger'
     ) {

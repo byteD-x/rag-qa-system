@@ -1,20 +1,24 @@
 ﻿from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from shared.auth import CurrentUser
 
-from .kb_api_support import audit_event, can_manage_everything, list_audit_events, require_kb_permission
+from .kb_api_support import audit_event, can_manage_everything, check_readiness, list_audit_events, require_kb_permission
 from .kb_runtime import KB_MANAGE_PERMISSION, KB_READ_PERMISSION, db
-from .kb_schemas import KBAnalyticsDashboardResponse, KBAnalyticsGovernanceResponse
+from .kb_schemas import KBAnalyticsDashboardResponse, KBAnalyticsGovernanceResponse, KBAnalyticsOperationsResponse
 
 
 router = APIRouter()
 STALLED_THRESHOLD_HOURS = 24
 LOW_VISUAL_REGION_CONFIDENCE = 0.8
+OPERATIONS_RETRYABLE_LIMIT = 8
+OPERATIONS_STALLED_LIMIT = 8
+OPERATIONS_CONNECTOR_LIMIT = 8
+OPERATIONS_INCIDENT_LIMIT = 12
 
 
 def _scope_clause(user: CurrentUser, view: str, *, field_name: str = "created_by") -> tuple[str, tuple[Any, ...]]:
@@ -744,6 +748,403 @@ def _dashboard_payload(user: CurrentUser, *, view: str, days: int) -> dict[str, 
     }
 
 
+def _service_health_status_from_checks(checks: dict[str, Any], *, degraded_sections: list[dict[str, Any]] | None = None) -> str:
+    statuses = [str((item or {}).get("status") or "") for item in checks.values()]
+    if any(status == "failed" for status in statuses):
+        return "failed"
+    if degraded_sections or any(status not in {"", "ok"} for status in statuses):
+        return "degraded"
+    return "ok"
+
+
+def _operations_degraded_section(section_key: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "key": section_key,
+        "detail": "operations section degraded during payload build",
+        "error_type": exc.__class__.__name__,
+    }
+
+
+def _operations_section(section_key: str, builder, fallback: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        return builder(), []
+    except Exception as exc:
+        return fallback, [_operations_degraded_section(section_key, exc)]
+
+
+def _empty_ingest_ops() -> dict[str, Any]:
+    return {
+        "summary": {
+            "total_documents": 0,
+            "ready_documents": 0,
+            "queryable_documents": 0,
+            "failed_documents": 0,
+            "unfinished_documents": 0,
+            "stalled_documents": 0,
+            "dead_letter_documents": 0,
+            "in_progress_documents": 0,
+            "stalled_threshold_hours": STALLED_THRESHOLD_HOURS,
+        },
+        "retryable_jobs": [],
+        "stalled_documents": [],
+    }
+
+
+def _empty_connector_ops() -> dict[str, Any]:
+    return {
+        "summary": {
+            "total_connectors": 0,
+            "scheduled_connectors": 0,
+            "due_connectors": 0,
+            "recent_failed_runs": 0,
+        },
+        "items": [],
+    }
+
+
+def _retryable_ingest_jobs(user: CurrentUser, *, view: str, limit: int) -> list[dict[str, Any]]:
+    clause, params = _scope_clause(user, view, field_name="docs.created_by")
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                WITH latest_retryable_jobs AS (
+                    SELECT DISTINCT ON (jobs.document_id)
+                        jobs.id::text AS job_id,
+                        jobs.document_id::text AS document_id,
+                        docs.base_id::text AS base_id,
+                        bases.name AS base_name,
+                        docs.file_name,
+                        docs.status AS document_status,
+                        docs.enhancement_status,
+                        jobs.status AS job_status,
+                        jobs.phase,
+                        jobs.error_message,
+                        jobs.last_error_code,
+                        jobs.attempt_count,
+                        jobs.max_attempts,
+                        jobs.updated_at,
+                        jobs.next_retry_at
+                    FROM kb_ingest_jobs jobs
+                    JOIN kb_documents docs ON docs.id = jobs.document_id
+                    JOIN kb_bases bases ON bases.id = docs.base_id
+                    WHERE {clause}
+                      AND jobs.status IN ('failed', 'dead_letter')
+                    ORDER BY jobs.document_id ASC, jobs.created_at DESC
+                )
+                SELECT *
+                FROM latest_retryable_jobs
+                ORDER BY updated_at DESC, file_name ASC
+                LIMIT %s
+                """,
+                params + (limit,),
+            )
+            rows = cur.fetchall()
+    return [
+        {
+            "job_id": str(row.get("job_id") or ""),
+            "document_id": str(row.get("document_id") or ""),
+            "base_id": str(row.get("base_id") or ""),
+            "base_name": str(row.get("base_name") or ""),
+            "file_name": str(row.get("file_name") or ""),
+            "document_status": str(row.get("document_status") or ""),
+            "enhancement_status": str(row.get("enhancement_status") or ""),
+            "job_status": str(row.get("job_status") or ""),
+            "phase": str(row.get("phase") or ""),
+            "error_message": str(row.get("error_message") or ""),
+            "last_error_code": str(row.get("last_error_code") or ""),
+            "attempt_count": int(row.get("attempt_count") or 0),
+            "max_attempts": int(row.get("max_attempts") or 0),
+            "updated_at": _serialize_timestamp(row.get("updated_at")),
+            "next_retry_at": _serialize_timestamp(row.get("next_retry_at")),
+            "retryable": True,
+        }
+        for row in rows
+    ]
+
+
+def _stalled_documents(user: CurrentUser, *, view: str, limit: int) -> list[dict[str, Any]]:
+    clause, params = _scope_clause(user, view, field_name="docs.created_by")
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                WITH scoped_docs AS (
+                    SELECT
+                        docs.id,
+                        docs.base_id,
+                        docs.file_name,
+                        docs.status,
+                        docs.enhancement_status,
+                        docs.updated_at,
+                        bases.name AS base_name
+                    FROM kb_documents docs
+                    JOIN kb_bases bases ON bases.id = docs.base_id
+                    WHERE {clause}
+                ),
+                latest_jobs AS (
+                    SELECT DISTINCT ON (jobs.document_id)
+                        jobs.document_id,
+                        jobs.id::text AS job_id,
+                        jobs.status AS job_status,
+                        jobs.phase,
+                        jobs.error_message,
+                        jobs.last_error_code,
+                        jobs.updated_at AS job_updated_at
+                    FROM kb_ingest_jobs jobs
+                    JOIN scoped_docs docs ON docs.id = jobs.document_id
+                    ORDER BY jobs.document_id ASC, jobs.created_at DESC
+                )
+                SELECT
+                    docs.id::text AS document_id,
+                    docs.base_id::text AS base_id,
+                    docs.base_name,
+                    docs.file_name,
+                    docs.status AS document_status,
+                    docs.enhancement_status,
+                    COALESCE(latest_jobs.job_id, '') AS job_id,
+                    COALESCE(latest_jobs.job_status, '') AS job_status,
+                    COALESCE(latest_jobs.phase, '') AS phase,
+                    COALESCE(latest_jobs.error_message, '') AS error_message,
+                    COALESCE(latest_jobs.last_error_code, '') AS last_error_code,
+                    COALESCE(latest_jobs.job_updated_at, docs.updated_at) AS last_activity_at
+                FROM scoped_docs docs
+                LEFT JOIN latest_jobs ON latest_jobs.document_id = docs.id
+                WHERE docs.status NOT IN ('ready', 'failed')
+                  AND COALESCE(latest_jobs.job_updated_at, docs.updated_at) <= NOW() - (%s || ' hours')::interval
+                ORDER BY last_activity_at ASC, docs.updated_at ASC
+                LIMIT %s
+                """,
+                params + (STALLED_THRESHOLD_HOURS, limit),
+            )
+            rows = cur.fetchall()
+    return [
+        {
+            "document_id": str(row.get("document_id") or ""),
+            "base_id": str(row.get("base_id") or ""),
+            "base_name": str(row.get("base_name") or ""),
+            "file_name": str(row.get("file_name") or ""),
+            "document_status": str(row.get("document_status") or ""),
+            "enhancement_status": str(row.get("enhancement_status") or ""),
+            "job_id": str(row.get("job_id") or ""),
+            "job_status": str(row.get("job_status") or ""),
+            "phase": str(row.get("phase") or ""),
+            "error_message": str(row.get("error_message") or ""),
+            "last_error_code": str(row.get("last_error_code") or ""),
+            "last_activity_at": _serialize_timestamp(row.get("last_activity_at")),
+        }
+        for row in rows
+    ]
+
+
+def _ingest_operations_payload(user: CurrentUser, *, view: str) -> dict[str, Any]:
+    return {
+        "summary": _ingest_summary(user, view=view),
+        "retryable_jobs": _retryable_ingest_jobs(user, view=view, limit=OPERATIONS_RETRYABLE_LIMIT),
+        "stalled_documents": _stalled_documents(user, view=view, limit=OPERATIONS_STALLED_LIMIT),
+    }
+
+
+def _connector_scope_clause(user: CurrentUser, view: str) -> tuple[str, tuple[Any, ...]]:
+    if view == "personal":
+        return "(connectors.created_by = %s OR bases.created_by = %s)", (user.user_id, user.user_id)
+    if not can_manage_everything(user):
+        raise HTTPException(status_code=403, detail={"detail": "admin dashboard requires kb.manage or platform_admin", "code": "permission_denied"})
+    return "TRUE", ()
+
+
+def _connector_operations_summary(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
+    clause, params = _connector_scope_clause(user, view)
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                WITH scoped_connectors AS (
+                    SELECT connectors.id
+                    FROM kb_connectors connectors
+                    JOIN kb_bases bases ON bases.id = connectors.base_id
+                    WHERE {clause}
+                )
+                SELECT
+                    COUNT(*) AS total_connectors,
+                    COUNT(*) FILTER (WHERE connectors.status = 'active' AND connectors.schedule_enabled = TRUE) AS scheduled_connectors,
+                    COUNT(*) FILTER (
+                        WHERE connectors.status = 'active'
+                          AND connectors.schedule_enabled = TRUE
+                          AND connectors.next_run_at IS NOT NULL
+                          AND connectors.next_run_at <= NOW()
+                    ) AS due_connectors
+                FROM kb_connectors connectors
+                JOIN scoped_connectors scoped ON scoped.id = connectors.id
+                """,
+                params,
+            )
+            summary_row = cur.fetchone() or {}
+            cur.execute(
+                f"""
+                WITH scoped_connectors AS (
+                    SELECT connectors.id
+                    FROM kb_connectors connectors
+                    JOIN kb_bases bases ON bases.id = connectors.base_id
+                    WHERE {clause}
+                )
+                SELECT COUNT(*) AS total_count
+                FROM kb_connector_runs runs
+                JOIN scoped_connectors scoped ON scoped.id = runs.connector_id
+                WHERE runs.status = 'failed'
+                  AND runs.started_at >= NOW() - (%s || ' days')::interval
+                """,
+                params + (days,),
+            )
+            failed_row = cur.fetchone() or {}
+    return {
+        "total_connectors": int(summary_row.get("total_connectors") or 0),
+        "scheduled_connectors": int(summary_row.get("scheduled_connectors") or 0),
+        "due_connectors": int(summary_row.get("due_connectors") or 0),
+        "recent_failed_runs": int(failed_row.get("total_count") or 0),
+    }
+
+
+def _connector_operation_items(user: CurrentUser, *, view: str, limit: int) -> list[dict[str, Any]]:
+    clause, params = _connector_scope_clause(user, view)
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    connectors.id::text AS connector_id,
+                    connectors.base_id::text AS base_id,
+                    bases.name AS base_name,
+                    connectors.name,
+                    connectors.connector_type,
+                    connectors.status,
+                    connectors.schedule_enabled,
+                    connectors.last_run_at,
+                    connectors.next_run_at,
+                    connectors.last_result_json,
+                    latest_run.status AS latest_run_status,
+                    latest_run.error_message AS latest_error_message,
+                    latest_run.started_at AS latest_run_started_at,
+                    latest_run.finished_at AS latest_run_finished_at
+                FROM kb_connectors connectors
+                JOIN kb_bases bases ON bases.id = connectors.base_id
+                LEFT JOIN LATERAL (
+                    SELECT runs.status, runs.error_message, runs.started_at, runs.finished_at
+                    FROM kb_connector_runs runs
+                    WHERE runs.connector_id = connectors.id
+                    ORDER BY runs.started_at DESC
+                    LIMIT 1
+                ) latest_run ON TRUE
+                WHERE {clause}
+                ORDER BY
+                    CASE
+                        WHEN connectors.status = 'active'
+                          AND connectors.schedule_enabled = TRUE
+                          AND connectors.next_run_at IS NOT NULL
+                          AND connectors.next_run_at <= NOW() THEN 0
+                        WHEN COALESCE(latest_run.status, '') = 'failed' THEN 1
+                        ELSE 2
+                    END ASC,
+                    connectors.next_run_at ASC NULLS LAST,
+                    connectors.updated_at DESC
+                LIMIT %s
+                """,
+                params + (limit,),
+            )
+            rows = cur.fetchall()
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        last_result = dict(row.get("last_result_json") or {})
+        items.append(
+            {
+                "connector_id": str(row.get("connector_id") or ""),
+                "base_id": str(row.get("base_id") or ""),
+                "base_name": str(row.get("base_name") or ""),
+                "name": str(row.get("name") or ""),
+                "connector_type": str(row.get("connector_type") or ""),
+                "status": str(row.get("status") or ""),
+                "schedule_enabled": bool(row.get("schedule_enabled")),
+                "next_run_at": _serialize_timestamp(row.get("next_run_at")),
+                "last_run_at": _serialize_timestamp(row.get("last_run_at") or row.get("latest_run_finished_at") or row.get("latest_run_started_at")),
+                "last_run_outcome": str(row.get("latest_run_status") or ""),
+                "last_error": str(row.get("latest_error_message") or last_result.get("error_message") or ""),
+            }
+        )
+    return items
+
+
+def _connector_operations_payload(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
+    return {
+        "summary": _connector_operations_summary(user, view=view, days=days),
+        "items": _connector_operation_items(user, view=view, limit=OPERATIONS_CONNECTOR_LIMIT),
+    }
+
+
+def _is_operations_incident(item: dict[str, Any]) -> bool:
+    action = str(item.get("action") or "")
+    outcome = str(item.get("outcome") or "")
+    if not (action.startswith("kb.ingest.") or action.startswith("kb.connector.")):
+        return False
+    if "retry" in action:
+        return True
+    return outcome in {"failed", "retry", "partial_success", "denied"}
+
+
+def _incident_feed_payload(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
+    normalized_view = view.strip().lower() or "personal"
+    if normalized_view == "admin" and not can_manage_everything(user):
+        raise HTTPException(status_code=403, detail={"detail": "admin dashboard requires kb.manage or platform_admin", "code": "permission_denied"})
+    actor_user_id = user.user_id if normalized_view == "personal" else ""
+    created_from = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    candidates = list_audit_events(
+        actor_user_id=actor_user_id,
+        created_from=created_from,
+        limit=max(80, OPERATIONS_INCIDENT_LIMIT * 4),
+    )
+    items = [
+        {
+            "id": str(item.get("id") or ""),
+            "trace_id": str(item.get("trace_id") or ""),
+            "resource_type": str(item.get("resource_type") or ""),
+            "resource_id": str(item.get("resource_id") or ""),
+            "action": str(item.get("action") or ""),
+            "outcome": str(item.get("outcome") or ""),
+            "created_at": item.get("created_at"),
+            "details": dict(item.get("details") or {}),
+        }
+        for item in candidates
+        if _is_operations_incident(item)
+    ][:OPERATIONS_INCIDENT_LIMIT]
+    return {"items": items}
+
+
+def _operations_payload(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
+    degraded_sections: list[dict[str, Any]] = []
+    service_health_checks = check_readiness()
+    ingest_ops, ingest_degraded = _operations_section("ingest_ops", lambda: _ingest_operations_payload(user, view=view), _empty_ingest_ops())
+    connector_ops, connector_degraded = _operations_section("connector_ops", lambda: _connector_operations_payload(user, view=view, days=days), _empty_connector_ops())
+    incident_feed, incident_degraded = _operations_section("incident_feed", lambda: _incident_feed_payload(user, view=view, days=days), {"items": []})
+    degraded_sections.extend(ingest_degraded)
+    degraded_sections.extend(connector_degraded)
+    degraded_sections.extend(incident_degraded)
+    return {
+        "view": view,
+        "days": days,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "service_health": {
+            "status": _service_health_status_from_checks(service_health_checks, degraded_sections=degraded_sections),
+            "checks": service_health_checks,
+        },
+        "ingest_ops": ingest_ops,
+        "connector_ops": connector_ops,
+        "incident_feed": incident_feed,
+        "data_quality": {
+            "unsupported_fields": [],
+            "degraded_sections": degraded_sections,
+        },
+    }
+
+
 @router.get(
     "/api/v1/kb/analytics/dashboard",
     response_model=KBAnalyticsDashboardResponse,
@@ -767,6 +1168,35 @@ def get_kb_dashboard(
         request=request,
         user=user,
         resource_type="kb_analytics_dashboard",
+        scope="admin" if normalized_view == "admin" else "owner",
+        details={"view": normalized_view, "days": days},
+    )
+    return payload
+
+
+@router.get(
+    "/api/v1/kb/analytics/operations",
+    response_model=KBAnalyticsOperationsResponse,
+    summary="知识库运维总览工作台",
+    description="返回 KB 依赖健康、ingest 风险队列、connector 运行情况与近期运维事故流，供知识库管理员值班排障使用。",
+)
+def get_kb_operations(
+    request: Request,
+    user: CurrentUser,
+    view: str = Query(default="personal", max_length=16, description="personal 仅统计当前用户资源；admin 统计管理范围内全部资源。"),
+    days: int = Query(default=14, ge=1, le=90, description="近期 connector 失败和 incident feed 的滚动时间窗口，单位为天。"),
+) -> dict[str, Any]:
+    require_kb_permission(request, user, KB_MANAGE_PERMISSION, action="kb.analytics.operations.get", resource_type="kb_analytics_operations")
+    normalized_view = view.strip().lower() or "personal"
+    if normalized_view not in {"personal", "admin"}:
+        raise HTTPException(status_code=400, detail={"detail": "unsupported operations view", "code": "analytics_view_invalid"})
+    payload = _operations_payload(user, view=normalized_view, days=days)
+    audit_event(
+        action="kb.analytics.operations.get",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="kb_analytics_operations",
         scope="admin" if normalized_view == "admin" else "owner",
         details={"view": normalized_view, "days": days},
     )

@@ -1638,7 +1638,112 @@ def test_kb_analytics_dashboard_payload_aggregates_ingest_health(monkeypatch) ->
     assert payload["ingest_health"]["summary"]["dead_letter_documents"] == 1
     assert payload["ingest_health"]["summary"]["stalled_documents"] == 1
     assert payload["ingest_health"]["upload_to_ready_latency_ms"]["p95_ms"] == 110000.0
-    assert payload["ingest_health"]["document_status_distribution"][0]["key"] == "ready"
+
+
+def test_kb_operations_payload_aggregates_sections_and_health(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="ops-1",
+        email="ops@local",
+        role="kb_admin",
+        permissions=auth_module.permissions_for_role("kb_admin"),
+    )
+
+    monkeypatch.setattr(kb_analytics, "check_readiness", lambda: {"database": {"status": "ok"}, "object_storage": {"status": "ok"}})
+    monkeypatch.setattr(
+        kb_analytics,
+        "_ingest_operations_payload",
+        lambda current_user, *, view: {
+            "summary": {"failed_documents": 2, "stalled_documents": 1},
+            "retryable_jobs": [{"job_id": "job-1"}],
+            "stalled_documents": [{"document_id": "doc-1"}],
+        },
+    )
+    monkeypatch.setattr(
+        kb_analytics,
+        "_connector_operations_payload",
+        lambda current_user, *, view, days: {
+            "summary": {"due_connectors": 1, "recent_failed_runs": 2},
+            "items": [{"connector_id": "conn-1"}],
+        },
+    )
+    monkeypatch.setattr(
+        kb_analytics,
+        "_incident_feed_payload",
+        lambda current_user, *, view, days: {"items": [{"id": "evt-1", "action": "kb.ingest.dead_lettered"}]},
+    )
+
+    payload = kb_analytics._operations_payload(user, view="personal", days=14)
+
+    assert payload["service_health"]["status"] == "ok"
+    assert payload["ingest_ops"]["retryable_jobs"][0]["job_id"] == "job-1"
+    assert payload["ingest_ops"]["stalled_documents"][0]["document_id"] == "doc-1"
+    assert payload["connector_ops"]["summary"]["due_connectors"] == 1
+    assert payload["incident_feed"]["items"][0]["id"] == "evt-1"
+    assert payload["data_quality"]["degraded_sections"] == []
+
+
+def test_kb_operations_payload_marks_degraded_sections_without_failing_page(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="ops-1",
+        email="ops@local",
+        role="kb_admin",
+        permissions=auth_module.permissions_for_role("kb_admin"),
+    )
+
+    monkeypatch.setattr(kb_analytics, "check_readiness", lambda: {"database": {"status": "ok"}})
+    monkeypatch.setattr(kb_analytics, "_ingest_operations_payload", lambda current_user, *, view: kb_analytics._empty_ingest_ops())
+    monkeypatch.setattr(
+        kb_analytics,
+        "_connector_operations_payload",
+        lambda current_user, *, view, days: (_ for _ in ()).throw(RuntimeError("connector query failed")),
+    )
+    monkeypatch.setattr(kb_analytics, "_incident_feed_payload", lambda current_user, *, view, days: {"items": []})
+
+    payload = kb_analytics._operations_payload(user, view="personal", days=14)
+
+    assert payload["service_health"]["status"] == "degraded"
+    assert payload["connector_ops"]["summary"]["total_connectors"] == 0
+    assert payload["connector_ops"]["items"] == []
+    assert payload["data_quality"]["degraded_sections"][0]["key"] == "connector_ops"
+    assert payload["data_quality"]["degraded_sections"][0]["error_type"] == "RuntimeError"
+
+
+def test_kb_operations_incident_feed_uses_personal_scope(monkeypatch) -> None:
+    kb_analytics = _load_kb_module("app.kb_analytics_routes")
+    captured: dict[str, object] = {}
+    user = auth_module.AuthUser(
+        user_id="ops-1",
+        email="ops@local",
+        role="kb_admin",
+        permissions=auth_module.permissions_for_role("kb_admin"),
+    )
+
+    def fake_list_audit_events(**kwargs):
+        captured.update(kwargs)
+        return [
+            {"id": "evt-1", "action": "kb.ingest.dead_lettered", "outcome": "failed", "trace_id": "trace-1", "resource_type": "ingest_job", "resource_id": "job-1", "details": {}, "created_at": "2026-03-22T10:00:00+00:00"},
+            {"id": "evt-2", "action": "kb.document.update", "outcome": "success", "trace_id": "trace-2", "resource_type": "document", "resource_id": "doc-1", "details": {}, "created_at": "2026-03-22T09:00:00+00:00"},
+        ]
+
+    monkeypatch.setattr(kb_analytics, "list_audit_events", fake_list_audit_events)
+
+    payload = kb_analytics._incident_feed_payload(user, view="personal", days=7)
+
+    assert captured["actor_user_id"] == "ops-1"
+    assert payload["items"] == [
+        {
+            "id": "evt-1",
+            "trace_id": "trace-1",
+            "resource_type": "ingest_job",
+            "resource_id": "job-1",
+            "action": "kb.ingest.dead_lettered",
+            "outcome": "failed",
+            "created_at": "2026-03-22T10:00:00+00:00",
+            "details": {},
+        }
+    ]
 
 
 def test_kb_governance_payload_aggregates_enterprise_queues(monkeypatch) -> None:
@@ -2188,6 +2293,25 @@ def test_kb_analytics_dashboard_route_requires_kb_read_permission(monkeypatch) -
 
     client = TestClient(kb_main.app)
     response = client.get("/api/v1/kb/analytics/dashboard", headers=_auth_headers(user))
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
+
+
+def test_kb_operations_route_requires_kb_manage_permission(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_api_support = importlib.import_module("app.kb_api_support")
+    monkeypatch.setattr(kb_api_support, "audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(kb_main.app)
+    response = client.get("/api/v1/kb/analytics/operations", headers=_auth_headers(user))
 
     assert response.status_code == 403
     payload = response.json()

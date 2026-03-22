@@ -374,6 +374,17 @@ class KBAnalyticsDashboardResponse(BaseModel):
     data_quality: dict[str, Any] = Field(description="Unsupported or degraded KB analytics fields. Empty arrays mean full support for the current payload.")
 
 
+class KBAnalyticsOperationsResponse(BaseModel):
+    view: str = Field(description="Operations scope. personal only includes the caller's KB resources; admin includes all visible resources.")
+    days: int = Field(description="Rolling window in days for recent connector failures and incident feeds.", ge=1, le=90)
+    generated_at: datetime = Field(description="Payload generation timestamp in UTC.")
+    service_health: dict[str, Any] = Field(description="KB dependency health checks with an aggregated status.")
+    ingest_ops: dict[str, Any] = Field(description="Ingest operations summary, retryable jobs, and stalled documents.")
+    connector_ops: dict[str, Any] = Field(description="Connector scheduling and latest run health summary.")
+    incident_feed: dict[str, Any] = Field(description="Recent KB operations incidents, failures, and retry events.")
+    data_quality: dict[str, Any] = Field(description="Unsupported or degraded operations fields. Empty arrays mean full support for the current payload.")
+
+
 class KBGovernanceDocumentItem(BaseModel):
     document_id: str = Field(description="Document identifier.")
     base_id: str = Field(description="Knowledge base identifier.")

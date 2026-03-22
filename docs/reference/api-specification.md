@@ -674,6 +674,52 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/dashboard?view=personal&d
   -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
+#### `GET /api/v1/kb/analytics/operations`
+
+用途：
+
+- 为 `/workspace/kb/operations` 知识库运维总览页提供聚合读模型
+- 聚合 KB 依赖健康、ingest 风险队列、connector 运行看板与近期运维事故流
+
+权限：
+
+- 页面与接口默认需要 `kb.manage`
+- `view=admin` 仅允许 `kb.manage` 或平台管理员查看团队范围
+- `view=personal` 返回当前用户范围内可见知识库的数据
+
+Query 参数：
+
+- `view=personal|admin`
+- `days=1..90`
+
+返回顶层字段：
+
+- `view`
+- `days`
+- `generated_at`
+- `service_health`
+- `ingest_ops`
+- `connector_ops`
+- `incident_feed`
+- `data_quality`
+
+字段说明：
+
+- `service_health.status`：聚合状态，取值 `ok | degraded | failed`
+- `service_health.checks`：透传 `readyz` 依赖检查项，包含 `database`、`storage`、`vector_store` 等
+- `ingest_ops.retryable_jobs`：仅包含当前可人工重试的 `failed | dead_letter` ingest job
+- `ingest_ops.stalled_documents`：超过阈值仍未推进的文档及其最近 job 状态
+- `connector_ops.items`：连接器当前运行视图，包含 `next_run_at`、`last_run_outcome`、`last_error`
+- `incident_feed.items`：失败、重试、降级相关审计事件，包含 `trace_id`
+- `data_quality.degraded_sections`：当某个区块上游暂时不可用时记录降级原因
+
+#### 请求示例
+
+```bash
+curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&days=14" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
 ### 指标说明
 
 - `knowledge_bases_created`：按知识库创建时间统计
