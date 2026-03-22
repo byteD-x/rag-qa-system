@@ -53,6 +53,54 @@
           </el-tag>
         </div>
 
+        <section class="smart-ask-panel">
+          <div class="smart-ask-panel__header">
+            <div>
+              <h3>智能提问</h3>
+              <p>围绕当前版本、版本比较和截图焦点，直接带上下文进入问答。</p>
+            </div>
+            <el-tag type="primary" effect="plain">{{ activeQuestionContextV2 }}</el-tag>
+          </div>
+          <div class="smart-ask-panel__tags">
+            <el-tag size="small" effect="plain" type="success">
+              当前版本 {{ document.version_label || `v${document.version_number || 1}` }}
+            </el-tag>
+            <el-tag v-if="compareVersionReady" size="small" effect="plain" type="warning">
+              比较 {{ selectedVersionRecord?.version_label || `v${selectedVersionRecord?.version_number || 1}` }}
+            </el-tag>
+            <el-tag v-if="activeVisualFocusHint?.display_text" size="small" effect="plain" type="info">
+              截图焦点 {{ activeVisualFocusHint.display_text }}
+            </el-tag>
+          </div>
+          <el-input
+            v-model="questionDraft"
+            type="textarea"
+            :rows="3"
+            resize="none"
+            :placeholder="smartQuestionPlaceholderV2"
+          />
+          <div class="smart-ask-panel__presets">
+            <button type="button" class="smart-ask-preset" @click="applyQuestionTemplate('请总结这个版本的关键变化和影响。')">
+              总结关键变化
+            </button>
+            <button type="button" class="smart-ask-preset" @click="applyQuestionTemplate('这个版本中最容易误解的地方是什么？')">
+              标出易误解点
+            </button>
+            <button type="button" class="smart-ask-preset" @click="applyQuestionTemplate('如果我要按这个文档执行，应该特别注意哪些前置条件？')">
+              提醒执行前置条件
+            </button>
+          </div>
+          <div class="smart-ask-panel__actions">
+            <el-button type="primary" @click="goChat()">按当前版本提问</el-button>
+            <el-button plain :disabled="!compareVersionReady" @click="goCompareChat(String(selectedVersionRecord?.id || ''))">
+              比较当前与所选版本
+            </el-button>
+            <el-button plain :disabled="!activeVisualFocusHint" @click="goFocusedVisualChat()">
+              聚焦当前截图区域
+            </el-button>
+          </div>
+        </section>
+
         <el-collapse v-model="activeCollapse">
           <el-collapse-item name="versions" title="版本治理">
             <template #title>
@@ -127,6 +175,47 @@
                 </el-tag>
               </div>
               <el-tabs v-model="versionInspectorTab">
+                <el-tab-pane label="快速摘要" name="summary">
+                  <EnhancedEmpty
+                    v-if="!selectedVersionSummary.items.length && !selectedVersionSummary.fallback_excerpt"
+                    variant="document"
+                    title="暂无摘要"
+                    description="当前版本还没有可提炼的正文内容，请切换到完整内容查看原文。"
+                    class="chunk-empty"
+                  />
+                  <div v-else class="version-summary">
+                    <div class="version-summary__meta">
+                      <strong>快速摘要</strong>
+                      <span>
+                        已提炼 {{ selectedVersionSummary.items.length }} / {{ selectedVersionSummary.total_section_count || selectedVersionSummary.items.length }} 个章节
+                      </span>
+                    </div>
+                    <article
+                      v-for="item in selectedVersionSummary.items"
+                      :key="item.key"
+                      class="version-summary-card"
+                    >
+                      <div class="version-summary-card__header">
+                        <strong>{{ item.title }}</strong>
+                        <span>{{ item.char_count }} 字</span>
+                      </div>
+                      <p>{{ item.excerpt }}</p>
+                    </article>
+                    <article
+                      v-if="selectedVersionSummary.fallback_excerpt"
+                      class="version-summary-card version-summary-card--fallback"
+                    >
+                      <div class="version-summary-card__header">
+                        <strong>全文摘要</strong>
+                        <span>自动回退</span>
+                      </div>
+                      <p>{{ selectedVersionSummary.fallback_excerpt }}</p>
+                    </article>
+                    <p v-if="selectedVersionSummary.hidden_section_count > 0" class="version-summary__hint">
+                      还有 {{ selectedVersionSummary.hidden_section_count }} 个章节未展开，可切换到“版本内容”查看完整文本。
+                    </p>
+                  </div>
+                </el-tab-pane>
                 <el-tab-pane label="版本内容" name="content">
                   <div class="version-sections">
                     <article v-for="section in selectedVersionContent.sections || []" :key="`${section.section_index}:${section.section_title}`" class="version-section">
@@ -224,6 +313,76 @@
                 </div>
               </article>
             </div>
+            <div v-if="compareVersionReady" class="visual-compare-panel">
+              <div class="visual-compare-panel__header">
+                <div>
+                  <strong>跨版本截图区域差异高亮</strong>
+                  <p>
+                    当前 {{ document.version_label || '当前版本' }} vs {{ selectedVersionRecord?.version_label || '所选版本' }}
+                  </p>
+                </div>
+                <el-tag size="small" effect="plain" :type="compareVisualMatch.strategy === 'region' ? 'success' : compareVisualMatch.strategy === 'asset' ? 'warning' : 'info'">
+                  {{ compareVisualModeLabel }}
+                </el-tag>
+              </div>
+              <EnhancedEmpty
+                v-if="!focusedVisualAsset"
+                variant="document"
+                title="请选择要对比的截图区域"
+                description="先点击当前版本中的截图或红框区域，系统会自动尝试在所选历史版本中匹配对应区域并生成差异高亮。"
+                class="chunk-empty"
+              />
+              <div v-else-if="compareVisualBundleLoading || compareVisualDiffLoading" class="visual-compare-panel__loading">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                <span>正在生成跨版本截图差异...</span>
+              </div>
+              <EnhancedEmpty
+                v-else-if="compareVisualDiffError"
+                variant="document"
+                title="差异高亮生成失败"
+                :description="compareVisualDiffError"
+                class="chunk-empty"
+              />
+              <EnhancedEmpty
+                v-else-if="!compareVisualAsset"
+                variant="document"
+                title="未找到可对照的历史截图"
+                description="当前截图区域在所选版本中没有找到足够接近的页面或区域，建议切换版本后重试。"
+                class="chunk-empty"
+              />
+              <template v-else>
+                <div class="visual-compare-panel__summary">
+                  <span>当前区域：{{ focusedVisualRegion?.region_label || `第 ${focusedVisualAsset.page_number || '-'} 页截图` }}</span>
+                  <span>对照区域：{{ compareVisualRegion?.region_label || `第 ${compareVisualAsset.page_number || '-'} 页截图` }}</span>
+                  <span>历史版本区域数：{{ compareVisualRegionsFor(compareVisualAsset).length }}</span>
+                  <span>变化像素：{{ (visualDiffState.changedRatio * 100).toFixed(1) }}%</span>
+                </div>
+                <div class="visual-compare-grid">
+                  <article class="visual-compare-card">
+                    <div class="visual-compare-card__meta">
+                      <strong>{{ document.version_label || '当前版本' }}</strong>
+                      <span>{{ focusedVisualRegion?.region_label || '当前截图区域' }}</span>
+                    </div>
+                    <canvas ref="currentVisualCompareCanvas" class="visual-compare-canvas"></canvas>
+                  </article>
+                  <article class="visual-compare-card">
+                    <div class="visual-compare-card__meta">
+                      <strong>{{ selectedVersionRecord?.version_label || '对照版本' }}</strong>
+                      <span>{{ compareVisualRegion?.region_label || '自动回退到同页截图' }}</span>
+                    </div>
+                    <canvas ref="compareVisualCompareCanvas" class="visual-compare-canvas"></canvas>
+                  </article>
+                  <article class="visual-compare-card visual-compare-card--diff">
+                    <div class="visual-compare-card__meta">
+                      <strong>变化热区</strong>
+                      <span v-if="visualDiffState.bounds">橙框代表主要变化区域</span>
+                      <span v-else>未检测到明显像素变化</span>
+                    </div>
+                    <canvas ref="visualDiffCanvas" class="visual-compare-canvas"></canvas>
+                  </article>
+                </div>
+              </template>
+            </div>
           </el-collapse-item>
 
           <el-collapse-item name="events" title="处理事件">
@@ -317,6 +476,9 @@ import {
   updateKBDocument
 } from '@/api/kb';
 import { buildKbChatRouteQuery } from '@/views/chat/chatRoutePresets';
+import { buildCompareVersionsFocus, buildSingleVersionFocus, buildVisualFocus } from '@/views/kb/kbChatFocus';
+import { computePixelDiffMask, findBestMatchingCompareVisual, resolveVisualRegionBox } from '@/views/kb/kbVisualCompare';
+import { buildVersionSummary } from '@/views/kb/kbVersionSummary';
 import { formatBytes } from '@/utils/format';
 import { statusMeta } from '@/utils/status';
 
@@ -328,17 +490,33 @@ const document = ref<any | null>(null);
 const events = ref<any[]>([]);
 const visualAssets = ref<any[]>([]);
 const visualRegionsByAsset = ref<Record<string, any[]>>({});
+const compareVisualAssets = ref<any[]>([]);
+const compareVisualRegionsByAsset = ref<Record<string, any[]>>({});
+const compareVisualBundleLoading = ref(false);
+const compareVisualDiffLoading = ref(false);
+const compareVisualDiffError = ref('');
 const focusedVisualAssetId = ref('');
 const focusedVisualRegionId = ref('');
 const versionHistory = ref<any[]>([]);
 const selectedVersionId = ref('');
 const selectedVersionContent = ref<any | null>(null);
 const selectedVersionDiff = ref<any | null>(null);
-const versionInspectorTab = ref<'content' | 'diff'>('content');
+const versionInspectorTab = ref<'summary' | 'content' | 'diff'>('content');
+const questionDraft = ref('');
 const retryingJob = ref(false);
 const editDrawerVisible = ref(false);
 const activeCollapse = ref<string[]>(['versions', 'chunks', 'visuals']);
 const versionStatusOptions = ['active', 'draft', 'superseded', 'archived'];
+const currentVisualCompareCanvas = ref<HTMLCanvasElement | null>(null);
+const compareVisualCompareCanvas = ref<HTMLCanvasElement | null>(null);
+const visualDiffCanvas = ref<HTMLCanvasElement | null>(null);
+const visualDiffState = reactive({
+  changedRatio: 0,
+  changedPixels: 0,
+  totalPixels: 0,
+  bounds: null as { left: number; top: number; right: number; bottom: number } | null
+});
+const visualBundleCache = new Map<string, { assets: any[]; regionsByAsset: Record<string, any[]> }>();
 
 const documentForm = reactive({
   file_name: '',
@@ -356,6 +534,113 @@ const documentForm = reactive({
 const sectionPreview = computed(() => document.value?.stats_json?.section_preview || []);
 const canWrite = computed(() => authStore.hasPermission('kb.write'));
 const canManage = computed(() => authStore.hasPermission('kb.manage'));
+const selectedVersionSummary = computed(() => buildVersionSummary(selectedVersionContent.value, {
+  maxItems: 5,
+  maxChars: 180
+}));
+const selectedVersionRecord = computed(() => {
+  const selectedId = String(selectedVersionId.value || document.value?.id || '');
+  return versionHistory.value.find((item: any) => String(item.id) === selectedId) || document.value || null;
+});
+const compareVersionReady = computed(() => Boolean(document.value?.id && selectedVersionRecord.value?.id && String(selectedVersionRecord.value.id) !== String(document.value.id)));
+const focusedVisualAsset = computed(() => visualAssets.value.find((item: any) => String(item.asset_id) === focusedVisualAssetId.value) || null);
+const focusedVisualRegion = computed(() => {
+  if (!focusedVisualAsset.value) {
+    return null;
+  }
+  return visualRegionsFor(focusedVisualAsset.value).find((item: any) => String(item.region_id) === focusedVisualRegionId.value) || null;
+});
+const focusedVisualDocumentRecord = computed(() => {
+  const assetDocumentId = String(focusedVisualAsset.value?.document_id || '');
+  if (!assetDocumentId) {
+    return document.value || null;
+  }
+  return (
+    versionHistory.value.find((item: any) => String(item.id) === assetDocumentId)
+    || (String(document.value?.id || '') === assetDocumentId ? document.value : null)
+    || document.value
+    || null
+  );
+});
+const activeVisualFocusHint = computed(() => {
+  const asset = focusedVisualAsset.value;
+  if (!document.value || !asset) {
+    return undefined;
+  }
+  return buildVisualFocus({
+    documentId: String(asset.document_id || focusedVisualDocumentRecord.value?.id || document.value.id || ''),
+    assetId: String(asset.asset_id || ''),
+    regionId: String(focusedVisualRegion.value?.region_id || ''),
+    regionLabel: String(focusedVisualRegion.value?.region_label || ''),
+    pageNumber: Number(focusedVisualRegion.value?.page_number || asset.page_number || 0) || undefined,
+    versionLabel: String(focusedVisualDocumentRecord.value?.version_label || document.value.version_label || '')
+  });
+});
+const compareVisualReady = computed(() => Boolean(compareVersionReady.value && activeVisualFocusHint.value?.asset_id));
+const visualCompareEligible = computed(() => Boolean(compareVersionReady.value && focusedVisualAsset.value));
+const compareVisualMatch = computed(() => findBestMatchingCompareVisual({
+  sourceAsset: focusedVisualAsset.value,
+  sourceRegion: focusedVisualRegion.value,
+  compareAssets: compareVisualAssets.value,
+  compareRegionsByAsset: compareVisualRegionsByAsset.value
+}));
+const compareVisualAsset = computed(() => compareVisualMatch.value.asset);
+const compareVisualRegion = computed(() => compareVisualMatch.value.region);
+const compareVisualModeLabel = computed(() => {
+  if (compareVisualMatch.value.strategy === 'region') {
+    return '自动匹配对应区域';
+  }
+  if (compareVisualMatch.value.strategy === 'asset') {
+    return '按同页截图区域回退';
+  }
+  return '未找到对照截图';
+});
+const smartQuestionPlaceholder = computed(() => {
+  if (activeVisualFocusHint.value?.display_text) {
+    return `补充你想问的具体问题，系统会自动带上 ${activeVisualFocusHint.value.display_text} 的截图焦点。`;
+  }
+  if (compareVersionReady.value) {
+    return '补充你想比较的问题，例如：这个版本相对当前版本改了什么，影响哪些流程？';
+  }
+  return '补充你想问的具体问题；留空时会用系统预设问题作为保底。';
+});
+const activeQuestionContext = computed(() => {
+  if (activeVisualFocusHint.value?.display_text) {
+    return `截图焦点：${activeVisualFocusHint.value.display_text}`;
+  }
+  if (compareVersionReady.value) {
+    return `版本比较：${String(document.value?.version_label || '当前版本')} vs ${String(selectedVersionRecord.value?.version_label || '所选版本')}`;
+  }
+  return `当前版本：${String(selectedVersionRecord.value?.version_label || document.value?.version_label || '未命名版本')}`;
+});
+
+const smartQuestionPlaceholderV2 = computed(() => {
+  if (compareVisualReady.value && activeVisualFocusHint.value?.display_text) {
+    return `补充你想比较的截图变化，例如：当前版本与所选版本在 ${activeVisualFocusHint.value.display_text} 里改了什么？`;
+  }
+  if (activeVisualFocusHint.value?.display_text) {
+    return `补充你想问的具体问题，系统会自动带上 ${activeVisualFocusHint.value.display_text} 的截图焦点。`;
+  }
+  if (compareVersionReady.value) {
+    return '补充你想比较的问题，例如：这个版本相对当前版本改了什么，影响哪些流程？';
+  }
+  return '补充你想问的具体问题；留空时会用系统预设问题作为保底。';
+});
+const activeQuestionContextV2 = computed(() => {
+  if (compareVisualReady.value) {
+    return `截图版本比较：${String(document.value?.version_label || '当前版本')} vs ${String(selectedVersionRecord.value?.version_label || '所选版本')} / ${String(activeVisualFocusHint.value?.region_label || activeVisualFocusHint.value?.display_text || '当前截图区域')}`;
+  }
+  if (activeVisualFocusHint.value?.display_text) {
+    return `截图焦点：${activeVisualFocusHint.value.display_text}`;
+  }
+  if (compareVersionReady.value) {
+    return `版本比较：${String(document.value?.version_label || '当前版本')} vs ${String(selectedVersionRecord.value?.version_label || '所选版本')}`;
+  }
+  return `当前版本：${String(selectedVersionRecord.value?.version_label || document.value?.version_label || '未命名版本')}`;
+});
+
+void smartQuestionPlaceholder;
+void activeQuestionContext;
 
 const syncDocumentForm = () => {
   documentForm.file_name = String(document.value?.file_name || '');
@@ -370,9 +655,35 @@ const syncDocumentForm = () => {
   documentForm.supersedes_document_id = String(document.value?.supersedes_document_id || '');
 };
 
+const clearCanvas = (canvas: HTMLCanvasElement | null) => {
+  if (!canvas) {
+    return;
+  }
+  const context = canvas.getContext('2d');
+  canvas.width = 1;
+  canvas.height = 1;
+  context?.clearRect(0, 0, 1, 1);
+};
+
+const resetVisualDiffState = () => {
+  visualDiffState.changedRatio = 0;
+  visualDiffState.changedPixels = 0;
+  visualDiffState.totalPixels = 0;
+  visualDiffState.bounds = null;
+  compareVisualDiffError.value = '';
+  clearCanvas(currentVisualCompareCanvas.value);
+  clearCanvas(compareVisualCompareCanvas.value);
+  clearCanvas(visualDiffCanvas.value);
+};
+
 const visualRegionsFor = (asset: any) => {
   const assetId = String(asset?.asset_id || '');
   return visualRegionsByAsset.value[assetId] || [];
+};
+
+const compareVisualRegionsFor = (asset: any) => {
+  const assetId = String(asset?.asset_id || '');
+  return compareVisualRegionsByAsset.value[assetId] || [];
 };
 
 const visualAssetDomId = (assetId: string) => `visual-asset-${String(assetId || '').trim()}`;
@@ -450,6 +761,7 @@ const focusVisualAsset = async (assetId: string) => {
   focusedVisualRegionId.value = '';
   await updateVisualFocusQuery(normalizedAssetId);
   await scrollToVisualAnchor();
+  await renderCrossVersionVisualDiff();
 };
 
 const focusVisualRegion = async (assetId: string, regionId: string) => {
@@ -462,13 +774,13 @@ const focusVisualRegion = async (assetId: string, regionId: string) => {
   focusedVisualRegionId.value = normalizedRegionId;
   await updateVisualFocusQuery(normalizedAssetId, normalizedRegionId);
   await scrollToVisualAnchor();
+  await renderCrossVersionVisualDiff();
 };
 
-const loadVisualRegions = async (assets: any[]) => {
+const buildVisualRegionsMap = async (assets: any[]) => {
   const targets = assets.filter((item: any) => String(item?.asset_id || '').trim());
   if (!targets.length) {
-    visualRegionsByAsset.value = {};
-    return;
+    return {};
   }
   const results: any[] = await Promise.all(
     targets.map((asset: any) =>
@@ -479,7 +791,175 @@ const loadVisualRegions = async (assets: any[]) => {
   targets.forEach((asset: any, index: number) => {
     nextMap[String(asset.asset_id)] = (results[index]?.items || []) as any[];
   });
-  visualRegionsByAsset.value = nextMap;
+  return nextMap;
+};
+
+const loadVisualRegions = async (assets: any[]) => {
+  visualRegionsByAsset.value = await buildVisualRegionsMap(assets);
+};
+
+const loadVisualBundleForDocument = async (documentId: string) => {
+  const normalizedDocumentId = String(documentId || '').trim();
+  if (!normalizedDocumentId) {
+    return { assets: [], regionsByAsset: {} };
+  }
+  const cached = visualBundleCache.get(normalizedDocumentId);
+  if (cached) {
+    return cached;
+  }
+  const visualResult: any = await getKBDocumentVisualAssets(normalizedDocumentId);
+  const assets = (visualResult?.items || []) as any[];
+  const regionsByAsset = await buildVisualRegionsMap(assets);
+  const bundle = { assets, regionsByAsset };
+  visualBundleCache.set(normalizedDocumentId, bundle);
+  return bundle;
+};
+
+const loadCompareVisualBundle = async (documentId: string) => {
+  const normalizedDocumentId = String(documentId || '').trim();
+  if (!normalizedDocumentId || normalizedDocumentId === String(document.value?.id || '')) {
+    compareVisualAssets.value = [];
+    compareVisualRegionsByAsset.value = {};
+    resetVisualDiffState();
+    return;
+  }
+  compareVisualBundleLoading.value = true;
+  try {
+    const bundle = await loadVisualBundleForDocument(normalizedDocumentId);
+    compareVisualAssets.value = bundle.assets;
+    compareVisualRegionsByAsset.value = bundle.regionsByAsset;
+  } finally {
+    compareVisualBundleLoading.value = false;
+  }
+};
+
+const resolveCropRect = (image: HTMLImageElement, bbox: number[]) => {
+  const safeBox = (bbox.length === 4 ? bbox : [0, 0, 1, 1]) as [number, number, number, number];
+  const imageWidth = Math.max(1, Number(image.naturalWidth || image.width || 1));
+  const imageHeight = Math.max(1, Number(image.naturalHeight || image.height || 1));
+  const sourceX = Math.floor(safeBox[0] * imageWidth);
+  const sourceY = Math.floor(safeBox[1] * imageHeight);
+  const sourceWidth = Math.max(1, Math.floor((safeBox[2] - safeBox[0]) * imageWidth));
+  const sourceHeight = Math.max(1, Math.floor((safeBox[3] - safeBox[1]) * imageHeight));
+  return {
+    x: sourceX,
+    y: sourceY,
+    width: Math.min(sourceWidth, imageWidth - sourceX),
+    height: Math.min(sourceHeight, imageHeight - sourceY)
+  };
+};
+
+const resolveCompareCanvasSize = (leftRect: { width: number; height: number }, rightRect: { width: number; height: number }) => {
+  const aspectCandidates = [
+    leftRect.width / Math.max(1, leftRect.height),
+    rightRect.width / Math.max(1, rightRect.height)
+  ].filter((value) => Number.isFinite(value) && value > 0);
+  const aspect = aspectCandidates.length ? aspectCandidates.reduce((sum, value) => sum + value, 0) / aspectCandidates.length : (4 / 3);
+  let width = 320;
+  let height = Math.round(width / aspect);
+  if (height > 220) {
+    height = 220;
+    width = Math.round(height * aspect);
+  }
+  return {
+    width: Math.max(140, width),
+    height: Math.max(96, height)
+  };
+};
+
+const drawCropPreview = (
+  canvas: HTMLCanvasElement | null,
+  image: HTMLImageElement,
+  cropRect: { x: number; y: number; width: number; height: number },
+  size: { width: number; height: number }
+) => {
+  if (!canvas) {
+    return null;
+  }
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return null;
+  }
+  canvas.width = size.width;
+  canvas.height = size.height;
+  context.clearRect(0, 0, size.width, size.height);
+  context.drawImage(image, cropRect.x, cropRect.y, cropRect.width, cropRect.height, 0, 0, size.width, size.height);
+  return context;
+};
+
+const drawDiffBounds = (context: CanvasRenderingContext2D | null, bounds: { left: number; top: number; right: number; bottom: number } | null) => {
+  if (!context || !bounds) {
+    return;
+  }
+  const width = Math.max(1, bounds.right - bounds.left);
+  const height = Math.max(1, bounds.bottom - bounds.top);
+  context.save();
+  context.lineWidth = 2;
+  context.strokeStyle = '#f97316';
+  context.setLineDash([6, 4]);
+  context.strokeRect(bounds.left, bounds.top, width, height);
+  context.restore();
+};
+
+const loadImageElement = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve(image);
+  image.onerror = () => reject(new Error(`failed to load image: ${src}`));
+  image.src = src;
+});
+
+const renderCrossVersionVisualDiff = async () => {
+  resetVisualDiffState();
+  if (!visualCompareEligible.value || !focusedVisualAsset.value || !compareVisualAsset.value) {
+    return;
+  }
+  const currentSource = String(focusedVisualAsset.value.thumbnail_url || '');
+  const compareSource = String(compareVisualAsset.value.thumbnail_url || '');
+  if (!currentSource || !compareSource) {
+    compareVisualDiffError.value = '当前版本或对照版本缺少截图预览，无法生成差异高亮。';
+    return;
+  }
+  compareVisualDiffLoading.value = true;
+  try {
+    await nextTick();
+    const [currentImage, compareImage] = await Promise.all([
+      loadImageElement(currentSource),
+      loadImageElement(compareSource)
+    ]);
+    const currentBox = resolveVisualRegionBox(focusedVisualRegion.value);
+    const compareBox = resolveVisualRegionBox(compareVisualRegion.value);
+    const fallbackBox = currentBox.length === 4 ? currentBox : [];
+    const currentCrop = resolveCropRect(currentImage, currentBox);
+    const compareCrop = resolveCropRect(compareImage, compareBox.length === 4 ? compareBox : fallbackBox);
+    const canvasSize = resolveCompareCanvasSize(currentCrop, compareCrop);
+    const currentContext = drawCropPreview(currentVisualCompareCanvas.value, currentImage, currentCrop, canvasSize);
+    const compareContext = drawCropPreview(compareVisualCompareCanvas.value, compareImage, compareCrop, canvasSize);
+    if (!currentContext || !compareContext || !visualDiffCanvas.value) {
+      return;
+    }
+    const leftImageData = currentContext.getImageData(0, 0, canvasSize.width, canvasSize.height);
+    const rightImageData = compareContext.getImageData(0, 0, canvasSize.width, canvasSize.height);
+    const diffResult = computePixelDiffMask(leftImageData.data, rightImageData.data, canvasSize.width, canvasSize.height);
+    visualDiffState.changedRatio = diffResult.changed_ratio;
+    visualDiffState.changedPixels = diffResult.changed_pixels;
+    visualDiffState.totalPixels = diffResult.total_pixels;
+    visualDiffState.bounds = diffResult.bounds;
+
+    const diffContext = visualDiffCanvas.value.getContext('2d');
+    if (!diffContext) {
+      return;
+    }
+    visualDiffCanvas.value.width = canvasSize.width;
+    visualDiffCanvas.value.height = canvasSize.height;
+    diffContext.putImageData(new ImageData(new Uint8ClampedArray(diffResult.mask), canvasSize.width, canvasSize.height), 0, 0);
+    drawDiffBounds(currentContext, diffResult.bounds);
+    drawDiffBounds(compareContext, diffResult.bounds);
+    drawDiffBounds(diffContext, diffResult.bounds);
+  } catch (error) {
+    compareVisualDiffError.value = '跨版本截图对比失败，请稍后重试。';
+  } finally {
+    compareVisualDiffLoading.value = false;
+  }
 };
 
 const load = async () => {
@@ -493,6 +973,10 @@ const load = async () => {
   events.value = eventsResult.items || [];
   visualAssets.value = visualResult.items || [];
   await loadVisualRegions(visualAssets.value);
+  visualBundleCache.set(String(document.value.id || ''), {
+    assets: visualAssets.value,
+    regionsByAsset: visualRegionsByAsset.value
+  });
   versionHistory.value = versionsResult.items || [];
   const defaultVersion = versionHistory.value.find((item: any) => String(item.id) === String(document.value?.id || '')) || versionHistory.value[0];
   if (defaultVersion) {
@@ -512,29 +996,87 @@ const inspectVersion = async (item: any, openDiff: boolean = false) => {
   ]);
   selectedVersionContent.value = contentResult.document || null;
   selectedVersionDiff.value = diffResult || null;
+  await loadCompareVisualBundle(String(item.id || ''));
+  await renderCrossVersionVisualDiff();
+};
+
+const resolveQuestion = (fallback: string) => questionDraft.value.trim() || fallback;
+
+const openChatWithQuery = (query: Record<string, string>) => {
+  router.push({
+    path: '/workspace/chat',
+    query
+  });
 };
 
 const goChat = (documentId: string = '') => {
   if (!document.value) return;
-  router.push({
-    path: '/workspace/chat',
-    query: buildKbChatRouteQuery({
-      baseId: String(document.value.base_id || ''),
-      documentId: String(documentId || document.value.id || '')
+  const target = versionHistory.value.find((item: any) => String(item.id) === String(documentId || document.value.id || '')) || document.value;
+  openChatWithQuery(buildKbChatRouteQuery({
+    baseId: String(document.value.base_id || ''),
+    documentId: String(target.id || document.value.id || ''),
+    question: resolveQuestion('请基于当前版本回答我的问题。'),
+    focusHint: buildSingleVersionFocus({
+      documentId: String(target.id || document.value.id || ''),
+      versionLabel: String(target.version_label || ''),
+      versionFamilyKey: String(target.version_family_key || document.value.version_family_key || ''),
+      fileName: String(target.file_name || document.value.file_name || '')
     })
-  });
+  }));
+};
+
+const goFocusedVisualChat = () => {
+  if (!document.value || !activeVisualFocusHint.value) return;
+  openChatWithQuery(buildKbChatRouteQuery({
+    baseId: String(document.value.base_id || ''),
+    documentId: String(activeVisualFocusHint.value.primary_document_id || document.value.id || ''),
+    question: resolveQuestion('请结合当前截图焦点回答我的问题。'),
+    focusHint: activeVisualFocusHint.value
+  }));
+};
+
+const applyQuestionTemplate = (template: string) => {
+  questionDraft.value = template;
 };
 
 const goCompareChat = (compareDocumentId: string = '') => {
   if (!document.value) return;
-  router.push({
-    path: '/workspace/chat',
-    query: buildKbChatRouteQuery({
-      baseId: String(document.value.base_id || ''),
-      documentId: String(document.value.id || ''),
-      compareDocumentId
-    })
+  const compareTarget = versionHistory.value.find((item: any) => String(item.id) === String(compareDocumentId || selectedVersionRecord.value?.id || '')) || null;
+  if (!compareTarget || String(compareTarget.id) === String(document.value.id)) {
+    goChat(String(document.value.id || ''));
+    return;
+  }
+  const visualContext = activeVisualFocusHint.value;
+  const compareQuestion = resolveQuestion(
+    visualContext?.asset_id
+      ? `请先比较 ${String(document.value.version_label || '当前版本')} 与 ${String(compareTarget.version_label || '所选版本')} 在当前截图焦点上的变化，再回答我的问题。`
+      : `请先比较 ${String(document.value.version_label || '当前版本')} 与 ${String(compareTarget.version_label || '所选版本')} 的正文差异，再回答我的问题。`
+  );
+  const compareFocusHint = buildCompareVersionsFocus({
+    primaryDocumentId: String(document.value.id || ''),
+    compareDocumentId: String(compareTarget.id || ''),
+    primaryVersionLabel: String(document.value.version_label || ''),
+    compareVersionLabel: String(compareTarget.version_label || ''),
+    versionFamilyKey: String(document.value.version_family_key || compareTarget.version_family_key || ''),
+    assetId: String(visualContext?.asset_id || ''),
+    regionId: String(visualContext?.region_id || ''),
+    regionLabel: String(visualContext?.region_label || ''),
+    pageNumber: Number(visualContext?.page_number || 0) || undefined
   });
+  openChatWithQuery(buildKbChatRouteQuery(Object.assign({
+    baseId: String(document.value.base_id || ''),
+    documentId: String(document.value.id || ''),
+    compareDocumentId: String(compareTarget.id || ''),
+    question: resolveQuestion(`请先比较 ${String(document.value.version_label || '当前版本')} 与 ${String(compareTarget.version_label || '所选版本')} 的正文差异，再回答我的问题。`),
+    ...{},
+    focusHint: buildCompareVersionsFocus({
+      primaryDocumentId: String(document.value.id || ''),
+      compareDocumentId: String(compareTarget.id || ''),
+      primaryVersionLabel: String(document.value.version_label || ''),
+      compareVersionLabel: String(compareTarget.version_label || ''),
+      versionFamilyKey: String(document.value.version_family_key || compareTarget.version_family_key || '')
+    })
+  }, { question: compareQuestion, focusHint: compareFocusHint })));
 };
 
 const openEditDrawer = () => {
@@ -615,7 +1157,20 @@ const formatDateTime = (value: string | Date | null | undefined) => {
 };
 
 watch(
-  () => [route.query.assetId, route.query.regionId],
+  () => [
+    focusedVisualAssetId.value,
+    focusedVisualRegionId.value,
+    selectedVersionId.value,
+    compareVisualMatch.value.asset?.asset_id || '',
+    compareVisualMatch.value.region?.region_id || ''
+  ],
+  () => {
+    void renderCrossVersionVisualDiff();
+  }
+);
+
+watch(
+  () => [route.query.assetId, route.query.regionId, route.query.versionId],
   () => {
     void syncVisualFocusFromRoute();
   }
@@ -652,6 +1207,73 @@ onMounted(() => void load());
   align-items: center;
   padding: 12px 0;
   margin-bottom: 12px;
+}
+
+.smart-ask-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--border-color));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 36%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.smart-ask-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.smart-ask-panel__header h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.smart-ask-panel__header p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.smart-ask-panel__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.smart-ask-panel__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.smart-ask-preset {
+  padding: 8px 12px;
+  border: 1px solid #d9e5fb;
+  border-radius: 999px;
+  background: #fff;
+  color: #275dad;
+  font-size: 12px;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.smart-ask-preset:hover {
+  transform: translateY(-1px);
+  border-color: #8bb6ff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08);
+}
+
+.smart-ask-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .info-item {
@@ -774,6 +1396,57 @@ onMounted(() => void load());
   gap: 12px;
 }
 
+.version-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.version-summary__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.version-summary__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.version-summary-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+}
+
+.version-summary-card--fallback {
+  background: var(--bg-panel-muted);
+}
+
+.version-summary-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.version-summary-card__header span {
+  color: var(--text-secondary);
+}
+
+.version-summary-card p {
+  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.7;
+}
+
 .version-section {
   display: grid;
   gap: 8px;
@@ -891,5 +1564,84 @@ onMounted(() => void load());
 
 .visual-region-item strong {
   color: var(--text-primary);
+}
+
+.visual-compare-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--border-color));
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top right, rgba(249, 115, 22, 0.08), transparent 32%),
+    linear-gradient(180deg, #fffdf8 0%, #ffffff 100%);
+}
+
+.visual-compare-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.visual-compare-panel__header p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.visual-compare-panel__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.visual-compare-panel__loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  color: var(--text-secondary);
+}
+
+.visual-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.visual-compare-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+}
+
+.visual-compare-card--diff {
+  background: color-mix(in srgb, #fff7ed 60%, white);
+}
+
+.visual-compare-card__meta {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.visual-compare-card__meta strong {
+  color: var(--text-primary);
+}
+
+.visual-compare-canvas {
+  width: 100%;
+  min-height: 120px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: #0f172a;
 }
 </style>

@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, nextTick } from 'vue';
+import { onBeforeUnmount, onMounted, ref, nextTick, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Platform, ChatLineRound } from '@element-plus/icons-vue';
 
@@ -157,23 +157,27 @@ function openTraceDrawer(workflowInfo: any) {
   }
 }
 
-async function applyRoutePreset() {
+async function applyRoutePreset(): Promise<boolean> {
   const preset = resolveKbRoutePreset(route.query as Record<string, unknown>);
-  if (preset) {
-    chatStore.applyScope(preset.scope);
-    await chatStore.handleScopeModeChange();
-    if (preset.question && composerRef.value) {
-      composerRef.value.setQuestion(preset.question);
-    }
+  if (!preset) {
+    return false;
   }
+  chatStore.startDraftSession();
+  chatStore.applyScope(preset.scope);
+  chatStore.setFocusHint(preset.focusHint || {});
+  await chatStore.handleScopeModeChange();
+  if (preset.question && composerRef.value) {
+    composerRef.value.setQuestion(preset.question);
+  }
+  return true;
 }
 
 onMounted(async () => {
   await chatStore.loadCorpora();
   await chatStore.loadSessions();
-  await applyRoutePreset();
+  const presetApplied = await applyRoutePreset();
 
-  if (route.query.sessionId) {
+  if (!presetApplied && route.query.sessionId) {
     const session = chatStore.sessions.find((item: any) => item.id === route.query.sessionId);
     if (session) {
       await chatStore.selectSession(session);
@@ -181,10 +185,21 @@ onMounted(async () => {
     }
   }
 
-  if (chatStore.sessions.length) {
+  if (!presetApplied && chatStore.sessions.length) {
     await chatStore.selectSession(chatStore.sessions[0]);
   }
 });
+
+watch(
+  () => route.fullPath,
+  async () => {
+    const presetApplied = await applyRoutePreset();
+    if (presetApplied) {
+      await nextTick();
+      scrollMessagesToBottom(false);
+    }
+  }
+);
 
 onBeforeUnmount(() => {
   chatStore.stopStreaming();

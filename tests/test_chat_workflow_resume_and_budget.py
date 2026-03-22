@@ -513,6 +513,67 @@ def test_build_chat_response_payload_marks_answer_basis_for_compare_mode() -> No
     assert "Approver changed from finance lead to finance director." in response_payload["answer"]
 
 
+def test_retrieve_scope_evidence_prioritizes_compare_focus_with_visual_region() -> None:
+    gateway_retrieval = _load_gateway_module("app.gateway_retrieval")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+
+    def fake_fetch_corpus_documents(*args, **kwargs):
+        return []
+
+    async def fake_request_service_json(*args, **kwargs):
+        return {
+            "items": [
+                {
+                    "document_id": "doc-v2",
+                    "asset_id": "asset-9",
+                    "unit_id": "region-3",
+                    "version_family_key": "expense-policy",
+                    "version_label": "v2",
+                    "evidence_path": {"final_score": 0.7},
+                },
+                {
+                    "document_id": "doc-v1",
+                    "asset_id": "asset-9",
+                    "unit_id": "region-2",
+                    "version_family_key": "expense-policy",
+                    "version_label": "v1",
+                    "evidence_path": {"final_score": 1.05},
+                },
+            ],
+            "retrieval": {"retrieval_ms": 8.0},
+        }
+
+    evidence, _, retrieval_meta = asyncio.run(
+        gateway_retrieval.retrieve_scope_evidence(
+            user=user,
+            scope_snapshot={
+                "corpus_ids": ["kb:base-1"],
+                "document_ids": [],
+                "documents_by_corpus": {},
+            },
+            question="compare the red box between versions",
+            history=[],
+            focus_hint={
+                "kind": "compare_versions",
+                "document_ids": ["doc-v2", "doc-v1"],
+                "compare_document_ids": ["doc-v2", "doc-v1"],
+                "primary_document_id": "doc-v2",
+                "version_family_key": "expense-policy",
+                "asset_id": "asset-9",
+                "region_id": "region-3",
+                "version_labels": ["v2", "v1"],
+            },
+            fetch_corpus_documents_fn=fake_fetch_corpus_documents,
+            kb_service_url="http://kb.test",
+            request_service_json_fn=fake_request_service_json,
+        )
+    )
+
+    assert evidence[0]["unit_id"] == "region-3"
+    assert evidence[0]["document_id"] == "doc-v2"
+    assert retrieval_meta["aggregate"]["focus_hint_applied"] is True
+
+
 def test_retry_chat_workflow_run_passes_resume_run_when_scope_is_reused(monkeypatch) -> None:
     gateway_chat_routes = _load_gateway_module("app.gateway_chat_routes")
     user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")

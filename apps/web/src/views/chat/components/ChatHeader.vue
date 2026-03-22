@@ -4,7 +4,17 @@
       <span class="chat-title">{{ chatStore.activeSessionTitle }}</span>
     </div>
     <div class="header-actions">
-      <!-- 检索范围设置 -->
+      <button
+        v-if="chatStore.hasActiveFocusHint"
+        type="button"
+        class="action-chip action-chip--focus"
+        @click="chatStore.clearFocusHint()"
+      >
+        <el-icon><Aim /></el-icon>
+        <span>焦点: {{ chatStore.activeFocusLabel }}</span>
+        <span class="focus-clear">清除</span>
+      </button>
+
       <el-popover placement="bottom-end" :width="320" trigger="click">
         <template #reference>
           <button type="button" class="action-chip">
@@ -80,7 +90,6 @@
         </div>
       </el-popover>
 
-      <!-- 模式设置 -->
       <el-popover placement="bottom-end" :width="280" trigger="click">
         <template #reference>
           <button type="button" class="action-chip" :class="{ 'is-agent': chatStore.executionMode === 'agent' }">
@@ -159,6 +168,8 @@ const selectedCorpusSummary = computed(() => {
 .header-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .action-chip {
@@ -184,6 +195,17 @@ const selectedCorpusSummary = computed(() => {
   color: #059669;
   border-color: #a7f3d0;
   background: #ecfdf5;
+}
+
+.action-chip--focus {
+  color: #275dad;
+  border-color: #bfd7ff;
+  background: #f5f9ff;
+}
+
+.focus-clear {
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 .scope-popover-title {

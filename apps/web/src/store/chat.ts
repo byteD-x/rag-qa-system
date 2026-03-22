@@ -19,6 +19,7 @@ import {
 } from '@/api/chat';
 import { createIdempotencyKey, isAbortRequestError, isHandledRequestError } from '@/api/request';
 import { buildSafetyNotice } from '@/utils/safety';
+import type { KBChatFocusHint } from '@/views/chat/chatRoutePresets';
 
 export const useChatStore = defineStore('chat', () => {
   const corpora = ref<any[]>([]);
@@ -35,8 +36,11 @@ export const useChatStore = defineStore('chat', () => {
   const selectedDocumentIds = ref<string[]>([]);
   const allowCommonKnowledge = ref(false);
   const executionMode = ref<'grounded' | 'agent'>('grounded');
+  const activeFocusHint = ref<KBChatFocusHint>({});
 
   const kbCorpora = computed(() => corpora.value.filter((item) => item.corpus_type === 'kb'));
+  const activeFocusLabel = computed(() => String(activeFocusHint.value.display_text || activeFocusHint.value.version_label || ''));
+  const hasActiveFocusHint = computed(() => Boolean(activeFocusLabel.value));
 
   const documentOptions = computed(() => {
     const ids = new Set(selectedCorpusIds.value);
@@ -73,6 +77,14 @@ export const useChatStore = defineStore('chat', () => {
     selectedCorpusIds.value = [...(normalized.corpus_ids || [])];
     selectedDocumentIds.value = [...(normalized.document_ids || [])];
     allowCommonKnowledge.value = Boolean(normalized.allow_common_knowledge);
+  }
+
+  function setFocusHint(focusHint: KBChatFocusHint | Record<string, any> | null | undefined) {
+    activeFocusHint.value = { ...(focusHint || {}) };
+  }
+
+  function clearFocusHint() {
+    activeFocusHint.value = {};
   }
 
   function attachMessageSafety(message: any) {
@@ -203,6 +215,7 @@ export const useChatStore = defineStore('chat', () => {
   async function selectSession(session: any) {
     stopStreaming();
     activeSessionId.value = String(session.id || '');
+    clearFocusHint();
     applyScope(session.scope_json || defaultChatScope());
     executionMode.value = session.execution_mode === 'agent' ? 'agent' : 'grounded';
     await ensureDocuments(selectedCorpusIds.value);
@@ -215,6 +228,7 @@ export const useChatStore = defineStore('chat', () => {
     stopStreaming();
     activeSessionId.value = '';
     messages.value = [];
+    clearFocusHint();
     applyScope(defaultChatScope());
     executionMode.value = 'grounded';
   }
@@ -364,7 +378,8 @@ export const useChatStore = defineStore('chat', () => {
       const result: any = await createChatRunV2(sessionId, {
         question: currentQuestion,
         scope: buildScope(),
-        execution_mode: executionMode.value
+        execution_mode: executionMode.value,
+        focus_hint: Object.keys(activeFocusHint.value).length ? activeFocusHint.value : undefined
       }, {
         idempotencyKey: createIdempotencyKey(`chat:${sessionId}`)
       });
@@ -467,6 +482,9 @@ export const useChatStore = defineStore('chat', () => {
     selectedDocumentIds,
     allowCommonKnowledge,
     executionMode,
+    activeFocusHint,
+    activeFocusLabel,
+    hasActiveFocusHint,
     kbCorpora,
     documentOptions,
     activeSessionTitle,
@@ -474,6 +492,8 @@ export const useChatStore = defineStore('chat', () => {
     loadCorpora,
     loadSessions,
     applyScope,
+    setFocusHint,
+    clearFocusHint,
     selectSession,
     startDraftSession,
     renameActiveSession,

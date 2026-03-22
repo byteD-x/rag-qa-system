@@ -137,7 +137,7 @@ export function retryWorkflowRun(runId: string, options: { idempotencyKey?: stri
 
 export function createChatRunV2(
   threadId: string,
-  data: { question: string; scope?: ChatScope; execution_mode?: 'grounded' | 'agent' },
+  data: { question: string; scope?: ChatScope; execution_mode?: 'grounded' | 'agent'; focus_hint?: Record<string, any> },
   options: { idempotencyKey?: string } = {}
 ) {
   return request.post(`/api/v2/chat/threads/${threadId}/runs`, data, {
@@ -161,6 +161,7 @@ export function resumeChatRunV2(
     target_version_ids?: string[];
     effective_at?: string;
     override_scope?: ChatScope;
+    focus_hint?: Record<string, any>;
   },
   options: { idempotencyKey?: string } = {}
 ) {
