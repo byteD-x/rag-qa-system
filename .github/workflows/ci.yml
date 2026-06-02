@@ -39,10 +39,10 @@ jobs:
         run: python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/ci_retrieval_ablation.json --summary-output artifacts/reports/ci_retrieval_ablation.md
 
       - name: Embedding benchmark smoke
-        run: python scripts/evaluation/compare-embedding-providers.py --output artifacts/reports/ci_embedding_retrieval_benchmark.json --summary-output artifacts/reports/ci_embedding_retrieval_benchmark.md
+        run: python scripts/evaluation/compare-embedding-providers.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/ci_embedding_retrieval_benchmark.json --summary-output artifacts/reports/ci_embedding_retrieval_benchmark.md
 
       - name: Local ingest benchmark smoke
-        run: python scripts/evaluation/benchmark-local-ingest.py --output artifacts/reports/ci_local_ingest_benchmark.json --summary-output artifacts/reports/ci_local_ingest_benchmark.md
+        run: python scripts/evaluation/benchmark-local-ingest.py --kb-path tests/fixtures/evals/local-ingest-policy.txt --output artifacts/reports/ci_local_ingest_benchmark.json --summary-output artifacts/reports/ci_local_ingest_benchmark.md
 
       - name: Docker compose config
         run: docker compose config --quiet

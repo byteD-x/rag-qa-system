@@ -1,5 +1,7 @@
 # RAG-QA AI 应用工程师面试主审问答稿
 
+> 最新口径：STAR 技术难点、解决方案和证据路径统一维护在 `docs/reference/RAG_STAR_TECHNICAL_CHALLENGES.md`。本问答稿用于按面试官问题顺序练习；涉及低成本 RAG、`retrieve/debug`、评测门禁、Grounded Answer、LangGraph 可恢复运行时等问题时，以 STAR 文档中的“已实现 / 已验证 / 待验证”边界为准。
+
 > 使用方式
 >
 > - 这份文档不是项目总结，而是一份“能拿去面试”的主审问答稿。

@@ -536,7 +536,14 @@ export function mergeKBChunks(chunkIds: string[], separator: string = '\n\n') {
 }
 
 // ---- Retrieval Debugger ----
-export function retrieveDebugKB(data: { query: string; base_id?: string; document_ids?: string[]; top_k?: number; [key: string]: any }) {
+export interface RetrieveDebugKBPayload {
+  base_id: string;
+  question: string;
+  document_ids?: string[];
+  limit?: number;
+}
+
+export function retrieveDebugKB(data: RetrieveDebugKBPayload) {
   return request.post('/kb/retrieve/debug', data);
 }
 

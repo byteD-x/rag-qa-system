@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import importlib
@@ -144,6 +144,7 @@ def _load_kb_module(module_name: str):
     for name in (
         module_name,
         "app.main",
+        "app.kb_query_routes",
         "app.kb_query_helpers",
         "app.retrieve",
         "app.runtime",
@@ -2855,6 +2856,102 @@ def test_batch_update_documents_request_rejects_empty_patch() -> None:
         assert "patch must contain at least one field" in str(exc)
     else:
         raise AssertionError("expected empty patch to raise ValidationError")
+
+
+def test_retrieve_debug_route_serializes_evidence_and_debug_meta(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_query_routes = importlib.import_module("app.kb_query_routes")
+    from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalResult, RetrievalStats
+
+    captured: dict[str, object] = {}
+
+    def fake_retrieve_kb_result(*, base_id: str, question: str, document_ids: list[str], limit: int):
+        captured.update(
+            {
+                "base_id": base_id,
+                "question": question,
+                "document_ids": document_ids,
+                "limit": limit,
+            }
+        )
+        return RetrievalResult(
+            items=[
+                EvidenceBlock(
+                    unit_id="unit-approval",
+                    document_id="doc-policy",
+                    document_title="Expense Policy",
+                    section_title="Approval",
+                    quote="Department owner and finance reviewer signatures are required.",
+                    raw_text="Department owner and finance reviewer signatures are required before reimbursement.",
+                    signal_scores={"structure": 1.0, "fts": 0.82, "vector": 0.61, "rerank": 9.4},
+                    evidence_path=EvidencePath(structure_hit=True, fts_rank=1, vector_rank=2, final_rank=1, final_score=0.91),
+                )
+            ],
+            stats=RetrievalStats(
+                original_query="Who signs expense approvals?",
+                focus_query="expense approvals signs",
+                structure_candidates=1,
+                fts_candidates=2,
+                vector_candidates=3,
+                fused_candidates=3,
+                reranked_candidates=1,
+                selected_candidates=1,
+                retrieval_ms=8.5,
+                rerank_applied=True,
+                rerank_provider="heuristic",
+            ),
+        )
+
+    monkeypatch.setattr(kb_query_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_query_routes, "ensure_base_exists", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_query_routes, "retrieve_kb_result", fake_retrieve_kb_result)
+
+    user = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/v1/kb/retrieve/debug",
+        json={
+            "base_id": "base-1",
+            "question": "Who signs expense approvals?",
+            "document_ids": ["doc-policy"],
+            "limit": 5,
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured == {
+        "base_id": "base-1",
+        "question": "Who signs expense approvals?",
+        "document_ids": ["doc-policy"],
+        "limit": 5,
+    }
+    assert payload["query"] == "Who signs expense approvals?"
+    assert payload["trace_id"].startswith("kb-")
+    assert payload["retrieval"]["selected_candidates"] == 1
+    assert payload["retrieval"]["rerank_provider"] == "heuristic"
+    assert len(payload["items"]) == 1
+    item = payload["items"][0]
+    assert item["corpus_id"] == "kb:base-1"
+    assert item["service_type"] == "kb"
+    assert item["document_title"] == "Expense Policy"
+    assert item["section_title"] == "Approval"
+    assert item["unit_id"] == "unit-approval"
+    assert item["quote"].startswith("Department owner")
+    assert item["raw_text"].startswith("Department owner")
+    assert item["signal_scores"]["fts"] == 0.82
+    assert item["evidence_path"]["fts_rank"] == 1
+    assert item["debug"]["rank"] == 1
+    assert item["debug"]["score"] == 0.91
+    assert item["debug"]["rerank_score"] == 9.4
+    assert item["debug"]["signal_scores"]["vector"] == 0.61
 
 
 def test_batch_update_documents_route_returns_partial_results(monkeypatch) -> None:

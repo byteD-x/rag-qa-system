@@ -41,3 +41,215 @@ export function updateAgentProfile(profileId: string, data: any) {
 export function deleteAgentProfile(profileId: string) {
   return request.delete(`/platform/agent-profiles/${profileId}`);
 }
+
+// ---- Tool Registry ----
+export interface ToolRegistrySummary {
+  registered_tools: number;
+  categories: number;
+  mcp_servers: number;
+  cache_entries: number;
+  tools: Record<string, {
+    category: string;
+    total_calls: number;
+    success_rate: number;
+    avg_duration_ms: number;
+  }>;
+}
+
+export function getToolRegistrySummary() {
+  return request.get<ToolRegistrySummary>('/platform/agent/registry/summary');
+}
+
+export function listAgentTools(params?: { category?: string }) {
+  return request.get('/platform/agent/tools', { params });
+}
+
+export function toggleAgentTool(toolName: string, enabled: boolean) {
+  return request.post(`/platform/agent/tools/${toolName}/toggle`, { enabled });
+}
+
+// ---- Agent Runs (Execution Monitoring) ----
+
+export interface AgentRunSummary {
+  id: string;
+  session_id: string;
+  status: string;
+  execution_mode: string;
+  question: string;
+  created_at: string;
+  completed_at?: string;
+  tool_calls_used: number;
+  total_latency_ms: number;
+  answer_mode: string;
+}
+
+export interface AgentTaskNode {
+  id: string;
+  description: string;
+  question: string;
+  category: string;
+  depends_on: string[];
+  status: string;
+  tool_calls: number;
+  evidence_count: number;
+  duration_ms: number;
+  error?: string;
+}
+
+export interface AgentRunDetail {
+  id: string;
+  session_id: string;
+  status: string;
+  execution_mode: string;
+  question: string;
+  contextualized_question: string;
+  complexity_score: number;
+  requires_decomposition: boolean;
+  sub_tasks: AgentTaskNode[];
+  execution_order: string[][];
+  agent_events: Array<{
+    type: string;
+    round?: number;
+    tool?: string;
+    tool_call_count?: number;
+    message_preview?: string;
+    [key: string]: any;
+  }>;
+  tool_calls: Array<{
+    tool: string;
+    question?: string;
+    result_count?: number;
+    expression?: string;
+    result?: any;
+    error?: string;
+  }>;
+  reflection?: {
+    passed: boolean;
+    confidence: number;
+    completeness_score: number;
+    accuracy_score: number;
+    citation_score: number;
+    issues: string[];
+    suggestions: string[];
+    needs_retry: boolean;
+  };
+  evidence_count: number;
+  answer_mode: string;
+  total_latency_ms: number;
+  retrieval_ms: number;
+  generation_ms: number;
+  created_at: string;
+  completed_at?: string;
+}
+
+export function listAgentRuns(params?: { limit?: number; status?: string }) {
+  return request.get('/platform/agent/runs', { params });
+}
+
+export function getAgentRunDetail(runId: string) {
+  return request.get<AgentRunDetail>(`/platform/agent/runs/${runId}`);
+}
+
+// ---- Memory Management ----
+
+export interface MemoryEntryItem {
+  id: string;
+  user_id: string;
+  memory_type: string;
+  subject: string;
+  predicate: string;
+  object: string;
+  confidence: number;
+  source_session_id: string;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryStats {
+  total_entries: number;
+  active_entries: number;
+  by_type: Record<string, number>;
+  top_subjects: Array<{ subject: string; count: number }>;
+}
+
+export function listMemoryEntries(params?: { memory_type?: string; limit?: number; offset?: number }) {
+  return request.get('/platform/memory/entries', { params });
+}
+
+export function searchMemoryEntries(params: { query: string; memory_type?: string; limit?: number }) {
+  return request.get('/platform/memory/search', { params });
+}
+
+export function deactivateMemory(memoryId: string) {
+  return request.delete(`/platform/memory/entries/${memoryId}`);
+}
+
+export function getMemoryStats() {
+  return request.get<MemoryStats>('/platform/memory/stats');
+}
+
+// ---- Cost Analytics ----
+export interface CostBreakdown {
+  by_model: Array<{ model: string; input_tokens: number; output_tokens: number; estimated_cost: number; calls: number }>;
+  by_day: Array<{ date: string; cost: number; calls: number }>;
+  by_scene: Array<{ scene: string; cost: number; percentage: number }>;
+  total_cost: number;
+  total_tokens: number;
+  total_calls: number;
+  currency: string;
+  period_days: number;
+}
+
+export function getCostBreakdown(params?: { period_days?: number }) {
+  return request.get<CostBreakdown>('/platform/cost/breakdown', { params });
+}
+
+export interface ModelHealthItem {
+  health_score: number;
+  success_rate: number;
+  total_calls: number;
+  p50_ms: number;
+  p95_ms: number;
+  avg_latency_ms: number;
+  circuit_open: boolean;
+  consecutive_failures: number;
+  estimated_cost: number;
+}
+
+export interface ModelHealthSummary {
+  models: Record<string, ModelHealthItem>;
+  total_models: number;
+  healthy_models: number;
+  circuit_open_models: number;
+}
+
+export function getModelHealth() {
+  return request.get<ModelHealthSummary>('/platform/cost/model-health');
+}
+
+// ---- Cache Management ----
+export interface CacheStats {
+  total_entries: number;
+  total_hits: number;
+  hit_rate_estimate: number;
+  avg_age_seconds: number;
+  memory_usage_estimate: number;
+}
+
+export function getCacheStats() {
+  return request.get<CacheStats>('/platform/cache/stats');
+}
+
+export function invalidateCache(params: { corpus_id?: string; question?: string; model_name?: string }) {
+  return request.post('/platform/cache/invalidate', params);
+}
+
+export function getCacheConfig() {
+  return request.get('/platform/cache/config');
+}
+
+export function updateCacheConfig(data: { semantic_threshold?: number; default_ttl?: number; max_entries?: number }) {
+  return request.patch('/platform/cache/config', data);
+}

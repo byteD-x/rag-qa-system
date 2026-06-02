@@ -21,9 +21,9 @@
 
 ![RAG-QA Architecture](docs/assets/architecture-overview.svg)
 
-一个面向中文场景的本地 RAG 问答系统。
+一个面向中文场景的**企业级 AI 问答平台**，融合 **Agent 自主决策**、**多源知识治理**、**三层推理优化**、**五层指令体系**与**全链路可观测**的完整 AI 应用工程实践。
 
-如果你不熟悉技术，可以把它理解成一套“企业知识库问答平台”：
+如果你不熟悉技术，可以把它理解成一套”企业知识库问答平台”：
 
 - 你上传公司制度、手册、合同、流程文档
 - 系统把文档整理成可搜索的知识库
@@ -53,6 +53,7 @@
 - [系统架构](#系统架构)
 - [AI 能力与治理](#ai-能力与治理)
 - [评测与回归](#评测与回归)
+- [面试材料与 STAR](#面试材料与-star)
 - [开发与运维](#开发与运维)
 - [项目结构](#项目结构)
 - [安全与边界](#安全与边界)
@@ -76,6 +77,9 @@
 - 支持个人视角与管理员视角的运营分析看板
 - 支持提示词版本管理、模型路由、重排、视觉 OCR
 - 支持评测基线、回归门禁和反馈闭环
+- **🆕 Agent 自主决策**：任务拆解（DAG并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
+- **🆕 推理优化**：L1精确/L2语义/L3 Prompt三层缓存、模型健康监控（自动熔断）、请求合并
+- **🆕 平台化**：五层分层指令引擎、6大场景模板（企业QA/技术/合规/培训/数据/代码审查）、RAG幻觉检测、Python SDK
 
 ## 技术栈
 
@@ -1507,6 +1511,21 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 - `search_corpus`
 - `calculator`
 
+**🆕 增强 Agent 能力**（v2.1+）：
+
+系统现在内置了完整的 AI Agent 开发所需能力：
+
+- **工具注册中心**：装饰器注册 + MCP 协议兼容 + 结果缓存 + 执行统计
+- **任务拆解引擎**：自动评估复杂度（1-5级），复杂问题拆为 DAG 子任务并行执行
+- **反思闭环**：输出自检（完整性/准确性/引用三维评分） + 失败根因分析 + 策略记忆
+- **三层记忆**：短期（会话窗口）+ 长期（三元组提取+Qdrant检索）+ 工作记忆（Scratchpad）
+- **五层指令体系**：L1系统→L2场景→L3 Agent→L4会话→L5调用级，优先级合并+冲突检测
+- **场景模板库**：6 大预制场景（企业QA/技术支持/合规审查/培训教练/数据分析/代码审查）
+- **RAG 幻觉检测**：引用一致性+数字一致性+LLM深度分析，自动标记可疑内容
+- **Python SDK**：同步/异步双客户端，支持问答/流式/知识库管理/Agent模式
+
+详见 [AI_HIGHLIGHTS.md](AI_HIGHLIGHTS.md) 和 [AGENTS.md](AGENTS.md)。
+
 ### 6. 提示词和模型路由
 
 系统支持：
@@ -1630,14 +1649,26 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 ### 评测脚本
 
 ```powershell
-python scripts/evaluation/benchmark-local-ingest.py --kb-path <glob-or-file> --kb-path <glob-or-file>
-python scripts/evaluation/run-retrieval-ablation.py --fixture <fixture.json>
-python scripts/evaluation/compare-embedding-providers.py --fixture <fixture.json>
+python scripts/evaluation/benchmark-local-ingest.py --kb-path tests/fixtures/evals/local-ingest-policy.txt
+python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
+python scripts/evaluation/compare-embedding-providers.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.json> --corpus-id kb:<uuid>
 python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
 python scripts/evaluation/check-eval-regression.py --report <suite-report.json>
 python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 ```
+
+### 面试演示的低成本默认路线
+
+当前默认演示路线是：本地 embedding / FastEmbed 配置入口 + Qdrant 向量召回 + PostgreSQL FTS + 结构信号 + weighted RRF + 本地启发式 rerank。外部 embedding 与 Cross-Encoder rerank 可以作为效果增强项介绍，但不作为本地低成本闭环的前提。
+
+最小 fixture 会输出可追踪报告：
+
+- `run-retrieval-ablation.py`：产出 `recall@1`、`recall@3`、`MRR`、`NDCG@3`
+- `compare-embedding-providers.py`：对比本地 embedding backend 的检索排序效果
+- `benchmark-local-ingest.py`：产出本地解析 sections、chunks、parse ms 和 throughput
+
+没有真实业务压测报告前，不建议把“延迟降低多少”“吞吐提升几倍”写成确定指标；面试中可以说“已有脚本和 fixture 能复现评测闭环，业务数据指标待补充”。
 
 ### smoke-eval 会做什么
 
@@ -1676,6 +1707,29 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 - CI 门禁
 - 面试展示
 - 效果对比
+
+## 面试材料与 STAR
+
+如果把这个仓库作为 AI 应用 / RAG 后端工程师面试项目，建议按下面顺序准备：
+
+| 文档 | 用途 |
+|---|---|
+| `AI_HIGHLIGHTS.md` | 简历和作品集的一页式亮点摘要 |
+| `docs/reference/RAG_STAR_TECHNICAL_CHALLENGES.md` | STAR 技术难点、解决方案、证据路径和可追问问题 |
+| `docs/reference/RAG_INTERVIEW_MATERIAL.md` | 深度面试材料，覆盖 RAG 主链路、技术挑战、追问与边界 |
+| `docs/reference/rag-ai-engineer-interview-master-qa.md` | 主审问答稿，适合按问题顺序准备 |
+| `docs/reference/rag-ai-engineer-interview-qa-detailed.md` | 详细问答版，适合补充实现细节 |
+| `docs/reference/rag-ai-engineer-interview-spoken.md` | 口语版表达，适合临场讲述 |
+
+面试主线建议聚焦五个可落地难点：
+
+- **可解释检索调试**：`retrieve/debug` 工作台展示 `signal_scores`、`evidence_path`、debug rank 和 retrieval stats。
+- **低成本混合检索**：本地 embedding / FastEmbed 配置入口 + Qdrant + PostgreSQL FTS + 结构信号 + weighted RRF + 启发式 rerank。
+- **评测门禁**：最小 deterministic fixture 跑通 retrieval ablation、embedding benchmark、local ingest benchmark。
+- **Grounded Answer 与安全边界**：证据引用、提示注入防护、证据不足时的保守回答。
+- **LangGraph 可恢复运行时**：把问答与检索拆成可观测、可测试、可恢复的阶段。
+
+这些材料只把最小 fixture 的结果作为“链路可验证”证据，不把它包装成真实业务收益。真实延迟、吞吐、准确率、成本和幻觉率仍需要目标数据集与压测报告补充。
 
 ## 开发与运维
 
@@ -1768,16 +1822,33 @@ python scripts/dev/reindex-qdrant.py
 apps/
   services/
     api-gateway/        统一聊天、认证、工作流、审计
+      ├─ gateway_agent.py          Agent 执行引擎（基础+增强：拆解+反思）
+      ├─ tool_registry.py          工具注册中心（MCP兼容）
+      ├─ task_decomposer.py        任务拆解（DAG并行）
+      ├─ agent_reflection.py       反思闭环（自检+失败分析）
+      ├─ memory_extractor.py       三层记忆提取
+      ├─ instruction_merger.py     五层分层指令合并
+      ├─ scene_templates.py        场景模板库（6大场景）
+      ├─ semantic_cache.py         三层语义缓存
+      ├─ model_health.py           模型健康监控（熔断）
+      ├─ complexity_classifier.py  问题复杂度分类
+      ├─ request_coalescer.py      请求合并器
+      ├─ hallucination_detector.py RAG幻觉检测
+      └─ gateway_graph.py          LangGraph 工作流引擎
     knowledge-base/     知识库、上传、检索、连接器、Worker
-  web/                  前端
+  web/                  前端（Vue 3）
+    ├─ views/platform/  Agent监控/工具管理/记忆/成本/缓存/场景模板
+    └─ api/             API 客户端层
 packages/
   python/shared/        共享鉴权、追踪、存储、检索、模型能力
+sdk/
+  python/rag_qa_client/ Python SDK（同步+异步）
 scripts/
   dev/                  本地开发脚本
   evaluation/           评测与回归脚本
   quality/              质量检查脚本
-tests/                  测试
-docs/reference/         API 文档
+tests/                  测试（5个文件，75+用例）
+docs/reference/         API 文档、STAR、面试材料
 ```
 
 ## 安全与边界

@@ -1,5 +1,7 @@
 # RAG-QA AI 应用工程师面试口语版材料
 
+> 最新口径：STAR 技术难点、解决方案和证据路径统一维护在 `docs/reference/RAG_STAR_TECHNICAL_CHALLENGES.md`。口语表达时可以简化术语，但不要把最小 fixture 的验证结果说成真实业务收益；遇到追问时回到 `retrieve/debug`、评测报告和证据路径。
+
 > 说明
 >
 > - 这是一份“口语版”面试材料，重点是讲得顺、讲得稳、讲得像真人，不是代码导读。

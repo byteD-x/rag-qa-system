@@ -168,6 +168,138 @@ const routes = [
         }
       },
       {
+        path: 'platform/monitor',
+        name: 'AgentMonitorView',
+        component: () => import('@/views/platform/AgentMonitorView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'Agent 监控',
+          subtitle: '',
+          breadcrumb: ['工作台', 'Agent 监控']
+        }
+      },
+      {
+        path: 'platform/tools',
+        name: 'ToolManagerView',
+        component: () => import('@/views/platform/ToolManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '工具管理',
+          subtitle: '',
+          breadcrumb: ['工作台', '工具管理']
+        }
+      },
+      {
+        path: 'platform/memory',
+        name: 'MemoryManagerView',
+        component: () => import('@/views/platform/MemoryManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '记忆管理',
+          subtitle: '',
+          breadcrumb: ['工作台', '记忆管理']
+        }
+      },
+      {
+        path: 'platform/cost',
+        name: 'CostDashboardView',
+        component: () => import('@/views/platform/CostDashboardView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '成本分析',
+          subtitle: '',
+          breadcrumb: ['工作台', '成本分析']
+        }
+      },
+      {
+        path: 'platform/scenes',
+        name: 'SceneManagerView',
+        component: () => import('@/views/platform/SceneManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '场景模板',
+          subtitle: '',
+          breadcrumb: ['工作台', '场景模板']
+        }
+      },
+      {
+        path: 'platform/cache',
+        name: 'CacheManagerView',
+        component: () => import('@/views/platform/CacheManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '缓存管理',
+          subtitle: '',
+          breadcrumb: ['工作台', '缓存管理']
+        }
+      },
+      {
+        path: 'platform/apikeys',
+        name: 'ApiKeyManagerView',
+        component: () => import('@/views/platform/ApiKeyManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'API Key 管理',
+          subtitle: '',
+          breadcrumb: ['工作台', 'API Key 管理']
+        }
+      },
+      {
+        path: 'platform/webhooks',
+        name: 'WebhookManagerView',
+        component: () => import('@/views/platform/WebhookManagerView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'Webhook 管理',
+          subtitle: '',
+          breadcrumb: ['工作台', 'Webhook 管理']
+        }
+      },
+      {
+        path: 'platform/pii',
+        name: 'PiiConfigView',
+        component: () => import('@/views/platform/PiiConfigView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'PII 脱敏配置',
+          subtitle: '',
+          breadcrumb: ['工作台', 'PII 脱敏']
+        }
+      },
+      {
+        path: 'platform/market',
+        name: 'InstructionMarketView',
+        component: () => import('@/views/platform/InstructionMarketView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '指令模板市场',
+          subtitle: '',
+          breadcrumb: ['工作台', '指令市场']
+        }
+      },
+      {
+        path: 'platform/experiments',
+        name: 'AbExperimentView',
+        component: () => import('@/views/platform/AbExperimentView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'A/B 实验',
+          subtitle: '',
+          breadcrumb: ['工作台', 'A/B 实验']
+        }
+      },
+      {
+        path: 'platform/orchestration',
+        name: 'AgentOrchestrationView',
+        component: () => import('@/views/platform/AgentOrchestrationView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'Agent 协作编排',
+          subtitle: '',
+          breadcrumb: ['工作台', 'Agent 编排']
+        }
+      },
+      {
         path: 'audit',
         name: 'AuditView',
         component: () => import('@/views/AuditView.vue'),

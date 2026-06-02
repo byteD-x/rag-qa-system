@@ -417,9 +417,23 @@ LangGraph 编排版检索接口。
 - 查看 rerank 分数与信号分数
 - 排查 zero-hit、低质量召回和排序问题
 
+请求关键字段：
+
+- `base_id`：必填，知识库 ID
+- `question`：必填，调试问题
+- `document_ids`：可选，限定检索文档范围
+- `limit`：可选，召回数量上限
+
 响应关键字段：
 
 - `query`
+- `items[*].document_title`
+- `items[*].section_title`
+- `items[*].unit_id`
+- `items[*].quote`
+- `items[*].raw_text`
+- `items[*].signal_scores`
+- `items[*].evidence_path`
 - `items[*].debug.rank`
 - `items[*].debug.score`
 - `items[*].debug.signal_scores`

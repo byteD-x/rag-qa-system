@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 本文件定义本仓库的人机协作协议（Owner / AI Agent / Reviewer）。
-> Last updated: 2026-03-08
+> Last updated: 2026-06-02
 
 ## 1. 目标与范围
 
@@ -98,3 +98,28 @@
 - `Why`：为什么这样改
 - `How to verify`：如何验证（命令 + 预期结果）
 - `Risk`：已知风险与回滚方式
+
+## 11. AI Agent 增强模块索引
+
+本项目已实现 AI Agent 全栈能力，各模块职责如下：
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| 工具注册中心 | `apps/services/api-gateway/src/app/tool_registry.py` | 可扩展工具注册/发现/执行/MCP兼容 |
+| 任务拆解引擎 | `apps/services/api-gateway/src/app/task_decomposer.py` | 复杂度评估+LLM拆解+DAG并行 |
+| 反思闭环 | `apps/services/api-gateway/src/app/agent_reflection.py` | 输出自检+失败分析+策略记忆 |
+| 记忆系统 | `apps/services/api-gateway/src/app/memory_extractor.py` | 三层记忆提取+Qdrant检索 |
+| 语义缓存 | `apps/services/api-gateway/src/app/semantic_cache.py` | L1-L3三层缓存+LRU淘汰 |
+| 模型监控 | `apps/services/api-gateway/src/app/model_health.py` | 延迟追踪+自动熔断+健康评分 |
+| 复杂度分类 | `apps/services/api-gateway/src/app/complexity_classifier.py` | 7维特征快速评估+模型层级推荐 |
+| 请求合并 | `apps/services/api-gateway/src/app/request_coalescer.py` | 窗口合并+leader-follower模式 |
+| 指令体系 | `apps/services/api-gateway/src/app/instruction_merger.py` | 五层指令合并+冲突检测+变量系统 |
+| 场景模板 | `apps/services/api-gateway/src/app/scene_templates.py` | 6大场景模板+一键切换 |
+| 幻觉检测 | `apps/services/api-gateway/src/app/hallucination_detector.py` | 规则+LLM双路径幻觉检测 |
+| Agent增强 | `apps/services/api-gateway/src/app/gateway_agent.py` | run_enhanced_agent()统一入口 |
+
+测试覆盖：
+
+- `tests/test_agent_capabilities.py` — Agent 核心能力（工具注册/任务拆解/反思/记忆）
+- `tests/test_inference_optimization.py` — 推理优化（缓存/健康监控/复杂度/合并）
+- `tests/test_platform_ecosystem.py` — 平台生态（指令/场景/幻觉/SDK）

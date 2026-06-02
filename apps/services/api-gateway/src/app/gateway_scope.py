@@ -14,6 +14,66 @@ from .gateway_schemas import ChatScopePayload
 from .gateway_transport import downstream_headers, parse_corpus_id, request_service_json
 
 
+# ---------------------------------------------------------------------------
+# 多租户隔离
+# ---------------------------------------------------------------------------
+
+# 租户级知识库映射: tenant_id → {corpus_ids, 配额}
+_tenant_kb_registry: dict[str, dict[str, Any]] = {}
+
+
+def register_tenant(
+    tenant_id: str,
+    *,
+    allowed_corpus_ids: list[str] | None = None,
+    quota_tokens_per_day: int = 0,
+) -> None:
+    """注册租户及其可访问的知识库范围。
+
+    参数:
+        tenant_id: 租户标识
+        allowed_corpus_ids: 允许访问的知识库 ID 列表（空=全部）
+        quota_tokens_per_day: 日配额（0=不限制）
+    """
+    _tenant_kb_registry[tenant_id] = {
+        "allowed_corpus_ids": allowed_corpus_ids or [],
+        "quota_tokens_per_day": quota_tokens_per_day,
+        "registered_at": __import__("time").time(),
+    }
+
+
+def tenant_scope_filter(
+    tenant_id: str,
+    corpus_ids: list[str],
+) -> list[str]:
+    """根据租户权限过滤知识库范围。
+
+    返回过滤后的知识库 ID 列表。
+    """
+    if not tenant_id or tenant_id not in _tenant_kb_registry:
+        return corpus_ids  # 未注册的租户不受限制
+
+    tenant_config = _tenant_kb_registry[tenant_id]
+    allowed = tenant_config.get("allowed_corpus_ids") or []
+    if not allowed:
+        return corpus_ids  # 空列表 = 允许全部
+
+    return [cid for cid in corpus_ids if cid in allowed]
+
+
+def tenant_has_access(tenant_id: str, corpus_id: str) -> bool:
+    """检查租户是否有权访问指定知识库。"""
+    if not tenant_id or tenant_id not in _tenant_kb_registry:
+        return True
+    allowed = _tenant_kb_registry[tenant_id].get("allowed_corpus_ids") or []
+    return not allowed or corpus_id in allowed
+
+
+# ---------------------------------------------------------------------------
+# Scope 解析
+# ---------------------------------------------------------------------------
+
+
 def default_scope() -> dict[str, Any]:
     return {
         "mode": "all",

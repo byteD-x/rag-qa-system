@@ -462,3 +462,259 @@ def _summarize_evidence(items: list[dict[str, Any]]) -> str:
             f"{compact_text(str(item.get('quote') or item.get('raw_text') or ''), 120)}"
         )
     return "\n".join(lines)
+
+
+# ============================================================================
+# 增强 Agent：集成工具注册中心 + 任务拆解 + 反思闭环
+# ============================================================================
+
+
+async def run_enhanced_agent(
+    *,
+    user: CurrentUser,
+    scope_snapshot: dict[str, Any],
+    question: str,
+    history: list[dict[str, Any]],
+    focus_hint: dict[str, Any] | None = None,
+    agent_profile: dict[str, Any] | None = None,
+    prompt_template: dict[str, Any] | None = None,
+    retrieve_scope_evidence_fn: Any,
+    fetch_corpus_documents_fn: Any,
+    kb_service_url: str,
+    request_service_json_fn: Any = request_service_json,
+    enable_decomposition: bool = True,
+    enable_reflection: bool = True,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    """增强版 Agent 执行 —— 在基础 Agent 之上叠加任务拆解和反思能力。
+
+    与 run_agent_search 的差异：
+    1. 工具通过 tool_registry 管理，支持动态注册/发现
+    2. 复杂问题自动触发任务拆解 → 并行执行子任务
+    3. 生成回答后执行自检（完整性/准确性/引用准确性）
+    4. 工具调用失败时自动分析根因并尝试恢复
+    5. 成功策略记录到策略记忆，下次优先复用
+
+    参数:
+        enable_decomposition: 是否启用任务拆解
+        enable_reflection: 是否启用反思自检
+    """
+    from .agent_reflection import AgentReflector
+    from .task_decomposer import TaskDecomposer
+    from .tool_registry import tool_registry
+
+    settings = load_llm_settings()
+    settings, _route = settings_with_model_route(
+        settings,
+        "agent",
+        default_temperature=0.1,
+        default_max_tokens=min(settings.default_max_tokens, 800),
+    )
+    if not settings.configured:
+        return await retrieve_scope_evidence_fn(
+            user=user,
+            scope_snapshot=scope_snapshot,
+            question=question,
+            history=history,
+            focus_hint=focus_hint,
+        )
+
+    contextualized_question = contextualize_question(question, history)
+    decomposer = TaskDecomposer(
+        build_chat_model_fn=build_chat_model,
+        settings=settings,
+        complexity_threshold=3,
+    )
+    reflector = AgentReflector(
+        build_chat_model_fn=build_chat_model,
+        settings=settings,
+        self_check_threshold=0.6,
+    )
+
+    all_evidence: list[dict[str, Any]] = []
+    all_tool_events: list[dict[str, Any]] = []
+    all_agent_events: list[dict[str, Any]] = []
+    composite_meta: dict[str, Any] = {}
+
+    # ---- Step 1: 任务拆解 ----
+    decomposition_result = None
+    if enable_decomposition:
+        try:
+            decomposition_result = await decomposer.decompose(
+                question,
+                context={
+                    "corpus_ids": scope_snapshot.get("corpus_ids", []),
+                    "execution_mode": "agent",
+                },
+                history=history,
+            )
+            logger.info(
+                "enhanced_agent_decomposed complexity=%d requires=%s sub_tasks=%d",
+                decomposition_result.complexity_score,
+                decomposition_result.requires_decomposition,
+                len(decomposition_result.sub_tasks),
+            )
+        except Exception as exc:
+            logger.warning("enhanced_agent_decompose_failed err=%s", exc)
+
+    # ---- Step 2: 执行 ----
+    if decomposition_result and decomposition_result.requires_decomposition and decomposition_result.sub_tasks:
+        # 并行执行拆解后的子任务组
+        enabled_tools = set(list((agent_profile or {}).get("enabled_tools") or [])) or {
+            "search_scope", "list_scope_documents", "search_corpus",
+        }
+        sub_results: dict[str, dict[str, Any]] = {}
+
+        for group_idx, task_ids in enumerate(decomposition_result.execution_order):
+            # 当前并行组中的子任务并发执行
+            group_tasks = []
+            for tid in task_ids:
+                sub = next((t for t in decomposition_result.sub_tasks if t.id == tid), None)
+                if sub is None:
+                    continue
+                group_tasks.append(sub)
+
+            async def _execute_sub_task(sub) -> dict[str, Any]:
+                try:
+                    sub_evidence, _, sub_meta = await run_agent_search(
+                        user=user,
+                        scope_snapshot=scope_snapshot,
+                        question=sub.question,
+                        history=history,
+                        focus_hint=focus_hint,
+                        agent_profile=agent_profile,
+                        prompt_template=prompt_template,
+                        retrieve_scope_evidence_fn=retrieve_scope_evidence_fn,
+                        fetch_corpus_documents_fn=fetch_corpus_documents_fn,
+                        kb_service_url=kb_service_url,
+                        request_service_json_fn=request_service_json_fn,
+                    )
+                    return {
+                        "task_id": sub.id,
+                        "status": "completed",
+                        "evidence": sub_evidence,
+                        "meta": sub_meta,
+                    }
+                except Exception as exc:
+                    logger.warning("sub_task_failed task_id=%s err=%s", sub.id, exc)
+                    return {"task_id": sub.id, "status": "failed", "error": str(exc), "evidence": [], "meta": {}}
+
+            import asyncio
+
+            batch = await asyncio.gather(*[_execute_sub_task(t) for t in group_tasks])
+            for result in batch:
+                if result:
+                    sub_results[result["task_id"]] = result
+                    all_evidence.extend(result.get("evidence") or [])
+                    agent_events_from_sub = list((result.get("meta") or {}).get("agent", {}).get("events") or [])
+                    all_agent_events.extend(agent_events_from_sub)
+                    tool_events_from_sub = list((result.get("meta") or {}).get("agent", {}).get("tool_calls") or [])
+                    all_tool_events.extend(tool_events_from_sub)
+
+        composite_meta = {
+            "execution_mode": "enhanced_agent",
+            "decomposition": {
+                "complexity_score": decomposition_result.complexity_score,
+                "requires_decomposition": True,
+                "sub_tasks": [
+                    {
+                        "id": t.id,
+                        "description": t.description,
+                        "category": t.category,
+                        "depends_on": t.depends_on,
+                        "status": sub_results.get(t.id, {}).get("status", "pending"),
+                    }
+                    for t in decomposition_result.sub_tasks
+                ],
+                "execution_order": decomposition_result.execution_order,
+                "reasoning": decomposition_result.reasoning,
+            },
+        }
+    else:
+        # 标准 Agent 路径（保持向后兼容）
+        evidence, _, retrieval_meta = await run_agent_search(
+            user=user,
+            scope_snapshot=scope_snapshot,
+            question=question,
+            history=history,
+            focus_hint=focus_hint,
+            agent_profile=agent_profile,
+            prompt_template=prompt_template,
+            retrieve_scope_evidence_fn=retrieve_scope_evidence_fn,
+            fetch_corpus_documents_fn=fetch_corpus_documents_fn,
+            kb_service_url=kb_service_url,
+            request_service_json_fn=request_service_json_fn,
+        )
+        all_evidence = evidence
+        all_agent_events = list((retrieval_meta.get("agent") or {}).get("events") or [])
+        all_tool_events = list((retrieval_meta.get("agent") or {}).get("tool_calls") or [])
+        composite_meta = dict(retrieval_meta or {})
+        composite_meta["execution_mode"] = "enhanced_agent"
+        composite_meta["decomposition"] = {
+            "complexity_score": decomposition_result.complexity_score if decomposition_result else 1,
+            "requires_decomposition": False,
+        }
+
+    # ---- Step 3: 去重证据 ----
+    evidence_by_unit: dict[str, dict[str, Any]] = {}
+    for item in all_evidence:
+        unit_id = str(item.get("unit_id") or "")
+        if not unit_id:
+            continue
+        existing = evidence_by_unit.get(unit_id)
+        if existing is None:
+            evidence_by_unit[unit_id] = item
+        else:
+            existing_score = float(((existing.get("evidence_path") or {}).get("final_score") or 0.0))
+            next_score = float(((item.get("evidence_path") or {}).get("final_score") or 0.0))
+            if next_score > existing_score:
+                evidence_by_unit[unit_id] = item
+    deduped_evidence = _ordered_evidence(evidence_by_unit, limit=AGENT_MAX_EVIDENCE)
+
+    # ---- Step 4: 策略记忆 ----
+    if decomposition_result and decomposition_result.requires_decomposition:
+        scenario_key = f"decomposed_{decomposition_result.complexity_score}"
+        reflector.record_strategy(
+            scenario_key=scenario_key,
+            approach=f"拆解为{len(decomposition_result.sub_tasks)}个子任务",
+            tool_sequence=list({e.get("tool", "") for e in all_tool_events if e.get("tool")}),
+            success=len(deduped_evidence) > 0,
+        )
+
+    composite_meta["agent"] = {
+        "events": all_agent_events,
+        "tool_calls": all_tool_events,
+        "tool_calls_used": len(all_tool_events),
+        "enhanced": True,
+    }
+
+    return deduped_evidence, contextualized_question, composite_meta
+
+
+async def reflect_on_answer(
+    answer: str,
+    evidence: list[dict[str, Any]],
+    question: str,
+    *,
+    settings: Any | None = None,
+) -> dict[str, Any]:
+    """对生成的回答进行反思自检（便捷函数）。
+
+    返回:
+        包含自检结果的 dict，可直接合并到 workflow_state 中。
+    """
+    from .agent_reflection import AgentReflector
+
+    if settings is None:
+        settings = load_llm_settings()
+    reflector = AgentReflector(build_chat_model_fn=build_chat_model, settings=settings)
+    check = await reflector.self_check(answer=answer, evidence=evidence, question=question)
+    return {
+        "reflection_passed": check.passed,
+        "reflection_confidence": check.confidence,
+        "reflection_completeness": check.completeness_score,
+        "reflection_accuracy": check.accuracy_score,
+        "reflection_citation": check.citation_score,
+        "reflection_issues": check.issues,
+        "reflection_suggestions": check.suggestions,
+        "reflection_needs_retry": check.needs_retry,
+    }

@@ -23,6 +23,8 @@ from shared.prompt_registry import get_prompt_definition
 from shared.prompt_safety import augment_settings_prompt, blocked_prompt_answer
 
 from .ai_client import load_llm_settings
+from .context_prioritizer import ContextPrioritizer
+from .context_window import ContextWindowManager, estimate_tokens
 from .gateway_config import SHORT_QUESTION_RE
 from .gateway_runtime import logger
 from .langchain_client import create_llm_completion, create_llm_completion_stream
@@ -56,6 +58,145 @@ def contextualize_question(question: str, history: list[dict[str, Any]]) -> str:
     if previous_question == cleaned:
         return cleaned
     return previous_question + "\n当前追问：" + cleaned
+
+
+# ---------------------------------------------------------------------------
+# Token 预算动态分配
+# ---------------------------------------------------------------------------
+
+
+def resolve_token_budget(
+    *,
+    question: str,
+    evidence_count: int,
+    answer_mode: str,
+    default_max_tokens: int = 4096,
+    complexity_score: float | None = None,
+) -> dict[str, int]:
+    """根据问题复杂度、证据量、回答模式动态分配 Token 预算。
+
+    返回各区域的预算分配：
+    - system_budget: 系统提示词 token 预算
+    - history_budget: 对话历史 token 预算
+    - evidence_budget: 证据文本 token 预算
+    - answer_budget: 回答生成 (max_tokens) 预算
+
+    策略：
+    - 复杂度高 → 更多 token 分配给 evidence + answer
+    - 证据多 → history 压缩更多，优先保留证据
+    - 常识模式 → 主要分配给 history（无证据依赖）
+    - 拒绝模式 → 最小预算，仅保留最近的上下文
+    """
+    # 基础预算：按 default_max_tokens 分配
+    total = max(default_max_tokens, 1024)
+
+    if answer_mode == "refusal":
+        return {
+            "system_budget": int(total * 0.30),
+            "history_budget": int(total * 0.70),
+            "evidence_budget": 0,
+            "answer_budget": 256,
+        }
+
+    if answer_mode == "common_knowledge":
+        return {
+            "system_budget": int(total * 0.25),
+            "history_budget": int(total * 0.75),
+            "evidence_budget": 0,
+            "answer_budget": min(default_max_tokens, 1200),
+        }
+
+    # grounded / agent 模式
+    # 复杂度越高 → 证据和答案占比越大
+    complexity = max(complexity_score or 1.0, 1.0)
+    evidence_ratio = 0.25 + min(complexity * 0.05, 0.15)  # 0.25 - 0.40
+    answer_ratio = 0.15 + min(complexity * 0.03, 0.10)     # 0.15 - 0.25
+    history_ratio = 1.0 - 0.20 - evidence_ratio - answer_ratio
+    system_ratio = 0.20  # 固定 20% 给系统提示词
+
+    # 证据数量修正：证据多时 history 压缩更强
+    if evidence_count > 10:
+        evidence_ratio += 0.05
+        history_ratio -= 0.05
+    elif evidence_count < 3:
+        evidence_ratio -= 0.05
+        history_ratio += 0.05
+
+    return {
+        "system_budget": max(int(total * system_ratio), 200),
+        "history_budget": max(int(total * history_ratio), 300),
+        "evidence_budget": max(int(total * evidence_ratio), 200),
+        "answer_budget": max(int(total * answer_ratio), 256),
+    }
+
+
+def manage_context_for_generation(
+    *,
+    question: str,
+    history: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    answer_mode: str,
+    system_prompt: str = "",
+    default_max_tokens: int = 4096,
+    complexity_score: float | None = None,
+    min_history_turns: int = 2,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    """应用上下文窗口管理，返回优化后的 history 和 evidence_block。
+
+    参数:
+        question: 当前问题
+        history: 原始对话历史
+        evidence: 证据列表
+        answer_mode: 回答模式
+        system_prompt: 系统提示词
+        default_max_tokens: 总 token 预算
+        complexity_score: 复杂度评分
+        min_history_turns: 最少保留的对话轮数
+
+    返回:
+        (managed_history, evidence_block, stats_dict)
+    """
+    # 1. 解析预算
+    budget = resolve_token_budget(
+        question=question,
+        evidence_count=len(evidence),
+        answer_mode=answer_mode,
+        default_max_tokens=default_max_tokens,
+        complexity_score=complexity_score,
+    )
+
+    # 2. 构建 evidence block
+    evidence_block = evidence_prompt_lines(evidence)
+    evidence_tokens = estimate_tokens(evidence_block)
+    if evidence_tokens > budget["evidence_budget"]:
+        # 裁剪证据
+        ratio = budget["evidence_budget"] / max(evidence_tokens, 1)
+        max_chars = max(int(len(evidence_block) * ratio * 1.1), 200)
+        evidence_block = evidence_block[:max_chars] + "\n...（证据已截断）"
+
+    # 3. 优先级排序（基于 question 相关性）
+    prioritizer = ContextPrioritizer()
+    managed_history = prioritizer.rank_and_select(
+        history,
+        question,
+        token_budget=budget["history_budget"],
+        min_turns=min_history_turns,
+    )
+
+    stats = {
+        "budget": budget,
+        "history_original": len(history),
+        "history_managed": len(managed_history),
+        "evidence_tokens": estimate_tokens(evidence_block),
+        "history_tokens": sum(estimate_tokens(str(msg.get("content") or "")) for msg in managed_history),
+    }
+
+    logger.debug(
+        "context_managed question_len=%d original_history=%d managed_history=%d evidence_tokens=%d budget=%s",
+        len(question), len(history), len(managed_history), stats["evidence_tokens"], budget,
+    )
+
+    return managed_history, evidence_block, stats
 
 
 def common_knowledge_prompt_messages(
@@ -197,15 +338,26 @@ async def generate_grounded_answer(
     )
     if not any(candidate.configured for candidate, _decision in route_plan):
         return {"answer": fallback_answer(question, evidence, answer_mode), "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+
+    # Token 预算感知的上下文管理
+    managed_history, managed_evidence_block, _ctx_stats = manage_context_for_generation(
+        question=question,
+        history=history,
+        evidence=evidence,
+        answer_mode=answer_mode,
+        system_prompt=str(route_plan[0][0].system_prompt or ""),
+        default_max_tokens=settings.default_max_tokens,
+        min_history_turns=2,
+    )
     prompt = prompt_definition.build_prompt()
     inputs = {
         "settings_prompt": augment_settings_prompt(
             "\n\n".join(part for part in ((route_plan[0][0].system_prompt or "").strip(), settings_prompt_append.strip()) if part)
         ),
-        "history": dicts_to_langchain_messages(history[-8:]),
+        "history": dicts_to_langchain_messages(managed_history),
         "question": question.strip(),
         "answer_mode": answer_mode,
-        "evidence_block": evidence_prompt_lines(evidence),
+        "evidence_block": managed_evidence_block,
     }
     try:
         completion, route, route_attempts = await execute_with_model_route_fallback(
@@ -342,15 +494,26 @@ async def stream_grounded_answer(
         answer = fallback_answer(question, evidence, answer_mode)
         await emit_answer(answer)
         return {"answer": answer, "provider": "", "model": "", "usage": {}, "llm_trace": {}}
+
+    # Token 预算感知的上下文管理
+    managed_history, managed_evidence_block, _ctx_stats = manage_context_for_generation(
+        question=question,
+        history=history,
+        evidence=evidence,
+        answer_mode=answer_mode,
+        system_prompt=str(route_plan[0][0].system_prompt or ""),
+        default_max_tokens=settings.default_max_tokens,
+        min_history_turns=2,
+    )
     prompt = prompt_definition.build_prompt()
     inputs = {
         "settings_prompt": augment_settings_prompt(
             "\n\n".join(part for part in ((route_plan[0][0].system_prompt or "").strip(), settings_prompt_append.strip()) if part)
         ),
-        "history": dicts_to_langchain_messages(history[-8:]),
+        "history": dicts_to_langchain_messages(managed_history),
         "question": question.strip(),
         "answer_mode": answer_mode,
-        "evidence_block": evidence_prompt_lines(evidence),
+        "evidence_block": managed_evidence_block,
     }
     try:
         completion, route, route_attempts = await execute_with_model_route_fallback(
@@ -394,5 +557,7 @@ __all__ = [
     "compact_text",
     "contextualize_question",
     "generate_grounded_answer",
+    "manage_context_for_generation",
+    "resolve_token_budget",
     "stream_grounded_answer",
 ]
