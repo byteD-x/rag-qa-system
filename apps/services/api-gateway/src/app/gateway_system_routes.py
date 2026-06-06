@@ -10,6 +10,7 @@ from shared.metrics import CONTENT_TYPE_LATEST, generate_latest
 
 from .ai_client import load_llm_settings
 from .gateway_runtime import gateway_db, runtime_settings
+from .semantic_cache import semantic_cache
 
 
 router = APIRouter()
@@ -49,6 +50,17 @@ async def readyz() -> dict[str, Any]:
     if failed:
         raise_api_error(503, "gateway_not_ready", f"gateway dependencies are not ready: {', '.join(failed)}")
     return {"status": "ready", "checks": checks}
+
+
+def get_metrics_summary() -> dict[str, Any]:
+    return {
+        "response_cache_summary": semantic_cache.stats(),
+    }
+
+
+@router.get("/api/v1/system/metrics-summary")
+async def metrics_summary() -> dict[str, Any]:
+    return get_metrics_summary()
 
 
 @router.get("/metrics")

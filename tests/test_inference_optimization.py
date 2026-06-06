@@ -119,7 +119,10 @@ class TestSemanticCache:
         await asyncio.sleep(0.01)
 
         hit = await cache.lookup(question="测试问题", corpus_ids=["kb:abc"], model_name="qwen-plus")
+        stats = cache.stats()
         assert hit is None
+        assert stats["expired"] >= 1
+        assert stats["misses"] >= 1
 
     @pytest.mark.asyncio
     async def test_invalidate_by_corpus(self, monkeypatch) -> None:
@@ -222,8 +225,77 @@ class TestSemanticCache:
         cache._memory_cache["k1"] = entry
 
         stats = cache.stats()
+        assert stats["enabled"] is True
+        assert stats["size"] >= 1
+        assert stats["ttl_seconds"] == 3600.0
+        assert stats["hits"] == 0
+        assert stats["misses"] == 0
+        assert stats["writes"] == 0
+        assert stats["expired"] == 0
+        assert stats["clears"] == 0
         assert stats["total_entries"] >= 1
         assert "hit_rate_estimate" in stats
+
+    @pytest.mark.asyncio
+    async def test_cache_stats_tracks_runtime_events(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import SemanticCache
+
+        cache = SemanticCache(default_ttl=123.0)
+        cache._memory_cache.clear()
+        cache._lru_order.clear()
+
+        await cache.store(
+            question="q",
+            answer="a",
+            answer_mode="grounded",
+            corpus_ids=["kb:x"],
+            model_name="m",
+        )
+        hit = await cache.lookup(question="q", corpus_ids=["kb:x"], model_name="m")
+        miss = await cache.lookup(question="missing", corpus_ids=["kb:x"], model_name="m")
+        removed = await cache.invalidate(corpus_id="kb:x")
+
+        stats = cache.stats()
+
+        assert hit is not None
+        assert miss is None
+        assert removed == 1
+        assert stats["enabled"] is True
+        assert stats["ttl_seconds"] == 123.0
+        assert stats["size"] == 0
+        assert stats["hits"] == 1
+        assert stats["misses"] == 1
+        assert stats["writes"] == 1
+        assert stats["clears"] == 1
+        assert stats["hit_rate"] == 0.5
+
+
+def test_gateway_metrics_summary_includes_response_cache(monkeypatch) -> None:
+    _import_gateway("app.gateway_system_routes", monkeypatch)
+    from app import gateway_system_routes
+
+    monkeypatch.setattr(
+        gateway_system_routes.semantic_cache,
+        "stats",
+        lambda: {
+            "enabled": True,
+            "ttl_seconds": 3600.0,
+            "size": 2,
+            "hits": 3,
+            "misses": 1,
+            "writes": 2,
+            "expired": 0,
+            "clears": 0,
+        },
+    )
+
+    payload = gateway_system_routes.get_metrics_summary()
+
+    assert payload["response_cache_summary"]["enabled"] is True
+    assert payload["response_cache_summary"]["size"] == 2
+    assert payload["response_cache_summary"]["hits"] == 3
+    assert payload["response_cache_summary"]["misses"] == 1
 
 
 # ============================================================================

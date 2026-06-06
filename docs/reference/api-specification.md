@@ -69,6 +69,12 @@ Authorization: Bearer <ACCESS_TOKEN>
 - Gateway 与 KB Service 均暴露 Prometheus 文本格式指标
 - 本地默认分别位于 `http://localhost:8080/metrics` 与 `http://localhost:8300/metrics`
 
+### `GET /api/v1/system/metrics-summary`
+
+- Gateway JSON 指标摘要，适合前端、CI 或本地排障脚本直接读取
+- 当前包含 `response_cache_summary`
+- `response_cache_summary` 描述回答级语义缓存运行时状态，字段包括 `enabled`、`ttl_seconds`、`size`、`max_entries`、`hits`、`misses`、`writes`、`expired`、`clears` 与 `hit_rate`
+
 ## 3. 认证
 
 ### `POST /api/v1/auth/login`

@@ -99,6 +99,11 @@ class SemanticCache:
         # 内存 LRU（fallback，当 Qdrant 不可用时）
         self._memory_cache: dict[str, CacheEntry] = {}
         self._lru_order: list[str] = []
+        self._hits = 0
+        self._misses = 0
+        self._writes = 0
+        self._expired = 0
+        self._clears = 0
 
     # ---- 查询 ---------------------------------------------------------------
 
@@ -133,6 +138,7 @@ class SemanticCache:
                 logger.debug("cache_hit_semantic similarity=%.3f q=%s", hit.similarity_score, question[:60])
                 return hit
 
+        self._misses += 1
         return None
 
     async def store(
@@ -167,8 +173,10 @@ class SemanticCache:
         )
 
         # 写入内存
+        self._remove_memory_entry(exact_key)
         self._memory_cache[exact_key] = entry
         self._lru_order.append(exact_key)
+        self._writes += 1
         self._evict_lru()
 
         # 写入 Qdrant（如果有）
@@ -197,24 +205,37 @@ class SemanticCache:
                 to_remove.append(key)
 
         for key in to_remove:
-            del self._memory_cache[key]
-            if key in self._lru_order:
-                self._lru_order.remove(key)
+            self._remove_memory_entry(key)
             removed += 1
 
+        self._clears += removed
         logger.info("cache_invalidated count=%d corpus=%s", removed, corpus_id or "all")
         return removed
 
     def stats(self) -> dict[str, Any]:
         """缓存统计。"""
+        now = time.time()
+        expired_entries = self._prune_expired_entries(now)
         entries = list(self._memory_cache.values())
-        hit_total = sum(e.hit_count for e in entries)
+        total_lookups = self._hits + self._misses
+        hit_rate = round(self._hits / max(total_lookups, 1), 4)
         return {
+            "enabled": True,
+            "ttl_seconds": round(float(self._default_ttl), 3),
+            "size": len(entries),
+            "max_entries": self._max_entries,
+            "hits": self._hits,
+            "misses": self._misses,
+            "writes": self._writes,
+            "expired": self._expired,
+            "clears": self._clears,
+            "hit_rate": hit_rate,
+            "expired_entries": expired_entries,
             "total_entries": len(entries),
-            "total_hits": hit_total,
-            "hit_rate_estimate": round(hit_total / max(hit_total + len(entries), 1), 4),
+            "total_hits": self._hits,
+            "hit_rate_estimate": hit_rate,
             "avg_age_seconds": round(
-                sum(time.time() - e.created_at for e in entries) / max(len(entries), 1), 1
+                sum(now - e.created_at for e in entries) / max(len(entries), 1), 1
             ),
             "memory_usage_estimate": len(entries) * 2048,  # 粗略估计
         }
@@ -227,11 +248,11 @@ class SemanticCache:
         if entry is None:
             return None
         if time.time() - entry.created_at > entry.ttl_seconds:
-            del self._memory_cache[exact_key]
-            if exact_key in self._lru_order:
-                self._lru_order.remove(exact_key)
+            self._remove_memory_entry(exact_key)
+            self._expired += 1
             return None
         entry.hit_count += 1
+        self._hits += 1
         # LRU 刷新
         if exact_key in self._lru_order:
             self._lru_order.remove(exact_key)
@@ -258,9 +279,11 @@ class SemanticCache:
 
         best_score = 0.0
         best_entry: CacheEntry | None = None
+        expired_keys: list[str] = []
 
         for entry in self._memory_cache.values():
             if time.time() - entry.created_at > entry.ttl_seconds:
+                expired_keys.append(entry.cache_key)
                 continue
             if model_name and entry.model_name != model_name:
                 continue
@@ -273,6 +296,8 @@ class SemanticCache:
 
         if best_entry is not None:
             best_entry.hit_count += 1
+            self._hits += 1
+            self._remove_expired_keys(expired_keys)
             return CacheHit(
                 cache_level="semantic",
                 cached_answer=best_entry.answer,
@@ -284,6 +309,7 @@ class SemanticCache:
                 age_seconds=time.time() - best_entry.created_at,
             )
 
+        self._remove_expired_keys(expired_keys)
         return None
 
     async def _embed(self, text: str) -> list[float]:
@@ -330,6 +356,26 @@ class SemanticCache:
             oldest_key = self._lru_order.pop(0)
             self._memory_cache.pop(oldest_key, None)
             logger.debug("cache_lru_evict key=%s", oldest_key[:32])
+
+    def _remove_memory_entry(self, key: str) -> None:
+        self._memory_cache.pop(key, None)
+        self._lru_order = [item for item in self._lru_order if item != key]
+
+    def _remove_expired_keys(self, keys: list[str]) -> int:
+        unique_keys = list(dict.fromkeys(keys))
+        for key in unique_keys:
+            self._remove_memory_entry(key)
+        self._expired += len(unique_keys)
+        return len(unique_keys)
+
+    def _prune_expired_entries(self, now: float | None = None) -> int:
+        current_time = time.time() if now is None else now
+        expired_keys = [
+            key
+            for key, entry in self._memory_cache.items()
+            if current_time - entry.created_at > entry.ttl_seconds
+        ]
+        return self._remove_expired_keys(expired_keys)
 
 
 # ---------------------------------------------------------------------------
