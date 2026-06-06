@@ -2031,6 +2031,7 @@ docker compose config --quiet
 ```
 
 `run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；失败或超时时可直接从摘要定位慢组、失败组和日志路径。
+默认串行执行以保持稳定的 fail-fast 语义；本地需要缩短整套回归时间时，可显式加 `--max-workers 2` 或更高并发度，让多个测试文件分批并行执行。`scripts/quality/ci-check.ps1` 同步支持 `-PytestMaxWorkers` 透传到该执行器。
 
 LangGraph 运行时的最小回归验证：
 

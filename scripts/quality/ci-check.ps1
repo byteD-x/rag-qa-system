@@ -9,6 +9,7 @@ param(
     [switch]$SkipPytest,
     [switch]$IncludeDockerBuild,
     [int]$PytestTimeoutSeconds = 900,
+    [int]$PytestMaxWorkers = 1,
     [int]$PytestTotalTimeoutSeconds = 3600
 )
 
@@ -151,6 +152,8 @@ if (-not $SkipPytest) {
             "scripts/quality/run_pytest_groups.py",
             "--timeout-seconds",
             "$PytestTimeoutSeconds",
+            "--max-workers",
+            "$PytestMaxWorkers",
             "tests"
         )
         Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds

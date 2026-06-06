@@ -110,6 +110,7 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
             "status": "passed",
             "scheduled_groups": 2,
             "completed_groups": 2,
+            "max_workers": 2,
             "failed_groups": 0,
             "timed_out_groups": 0,
             "elapsed_seconds": 12.3456,
@@ -135,10 +136,12 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
     assert report["metrics"]["eval_suite"]["jobs"][0]["p95_latency_ms"] == 42.0
     assert report["metrics"]["pytest_groups"]["status"] == "passed"
     assert report["metrics"]["pytest_groups"]["completed_groups"] == 2
+    assert report["metrics"]["pytest_groups"]["max_workers"] == 2
     assert "# RAG Daily Report" in markdown
     assert "## Report Inventory" in markdown
     assert "## Evidence Pack" in markdown
     assert "## Pytest Groups" in markdown
+    assert "Max workers: `2`" in markdown
 
 
 def test_rag_daily_report_marks_missing_required_reports_as_partial(tmp_path: Path) -> None:

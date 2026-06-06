@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import shlex
@@ -44,6 +45,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("paths", nargs="*", default=["tests"], help="Test paths or node ids to run.")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--heartbeat-seconds", type=int, default=DEFAULT_HEARTBEAT_SECONDS)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help="Maximum pytest groups to run concurrently. Defaults to 1 for stable fail-fast behavior.",
+    )
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
     parser.add_argument("--summary-output", type=Path, default=DEFAULT_SUMMARY_OUTPUT)
     parser.add_argument("--pytest-arg", action="append", default=[], help="Extra argument passed to pytest.")
@@ -152,6 +159,62 @@ def run_group(
     )
 
 
+def run_groups(
+    groups: list[TestGroup],
+    *,
+    python: str,
+    pytest_args: list[str],
+    timeout_seconds: int,
+    heartbeat_seconds: int,
+    log_dir: Path,
+    disable_plugin_autoload: bool = True,
+    max_workers: int = 1,
+) -> list[GroupResult]:
+    workers = max(1, int(max_workers))
+    if workers == 1:
+        results: list[GroupResult] = []
+        for group in groups:
+            result = run_group(
+                group,
+                python=python,
+                pytest_args=pytest_args,
+                timeout_seconds=timeout_seconds,
+                heartbeat_seconds=heartbeat_seconds,
+                log_dir=log_dir,
+                disable_plugin_autoload=disable_plugin_autoload,
+            )
+            results.append(result)
+            if result.exit_code != 0:
+                break
+        return results
+
+    results = []
+    for batch_start in range(0, len(groups), workers):
+        batch = groups[batch_start : batch_start + workers]
+        batch_results: dict[int, GroupResult] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(batch)) as executor:
+            future_to_index = {
+                executor.submit(
+                    run_group,
+                    group,
+                    python=python,
+                    pytest_args=pytest_args,
+                    timeout_seconds=timeout_seconds,
+                    heartbeat_seconds=heartbeat_seconds,
+                    log_dir=log_dir,
+                    disable_plugin_autoload=disable_plugin_autoload,
+                ): batch_start + offset
+                for offset, group in enumerate(batch)
+            }
+            for future in concurrent.futures.as_completed(future_to_index):
+                batch_results[future_to_index[future]] = future.result()
+
+        results.extend(batch_results[index] for index in sorted(batch_results))
+        if any(item.exit_code != 0 for item in batch_results.values()):
+            break
+    return results
+
+
 def terminate_process_tree(process: subprocess.Popen[object]) -> None:
     if process.poll() is not None:
         return
@@ -175,33 +238,42 @@ def terminate_process_tree(process: subprocess.Popen[object]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    max_workers = max(1, int(args.max_workers))
     groups = build_groups(list(args.paths))
     if not groups:
         print("[pytest-group] no tests discovered", flush=True)
-        write_summary([], scheduled_groups=0, output_path=args.summary_output)
+        write_summary(
+            [],
+            scheduled_groups=0,
+            output_path=args.summary_output,
+            max_workers=max_workers,
+            elapsed_seconds=0.0,
+        )
         return 0
 
     pytest_args = [*DEFAULT_PYTEST_ARGS, *args.pytest_arg]
-    results: list[GroupResult] = []
-    for group in groups:
-        result = run_group(
-            group,
-            python=args.python,
-            pytest_args=pytest_args,
-            timeout_seconds=max(1, int(args.timeout_seconds)),
-            heartbeat_seconds=max(1, int(args.heartbeat_seconds)),
-            log_dir=args.log_dir,
-            disable_plugin_autoload=not args.enable_plugin_autoload,
-        )
-        results.append(result)
-        if result.exit_code != 0:
-            _print_summary(results)
-            write_summary(results, scheduled_groups=len(groups), output_path=args.summary_output)
-            return result.exit_code
-
-    _print_summary(results)
-    write_summary(results, scheduled_groups=len(groups), output_path=args.summary_output)
-    return 0
+    started = time.monotonic()
+    results = run_groups(
+        groups,
+        python=args.python,
+        pytest_args=pytest_args,
+        timeout_seconds=max(1, int(args.timeout_seconds)),
+        heartbeat_seconds=max(1, int(args.heartbeat_seconds)),
+        log_dir=args.log_dir,
+        disable_plugin_autoload=not args.enable_plugin_autoload,
+        max_workers=max_workers,
+    )
+    elapsed = time.monotonic() - started
+    _print_summary(results, elapsed_seconds=elapsed)
+    write_summary(
+        results,
+        scheduled_groups=len(groups),
+        output_path=args.summary_output,
+        max_workers=max_workers,
+        elapsed_seconds=elapsed,
+    )
+    failed = [item for item in results if item.exit_code != 0]
+    return int(failed[0].exit_code) if failed else 0
 
 
 def _start_process(
@@ -233,8 +305,8 @@ def _start_process(
         raise
 
 
-def _print_summary(results: list[GroupResult]) -> None:
-    total = sum(item.elapsed_seconds for item in results)
+def _print_summary(results: list[GroupResult], *, elapsed_seconds: float | None = None) -> None:
+    total = sum(item.elapsed_seconds for item in results) if elapsed_seconds is None else elapsed_seconds
     failed = [item for item in results if item.exit_code != 0]
     print(
         f"[pytest-group] summary groups={len(results)} failed={len(failed)} "
@@ -250,10 +322,16 @@ def _print_summary(results: list[GroupResult]) -> None:
         )
 
 
-def build_summary(results: list[GroupResult], *, scheduled_groups: int) -> dict[str, object]:
+def build_summary(
+    results: list[GroupResult],
+    *,
+    scheduled_groups: int,
+    max_workers: int = 1,
+    elapsed_seconds: float | None = None,
+) -> dict[str, object]:
     failed = [item for item in results if item.exit_code != 0]
     timed_out = [item for item in results if item.timed_out]
-    total_elapsed = round(sum(item.elapsed_seconds for item in results), 4)
+    total_elapsed = sum(item.elapsed_seconds for item in results) if elapsed_seconds is None else elapsed_seconds
     result_items = [_result_to_dict(item) for item in results]
     slowest = sorted(result_items, key=lambda item: float(item["elapsed_seconds"]), reverse=True)[:5]
     status = "passed"
@@ -267,17 +345,30 @@ def build_summary(results: list[GroupResult], *, scheduled_groups: int) -> dict[
         "status": status,
         "scheduled_groups": scheduled_groups,
         "completed_groups": len(results),
+        "max_workers": max(1, int(max_workers)),
         "failed_groups": len(failed),
         "timed_out_groups": len(timed_out),
-        "elapsed_seconds": total_elapsed,
+        "elapsed_seconds": round(total_elapsed, 4),
         "slowest_groups": slowest,
         "results": result_items,
     }
 
 
-def write_summary(results: list[GroupResult], *, scheduled_groups: int, output_path: Path) -> None:
+def write_summary(
+    results: list[GroupResult],
+    *,
+    scheduled_groups: int,
+    output_path: Path,
+    max_workers: int = 1,
+    elapsed_seconds: float | None = None,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    summary = build_summary(results, scheduled_groups=scheduled_groups)
+    summary = build_summary(
+        results,
+        scheduled_groups=scheduled_groups,
+        max_workers=max_workers,
+        elapsed_seconds=elapsed_seconds,
+    )
     output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[pytest-group] summary_json={output_path}", flush=True)
 

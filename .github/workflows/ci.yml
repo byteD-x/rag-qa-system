@@ -24,7 +24,8 @@ jobs:
           python -m pip install \
             -r apps/services/api-gateway/requirements.runtime.txt \
             -r apps/services/knowledge-base/requirements.runtime.txt \
-            pytest
+            pytest \
+            pytest-asyncio
 
       - name: Encoding check
         run: python scripts/quality/check-encoding.py
@@ -33,7 +34,7 @@ jobs:
         run: python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 
       - name: Pytest
-        run: python -m pytest tests -q
+        run: python scripts/quality/run_pytest_groups.py --timeout-seconds 900 --heartbeat-seconds 30 --summary-output artifacts/reports/ci_pytest_groups_summary.json tests
 
       - name: Retrieval ablation smoke
         run: python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/ci_retrieval_ablation.json --summary-output artifacts/reports/ci_retrieval_ablation.md

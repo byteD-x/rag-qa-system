@@ -609,16 +609,63 @@ def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path
         stderr_path=tmp_path / "slow.err.log",
     )
 
-    summary = runner.build_summary([passed, timeout], scheduled_groups=3)
+    summary = runner.build_summary([passed, timeout], scheduled_groups=3, max_workers=4)
 
     assert summary["status"] == "failed"
     assert summary["scheduled_groups"] == 3
     assert summary["completed_groups"] == 2
+    assert summary["max_workers"] == 4
     assert summary["failed_groups"] == 1
     assert summary["timed_out_groups"] == 1
     assert summary["slowest_groups"][0]["group"] == "tests/test_slow.py"
     assert summary["results"][1]["status"] == "timeout"
     assert summary["results"][1]["stdout_log"].endswith("slow.out.log")
+
+    wall_clock_summary = runner.build_summary(
+        [passed, timeout],
+        scheduled_groups=3,
+        max_workers=4,
+        elapsed_seconds=5.5,
+    )
+
+    assert wall_clock_summary["elapsed_seconds"] == 5.5
+
+
+def test_pytest_group_runner_parallel_batches_stop_after_failure(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_parallel_test", "scripts/quality/run_pytest_groups.py")
+    groups = [
+        runner.TestGroup(name="tests/test_first.py", args=["tests/test_first.py"]),
+        runner.TestGroup(name="tests/test_second.py", args=["tests/test_second.py"]),
+        runner.TestGroup(name="tests/test_third.py", args=["tests/test_third.py"]),
+    ]
+    calls: list[str] = []
+
+    def fake_run_group(group, **_kwargs):
+        calls.append(group.name)
+        return runner.GroupResult(
+            group=group,
+            exit_code=7 if group.name.endswith("second.py") else 0,
+            elapsed_seconds=0.25,
+            timed_out=False,
+            stdout_path=tmp_path / f"{Path(group.name).stem}.out.log",
+            stderr_path=tmp_path / f"{Path(group.name).stem}.err.log",
+        )
+
+    monkeypatch.setattr(runner, "run_group", fake_run_group)
+
+    results = runner.run_groups(
+        groups,
+        python="python",
+        pytest_args=["-q"],
+        timeout_seconds=10,
+        heartbeat_seconds=1,
+        log_dir=tmp_path,
+        max_workers=2,
+    )
+
+    assert [item.group.name for item in results] == ["tests/test_first.py", "tests/test_second.py"]
+    assert results[1].exit_code == 7
+    assert set(calls) == {"tests/test_first.py", "tests/test_second.py"}
 
 
 def test_pytest_group_runner_writes_summary_on_first_failure(monkeypatch, tmp_path: Path) -> None:
@@ -656,3 +703,45 @@ def test_pytest_group_runner_writes_summary_on_first_failure(monkeypatch, tmp_pa
     assert payload["scheduled_groups"] == 2
     assert payload["completed_groups"] == 1
     assert payload["results"][0]["group"] == "tests/test_first.py"
+
+
+def test_pytest_group_runner_main_records_parallel_worker_count(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_main_parallel_summary_test", "scripts/quality/run_pytest_groups.py")
+    groups = [
+        runner.TestGroup(name="tests/test_first.py", args=["tests/test_first.py"]),
+        runner.TestGroup(name="tests/test_second.py", args=["tests/test_second.py"]),
+    ]
+    observed_workers: list[int] = []
+
+    def fake_build_groups(_paths):
+        return groups
+
+    def fake_run_groups(_groups, **kwargs):
+        observed_workers.append(kwargs["max_workers"])
+        return [
+            runner.GroupResult(
+                group=group,
+                exit_code=0,
+                elapsed_seconds=0.1,
+                timed_out=False,
+                stdout_path=tmp_path / f"{Path(group.name).stem}.out.log",
+                stderr_path=tmp_path / f"{Path(group.name).stem}.err.log",
+            )
+            for group in _groups
+        ]
+
+    monkeypatch.setattr(runner, "build_groups", fake_build_groups)
+    monkeypatch.setattr(runner, "run_groups", fake_run_groups)
+    ticks = iter([10.0, 11.25])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+
+    summary_path = tmp_path / "pytest-summary.json"
+    exit_code = runner.main(["--max-workers", "3", "--summary-output", str(summary_path), "tests"])
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert observed_workers == [3]
+    assert payload["status"] == "passed"
+    assert payload["max_workers"] == 3
+    assert payload["completed_groups"] == 2
+    assert payload["elapsed_seconds"] == 1.25
