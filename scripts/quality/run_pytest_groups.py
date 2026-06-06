@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import signal
@@ -8,11 +9,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_DIR = REPO_ROOT / "logs" / "quality"
+DEFAULT_SUMMARY_OUTPUT = DEFAULT_LOG_DIR / "pytest-groups-summary.json"
 DEFAULT_TIMEOUT_SECONDS = 900
 DEFAULT_HEARTBEAT_SECONDS = 30
 DEFAULT_PYTEST_ARGS = ["-q", "-p", "pytest_asyncio.plugin"]
@@ -42,6 +45,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--heartbeat-seconds", type=int, default=DEFAULT_HEARTBEAT_SECONDS)
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR)
+    parser.add_argument("--summary-output", type=Path, default=DEFAULT_SUMMARY_OUTPUT)
     parser.add_argument("--pytest-arg", action="append", default=[], help="Extra argument passed to pytest.")
     parser.add_argument("--python", default=sys.executable, help="Python executable used to run pytest.")
     parser.add_argument(
@@ -174,6 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     groups = build_groups(list(args.paths))
     if not groups:
         print("[pytest-group] no tests discovered", flush=True)
+        write_summary([], scheduled_groups=0, output_path=args.summary_output)
         return 0
 
     pytest_args = [*DEFAULT_PYTEST_ARGS, *args.pytest_arg]
@@ -191,9 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         results.append(result)
         if result.exit_code != 0:
             _print_summary(results)
+            write_summary(results, scheduled_groups=len(groups), output_path=args.summary_output)
             return result.exit_code
 
     _print_summary(results)
+    write_summary(results, scheduled_groups=len(groups), output_path=args.summary_output)
     return 0
 
 
@@ -241,6 +248,52 @@ def _print_summary(results: list[GroupResult]) -> None:
             f"logs={item.stdout_path} {item.stderr_path}",
             flush=True,
         )
+
+
+def build_summary(results: list[GroupResult], *, scheduled_groups: int) -> dict[str, object]:
+    failed = [item for item in results if item.exit_code != 0]
+    timed_out = [item for item in results if item.timed_out]
+    total_elapsed = round(sum(item.elapsed_seconds for item in results), 4)
+    result_items = [_result_to_dict(item) for item in results]
+    slowest = sorted(result_items, key=lambda item: float(item["elapsed_seconds"]), reverse=True)[:5]
+    status = "passed"
+    if failed:
+        status = "failed"
+    elif scheduled_groups > len(results):
+        status = "incomplete"
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "scheduled_groups": scheduled_groups,
+        "completed_groups": len(results),
+        "failed_groups": len(failed),
+        "timed_out_groups": len(timed_out),
+        "elapsed_seconds": total_elapsed,
+        "slowest_groups": slowest,
+        "results": result_items,
+    }
+
+
+def write_summary(results: list[GroupResult], *, scheduled_groups: int, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    summary = build_summary(results, scheduled_groups=scheduled_groups)
+    output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[pytest-group] summary_json={output_path}", flush=True)
+
+
+def _result_to_dict(result: GroupResult) -> dict[str, object]:
+    status = "timeout" if result.timed_out else ("passed" if result.exit_code == 0 else "failed")
+    return {
+        "group": result.group.name,
+        "args": result.group.args,
+        "status": status,
+        "exit_code": result.exit_code,
+        "elapsed_seconds": round(result.elapsed_seconds, 4),
+        "timed_out": result.timed_out,
+        "stdout_log": str(result.stdout_path),
+        "stderr_log": str(result.stderr_path),
+    }
 
 
 def _subprocess_env(*, disable_plugin_autoload: bool) -> dict[str, str]:

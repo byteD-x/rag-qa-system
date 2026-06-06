@@ -588,3 +588,71 @@ def test_pytest_group_runner_timeout_is_actionable(monkeypatch, tmp_path: Path) 
     assert terminated == [12345]
     assert len(closed) == 2
     assert result.stdout_path.parent == tmp_path
+
+
+def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_summary_test", "scripts/quality/run_pytest_groups.py")
+    passed = runner.GroupResult(
+        group=runner.TestGroup(name="tests/test_fast.py", args=["tests/test_fast.py"]),
+        exit_code=0,
+        elapsed_seconds=1.25,
+        timed_out=False,
+        stdout_path=tmp_path / "fast.out.log",
+        stderr_path=tmp_path / "fast.err.log",
+    )
+    timeout = runner.GroupResult(
+        group=runner.TestGroup(name="tests/test_slow.py", args=["tests/test_slow.py"]),
+        exit_code=124,
+        elapsed_seconds=9.5,
+        timed_out=True,
+        stdout_path=tmp_path / "slow.out.log",
+        stderr_path=tmp_path / "slow.err.log",
+    )
+
+    summary = runner.build_summary([passed, timeout], scheduled_groups=3)
+
+    assert summary["status"] == "failed"
+    assert summary["scheduled_groups"] == 3
+    assert summary["completed_groups"] == 2
+    assert summary["failed_groups"] == 1
+    assert summary["timed_out_groups"] == 1
+    assert summary["slowest_groups"][0]["group"] == "tests/test_slow.py"
+    assert summary["results"][1]["status"] == "timeout"
+    assert summary["results"][1]["stdout_log"].endswith("slow.out.log")
+
+
+def test_pytest_group_runner_writes_summary_on_first_failure(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_main_summary_test", "scripts/quality/run_pytest_groups.py")
+    groups = [
+        runner.TestGroup(name="tests/test_first.py", args=["tests/test_first.py"]),
+        runner.TestGroup(name="tests/test_second.py", args=["tests/test_second.py"]),
+    ]
+    calls: list[str] = []
+
+    def fake_build_groups(_paths):
+        return groups
+
+    def fake_run_group(group, **_kwargs):
+        calls.append(group.name)
+        return runner.GroupResult(
+            group=group,
+            exit_code=2,
+            elapsed_seconds=0.5,
+            timed_out=False,
+            stdout_path=tmp_path / "first.out.log",
+            stderr_path=tmp_path / "first.err.log",
+        )
+
+    monkeypatch.setattr(runner, "build_groups", fake_build_groups)
+    monkeypatch.setattr(runner, "run_group", fake_run_group)
+
+    summary_path = tmp_path / "pytest-summary.json"
+    exit_code = runner.main(["--summary-output", str(summary_path), "tests"])
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+    assert exit_code == 2
+    assert calls == ["tests/test_first.py"]
+    assert payload["status"] == "failed"
+    assert payload["scheduled_groups"] == 2
+    assert payload["completed_groups"] == 1
+    assert payload["results"][0]["group"] == "tests/test_first.py"

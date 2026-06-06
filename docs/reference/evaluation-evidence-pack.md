@@ -55,7 +55,7 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 
 ```powershell
 python scripts/evaluation/verify-agent-smoke-evidence.py
-.venv\Scripts\python.exe scripts/quality/run_pytest_groups.py --timeout-seconds 90 --heartbeat-seconds 10 tests/test_eval_pipeline.py
+.venv\Scripts\python.exe scripts/quality/run_pytest_groups.py --timeout-seconds 90 --heartbeat-seconds 10 --summary-output artifacts/reports/eval_pipeline_pytest_summary.json tests/test_eval_pipeline.py
 ```
 
-如果第一步失败，优先修复 fixture 或 baseline；如果第二步失败，再检查评测脚本逻辑或测试执行器。
+如果第一步失败，优先修复 fixture 或 baseline；如果第二步失败，再检查评测脚本逻辑或测试执行器。`run_pytest_groups.py` 会同时写出 stdout/stderr 分组日志和 JSON 摘要，便于快速定位慢测试、失败组和超时组。

@@ -1852,6 +1852,7 @@ python scripts/dev/reindex-qdrant.py
 - `scripts/dev/smoke-eval.ps1`
 - `scripts/dev/smoke_eval.py`
 - `scripts/observability/rag-daily-report.py`
+- `scripts/quality/run_pytest_groups.py`
 
 ## 项目结构
 
@@ -2024,9 +2025,11 @@ python scripts/quality/check-encoding.py --root .
 cd apps/web && npm run test:unit
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
-python -m pytest tests -q
+python scripts/quality/run_pytest_groups.py --timeout-seconds 900 --heartbeat-seconds 30 tests
 docker compose config --quiet
 ```
+
+`run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；失败或超时时可直接从摘要定位慢组、失败组和日志路径。
 
 LangGraph 运行时的最小回归验证：
 
