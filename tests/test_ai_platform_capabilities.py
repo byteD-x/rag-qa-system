@@ -175,6 +175,65 @@ def test_external_cross_encoder_rerank_prefers_provider_scores(monkeypatch) -> N
     assert debug[0].provider == "external-cross-encoder"
 
 
+def test_kb_section_chunking_uses_shared_window_and_overlap() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    parsing = importlib.import_module("app.parsing")
+
+    section = parsing.KBSection(
+        id="section-1",
+        section_index=2,
+        title="Policy Rules",
+        summary="",
+        search_text="",
+        text="A" * 2200,
+        char_start=10,
+        char_end=2210,
+        source_kind="visual_ocr",
+        page_number=3,
+        asset_id="asset-1",
+    )
+
+    chunks = parsing.build_section_chunks(section)
+
+    assert [(chunk.char_start, chunk.char_end) for chunk in chunks] == [
+        (10, 1010),
+        (890, 1890),
+        (1770, 2210),
+    ]
+    assert [chunk.chunk_index for chunk in chunks] == [1, 2, 3]
+    assert chunks[0].search_text.startswith("policy rules ")
+    assert chunks[0].source_kind == "visual_ocr"
+    assert chunks[0].page_number == 3
+    assert chunks[0].asset_id == "asset-1"
+
+
+def test_kb_worker_reuses_shared_section_chunking() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    worker = importlib.import_module("app.worker")
+
+    section, chunks = worker._build_section_and_chunks(
+        section_index=1,
+        title="Policy",
+        raw_text="X" * 2200,
+        char_start=5,
+    )
+
+    assert section is not None
+    assert [(chunk.char_start, chunk.char_end) for chunk in chunks] == [
+        (5, 1005),
+        (885, 1885),
+        (1765, 2205),
+    ]
+    assert chunks[1].search_text.startswith("policy ")
+    assert chunks[1].section_id == section.id
+
+
 def test_visual_layout_regions_are_promoted_to_region_units() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
     prioritize_service_src(kb_src)

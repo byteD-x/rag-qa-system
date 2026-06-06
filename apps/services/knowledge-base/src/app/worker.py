@@ -14,7 +14,7 @@ from shared.metrics import Counter, Histogram, start_http_server
 from shared.text_encoding import detect_text_encoding
 from shared.text_search import build_fts_lexeme_text
 
-from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, parse_document
+from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, build_section_chunks, parse_document
 from .runtime import BLOB_ROOT, db, prepare_runtime, storage
 from .vector_store import (
     delete_document_vectors,
@@ -299,18 +299,7 @@ def _build_section_and_chunks(
         asset_id=asset_id,
     )
 
-    chunks: list[KBChunk] = []
-    cursor = 0
-    chunk_index = 1
-    while cursor < len(content):
-        end = min(cursor + 1000, len(content))
-        snippet = content[cursor:end].strip()
-        if snippet:
-            chunks.append(KBChunk(id=str(uuid4()), section_id=section_id, section_index=section_index, chunk_index=chunk_index, text=snippet, search_text=snippet, char_start=char_start + cursor, char_end=char_start + end, source_kind=source_kind, page_number=page_number, asset_id=asset_id))
-            chunk_index += 1
-        if end >= len(content):
-            break
-        cursor = max(end - 120, cursor + 1)
+    chunks = build_section_chunks(section)
     return section, chunks
 
 

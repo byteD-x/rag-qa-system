@@ -12,6 +12,8 @@ from shared.text_encoding import read_text_with_fallback
 
 TXT_HEADING_RE = re.compile(r"^\s*(第[0-9一二三四五六七八九十百千万零两〇]+[章节篇].*|[A-Z][A-Za-z0-9\s_-]{2,40}|#+\s+.+)$")
 DOCX_HEADING_RE = re.compile(r"heading", re.IGNORECASE)
+DEFAULT_CHUNK_WINDOW = 1000
+DEFAULT_CHUNK_OVERLAP = 120
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,48 @@ def parse_document(path: Path, file_type: str) -> ParsedKB:
 
 def normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
+
+
+def build_section_chunks(
+    section: KBSection,
+    *,
+    window: int = DEFAULT_CHUNK_WINDOW,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[KBChunk]:
+    if window < 1:
+        raise ValueError("chunk window must be positive")
+    if overlap < 0:
+        raise ValueError("chunk overlap must not be negative")
+
+    chunks: list[KBChunk] = []
+    cursor = 0
+    chunk_index = 1
+    while cursor < len(section.text):
+        end = min(cursor + window, len(section.text))
+        snippet = section.text[cursor:end].strip()
+        if snippet:
+            chunks.append(
+                KBChunk(
+                    id=str(uuid4()),
+                    section_id=section.id,
+                    section_index=section.section_index,
+                    chunk_index=chunk_index,
+                    text=snippet,
+                    search_text=normalize_text(f"{section.title} {snippet}"),
+                    char_start=section.char_start + cursor,
+                    char_end=section.char_start + end,
+                    source_kind=section.source_kind,
+                    page_number=section.page_number,
+                    asset_id=section.asset_id,
+                )
+            )
+            chunk_index += 1
+        if end >= len(section.text):
+            break
+        cursor = max(end - overlap, cursor + 1)
+    return chunks
+
+
 def _parse_docx(doc: DocxDocument) -> ParsedKB:
     sections: list[KBSection] = []
     current_title = "Section 1"
@@ -179,31 +223,8 @@ def _parse_text_sections(text: str) -> ParsedKB:
 
 def _chunk_sections(sections: list[KBSection]) -> list[KBChunk]:
     chunks: list[KBChunk] = []
-    window = 1000
-    overlap = 100
     for section in sections:
-        cursor = 0
-        chunk_index = 1
-        while cursor < len(section.text):
-            end = min(cursor + window, len(section.text))
-            snippet = section.text[cursor:end].strip()
-            if snippet:
-                chunks.append(
-                    KBChunk(
-                        id=str(uuid4()),
-                        section_id=section.id,
-                        section_index=section.section_index,
-                        chunk_index=chunk_index,
-                        text=snippet,
-                        search_text=normalize_text(f"{section.title} {snippet}"),
-                        char_start=section.char_start + cursor,
-                        char_end=section.char_start + end,
-                    )
-                )
-                chunk_index += 1
-            if end >= len(section.text):
-                break
-            cursor = max(end - overlap, cursor + 1)
+        chunks.extend(build_section_chunks(section))
     return chunks
 
 
