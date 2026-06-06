@@ -71,6 +71,7 @@ class ToolDefinition:
     max_retries: int = 1
     cache_ttl_seconds: float = 0.0  # 0 表示不缓存
     is_async: bool = True
+    enabled: bool = True
 
     # 运行时统计
     total_calls: int = 0
@@ -159,8 +160,9 @@ class ToolRegistry:
                 cache_ttl_seconds=cache_ttl_seconds,
                 is_async=is_async,
             )
+            self._remove_from_category_index(name)
             self._tools[name] = definition
-            self._category_index[category].append(name)
+            self._add_to_category_index(category, name)
             logger.info("tool_registered name=%s category=%s async=%s", name, category, is_async)
             return func
 
@@ -170,8 +172,9 @@ class ToolRegistry:
         """直接注册一个 ToolDefinition 实例（非装饰器路径）。"""
         if definition.name in self._tools:
             logger.warning("tool_overwrite name=%s", definition.name)
+        self._remove_from_category_index(definition.name)
         self._tools[definition.name] = definition
-        self._category_index[definition.category].append(definition.name)
+        self._add_to_category_index(definition.category, definition.name)
         logger.info("tool_registered_direct name=%s category=%s", definition.name, definition.category)
 
     def unregister(self, name: str) -> bool:
@@ -179,10 +182,17 @@ class ToolRegistry:
         tool = self._tools.pop(name, None)
         if tool is None:
             return False
-        cat_list = self._category_index.get(tool.category, [])
-        if name in cat_list:
-            cat_list.remove(name)
+        self._remove_from_category_index(name)
         logger.info("tool_unregistered name=%s", name)
+        return True
+
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        """更新工具启停状态；返回工具是否存在。"""
+        tool = self._tools.get(name)
+        if tool is None:
+            return False
+        tool.enabled = bool(enabled)
+        logger.info("tool_enabled_updated name=%s enabled=%s", name, tool.enabled)
         return True
 
     # ---- 查询 ---------------------------------------------------------------
@@ -227,6 +237,8 @@ class ToolRegistry:
         ctx = context or {}
         result: list[dict[str, Any]] = []
         for name, tool in self._tools.items():
+            if not tool.enabled:
+                continue
             if enabled_tools is not None and name not in enabled_tools:
                 continue
             if categories is not None and tool.category not in categories:
@@ -252,6 +264,8 @@ class ToolRegistry:
         """生成 LangChain StructuredTool 列表（用于 bind_tools）。"""
         result: list[StructuredTool] = []
         for name, tool in self._tools.items():
+            if not tool.enabled:
+                continue
             if enabled_tools is not None and name not in enabled_tools:
                 continue
             if categories is not None and tool.category not in categories:
@@ -292,6 +306,9 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult(tool_name=name, success=False, error=f"tool '{name}' not registered")
+
+        if not tool.enabled:
+            return ToolResult(tool_name=name, success=False, error=f"tool '{name}' is disabled")
 
         if tool.requires_confirmation and not force:
             return ToolResult(
@@ -399,8 +416,9 @@ class ToolRegistry:
                     category="external",
                     is_async=True,
                 )
+                self._remove_from_category_index(mcp_name)
                 self._tools[mcp_name] = definition
-                self._category_index["external"].append(mcp_name)
+                self._add_to_category_index("external", mcp_name)
             logger.info("mcp_server_registered name=%s tool_count=%d", name, len(tools))
             return True
         except Exception as exc:
@@ -439,17 +457,32 @@ class ToolRegistry:
         for name, tool in self._tools.items():
             tools_stats[name] = {
                 "category": tool.category,
+                "description": tool.description,
+                "enabled": tool.enabled,
                 "total_calls": tool.total_calls,
                 "success_rate": round(tool.success_rate, 4),
                 "avg_duration_ms": round(tool.avg_duration_ms, 2),
             }
         return {
             "registered_tools": len(self._tools),
+            "enabled_tools": sum(1 for tool in self._tools.values() if tool.enabled),
             "categories": len(self._category_index),
             "mcp_servers": len(self._mcp_servers),
             "cache_entries": len(self._cache),
             "tools": tools_stats,
         }
+
+    def _add_to_category_index(self, category: str, name: str) -> None:
+        names = self._category_index[category]
+        if name not in names:
+            names.append(name)
+
+    def _remove_from_category_index(self, name: str) -> None:
+        for category, names in list(self._category_index.items()):
+            if name in names:
+                names.remove(name)
+            if not names:
+                self._category_index.pop(category, None)
 
 
 # ---------------------------------------------------------------------------

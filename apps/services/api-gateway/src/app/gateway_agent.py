@@ -278,6 +278,9 @@ async def run_agent_search(
                 description="Evaluate a basic arithmetic expression when numerical computation is needed.",
             )
         )
+    from .business_tools import extend_with_enabled_business_tools
+
+    extend_with_enabled_business_tools(tools, enabled_tools)
     agent_contract = _agent_runtime_contract(tools)
     tools_by_name = {tool.name: tool for tool in tools}
     try:

@@ -8,8 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from conftest import clear_app_modules
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -17,12 +15,13 @@ GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
 
 def _prioritize_sys_path(path: Path) -> None:
     target = str(path)
+    if sys.path[:1] == [target]:
+        return
     try:
         sys.path.remove(target)
     except ValueError:
         pass
     sys.path.insert(0, target)
-    clear_app_modules()
 
 
 def _import_module(module_name: str, monkeypatch) -> None:
@@ -74,6 +73,7 @@ class TestToolRegistry:
         assert tool.name == "test_search"
         assert tool.category == "search"
         assert tool.is_async
+        assert tool.enabled
 
         # 清理
         tr._tools.clear()
@@ -174,6 +174,36 @@ class TestToolRegistry:
         tr._tools.clear()
 
     @pytest.mark.asyncio
+    async def test_disabled_tool_is_hidden_and_not_executable(self, monkeypatch) -> None:
+        _import_module("app.tool_registry", monkeypatch)
+        from app.tool_registry import tool_registry as tr
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
+        @tr.register(name="toggle_me", description="可启停工具", category="general")
+        async def toggle_me() -> dict:
+            return {"ok": True}
+
+        assert tr.set_enabled("toggle_me", False)
+        assert not tr.get("toggle_me").enabled
+        assert tr.get_llm_tools() == []
+
+        result = await tr.execute("toggle_me", {})
+        assert not result.success
+        assert "disabled" in result.error
+
+        stats = tr.stats()
+        assert stats["enabled_tools"] == 0
+        assert stats["tools"]["toggle_me"]["enabled"] is False
+        assert stats["tools"]["toggle_me"]["description"] == "可启停工具"
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
+    @pytest.mark.asyncio
     async def test_execute_async_tool(self, monkeypatch) -> None:
         _import_module("app.tool_registry", monkeypatch)
         from app.tool_registry import tool_registry as tr
@@ -251,7 +281,9 @@ class TestToolRegistry:
 
         s = tr.stats()
         assert s["registered_tools"] >= 1
+        assert s["enabled_tools"] >= 1
         assert "stat_tool" in s["tools"]
+        assert s["tools"]["stat_tool"]["enabled"] is True
 
         tr._tools.clear()
 
@@ -272,6 +304,56 @@ class TestToolRegistry:
         assert td.avg_duration_ms == 0.0
         td.total_duration_ms = 500.0
         assert td.avg_duration_ms == 50.0
+
+    @pytest.mark.asyncio
+    async def test_business_tools_register_idempotently(self, monkeypatch) -> None:
+        _import_module("app.business_tools", monkeypatch)
+        from app.business_tools import ensure_business_tools_registered
+        from app.tool_registry import tool_registry as tr
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
+        ensure_business_tools_registered()
+        ensure_business_tools_registered()
+
+        expected = {"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"}
+        assert expected.issubset(set(tr.tool_names))
+        system_names = [tool.name for tool in tr.list_by_category("system")]
+        for name in expected:
+            assert system_names.count(name) == 1
+
+        scope_result = await tr.execute(
+            "kb_scope_summary",
+            {"scope_snapshot": {"corpus_ids": ["kb:a", "kb:b"], "document_count": 3}},
+        )
+        assert scope_result.success
+        assert scope_result.data["corpus_count"] == 2
+        assert scope_result.data["document_count"] == 3
+
+        trace_result = await tr.execute(
+            "workflow_trace_summary",
+            {
+                "workflow_run": {
+                    "workflow_state": {
+                        "response": {
+                            "llm_trace": {"model_resolved": "test-model", "fallback_used": False},
+                            "semantic_cache": {"hit": True},
+                            "hallucination": {"passed": True},
+                        }
+                    },
+                    "tool_calls": [{"tool": "search", "success": True}],
+                }
+            },
+        )
+        assert trace_result.success
+        assert trace_result.data["trace_completeness"] >= 0.8
+        assert trace_result.data["tool_success_rate"] == 1.0
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
 
 
 # ============================================================================
@@ -612,6 +694,35 @@ class TestIntegration:
         assert "parameters" in func
 
         tr._tools.clear()
+
+    def test_business_tools_can_extend_agent_runtime_contract(self, monkeypatch) -> None:
+        _import_module("app.business_tools", monkeypatch)
+        from app.business_tools import extend_with_enabled_business_tools
+        from app.tool_registry import tool_registry as tr
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
+        tools = []
+        extend_with_enabled_business_tools(tools, {"search_scope"})
+        assert tools == []
+        assert "kb_scope_summary" not in tr.tool_names
+
+        extend_with_enabled_business_tools(tools, {"kb_scope_summary", "tool_registry_stats"})
+
+        assert [tool.name for tool in tools] == ["kb_scope_summary", "tool_registry_stats"]
+        assert "workflow_trace_summary" in tr.tool_names
+
+        tr.set_enabled("kb_scope_summary", False)
+        tools = []
+        extend_with_enabled_business_tools(tools, {"kb_scope_summary", "tool_registry_stats"})
+
+        assert [tool.name for tool in tools] == ["tool_registry_stats"]
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
 
     def test_decomposition_result_feeds_agent(self, monkeypatch) -> None:
         """任务拆解结果应能正确驱动 Agent 并行执行。"""
