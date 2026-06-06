@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -13,6 +14,7 @@ def _load_script_module(module_name: str, relative_path: str):
     if spec is None or spec.loader is None:
         raise RuntimeError(f"unable to load module: {module_path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -339,31 +341,154 @@ def test_smoke_eval_runs_regression_gate_with_repo_baseline(monkeypatch, tmp_pat
     smoke_eval = _load_script_module("smoke_eval_regression_gate_test", "scripts/dev/smoke_eval.py")
     monkeypatch.setattr(smoke_eval, "REPORT_DIR", tmp_path)
 
-    calls: list[list[str]] = []
+    calls: list[dict[str, object]] = []
 
-    def fake_run(command: list[str], check: bool, cwd: str) -> None:
-        calls.append(command)
+    def fake_run(command: list[str], check: bool, cwd: str, timeout: int) -> None:
+        calls.append({"command": command, "timeout": timeout})
         assert check is True
         assert cwd == str(REPO_ROOT)
+        assert timeout == 123
 
     monkeypatch.setattr(smoke_eval.subprocess, "run", fake_run)
 
     report_path = tmp_path / "agent_smoke_report.json"
-    output_path, summary_path = smoke_eval.run_regression_gate(report_path)
+    output_path, summary_path = smoke_eval.run_regression_gate(report_path, timeout_seconds=123)
 
     assert output_path == tmp_path / "agent_smoke_regression_gate.json"
     assert summary_path == tmp_path / "agent_smoke_regression_gate.md"
     assert calls == [
-        [
-            smoke_eval.sys.executable,
-            str(smoke_eval.REGRESSION_GATE_SCRIPT),
-            "--report",
-            str(report_path),
-            "--baseline",
-            str(smoke_eval.REGRESSION_BASELINE),
-            "--output",
-            str(output_path),
-            "--summary-output",
-            str(summary_path),
-        ]
+        {
+            "command": [
+                smoke_eval.sys.executable,
+                str(smoke_eval.REGRESSION_GATE_SCRIPT),
+                "--report",
+                str(report_path),
+                "--baseline",
+                str(smoke_eval.REGRESSION_BASELINE),
+                "--output",
+                str(output_path),
+                "--summary-output",
+                str(summary_path),
+            ],
+            "timeout": 123,
+        }
     ]
+
+
+def test_smoke_eval_subprocess_timeout_has_actionable_error(monkeypatch) -> None:
+    smoke_eval = _load_script_module("smoke_eval_timeout_test", "scripts/dev/smoke_eval.py")
+
+    def fake_run(command: list[str], check: bool, cwd: str, timeout: int) -> None:
+        raise smoke_eval.subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(smoke_eval.subprocess, "run", fake_run)
+
+    try:
+        smoke_eval.run_checked_subprocess(["python", "slow.py"], timeout_seconds=7)
+    except RuntimeError as exc:
+        assert "timed out after 7s" in str(exc)
+        assert "python slow.py" in str(exc)
+    else:
+        raise AssertionError("expected timeout to raise RuntimeError")
+
+
+def test_http_helpers_poll_job_times_out_with_last_status(monkeypatch) -> None:
+    http_helpers = _load_script_module("http_helpers_timeout_test", "scripts/evaluation/http_helpers.py")
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "status": "processing",
+                "document_status": "uploaded",
+                "phase": "parsing",
+                "query_ready": False,
+            }
+
+    class FakeClient:
+        def get(self, *_args, **_kwargs) -> FakeResponse:
+            return FakeResponse()
+
+    ticks = iter([0.0, 0.0, 0.0, 0.2])
+    monkeypatch.setattr(http_helpers.time, "time", lambda: next(ticks))
+    monkeypatch.setattr(http_helpers.time, "sleep", lambda _seconds: None)
+
+    try:
+        http_helpers.poll_job(
+            FakeClient(),
+            base_url="http://example.test/api/v1",
+            headers={},
+            job_id="job-timeout",
+            timeout_seconds=0.1,
+            poll_seconds=0.01,
+            upload_ack_seconds=0.1,
+        )
+    except TimeoutError as exc:
+        assert "job-timeout" in str(exc)
+        assert '"document_status": "uploaded"' in str(exc)
+        assert '"phase": "parsing"' in str(exc)
+    else:
+        raise AssertionError("expected poll timeout")
+
+
+def test_pytest_group_runner_discovers_test_files(tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_discovery_test", "scripts/quality/run_pytest_groups.py")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_alpha.py").write_text("def test_alpha(): pass\n", encoding="utf-8")
+    (tests_dir / "helper.py").write_text("", encoding="utf-8")
+
+    groups = runner.build_groups([str(tests_dir)])
+
+    assert [group.name for group in groups] == [(tests_dir / "test_alpha.py").as_posix()]
+    assert groups[0].args == [str(tests_dir / "test_alpha.py")]
+
+
+def test_pytest_group_runner_timeout_is_actionable(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_timeout_test", "scripts/quality/run_pytest_groups.py")
+
+    class FakeProcess:
+        pid = 12345
+
+        def poll(self):
+            return None
+
+    closed: list[str] = []
+
+    class FakeHandle:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def close(self) -> None:
+            closed.append(self.name)
+
+    terminated: list[int] = []
+
+    def fake_start_process(_command, *, stdout_path: Path, stderr_path: Path, disable_plugin_autoload: bool = True):
+        assert disable_plugin_autoload is True
+        return FakeProcess(), FakeHandle(stdout_path.name), FakeHandle(stderr_path.name)
+
+    ticks = iter([0.0, 2.0, 2.1])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "_start_process", fake_start_process)
+    monkeypatch.setattr(runner, "terminate_process_tree", lambda process: terminated.append(process.pid))
+
+    result = runner.run_group(
+        runner.TestGroup(name="tests/test_slow.py", args=["tests/test_slow.py"]),
+        python="python",
+        pytest_args=["-q"],
+        timeout_seconds=1,
+        heartbeat_seconds=1,
+        log_dir=tmp_path,
+    )
+
+    assert result.exit_code == 124
+    assert result.timed_out is True
+    assert terminated == [12345]
+    assert len(closed) == 2
+    assert result.stdout_path.parent == tmp_path

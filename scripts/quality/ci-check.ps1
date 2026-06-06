@@ -7,7 +7,9 @@ param(
     [switch]$SkipFrontendBuild,
     [switch]$SkipDockerConfig,
     [switch]$SkipPytest,
-    [switch]$IncludeDockerBuild
+    [switch]$IncludeDockerBuild,
+    [int]$PytestTimeoutSeconds = 900,
+    [int]$PytestTotalTimeoutSeconds = 3600
 )
 
 Set-StrictMode -Version Latest
@@ -51,6 +53,60 @@ function Invoke-RepoTool {
     Invoke-ExternalCommand -Command $Command -Arguments $Arguments -WorkingDirectory $WorkingDirectory
 }
 
+function Invoke-RepoToolWithTimeout {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string[]]$Arguments = @(),
+        [string]$WorkingDirectory = $repoRoot,
+        [int]$TimeoutSeconds = 900,
+        [int]$HeartbeatSeconds = 30
+    )
+
+    $logDir = Join-Path $repoRoot "logs\quality"
+    Ensure-Directory -Path $logDir
+    $safeName = ($Command -replace '[^A-Za-z0-9_.-]', '_')
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $stdoutPath = Join-Path $logDir "$safeName-$timestamp.out.log"
+    $stderrPath = Join-Path $logDir "$safeName-$timestamp.err.log"
+
+    $process = Start-Process `
+        -FilePath $Command `
+        -ArgumentList $Arguments `
+        -WorkingDirectory $WorkingDirectory `
+        -NoNewWindow `
+        -PassThru `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
+
+    $started = Get-Date
+    try {
+        while (-not $process.HasExited) {
+            $waitMs = [Math]::Max([Math]::Min($HeartbeatSeconds, 30), 1) * 1000
+            $process.WaitForExit($waitMs) | Out-Null
+            $elapsed = [int]((Get-Date) - $started).TotalSeconds
+            Write-Info "Still running after ${elapsed}s: $Command $($Arguments -join ' ')"
+            if ($elapsed -ge $TimeoutSeconds) {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                throw "Command timed out after ${TimeoutSeconds}s: $Command $($Arguments -join ' '). Logs: $stdoutPath $stderrPath"
+            }
+        }
+
+        $stdout = if (Test-Path $stdoutPath) { Get-Content -Path $stdoutPath -Raw -ErrorAction SilentlyContinue } else { "" }
+        $stderr = if (Test-Path $stderrPath) { Get-Content -Path $stderrPath -Raw -ErrorAction SilentlyContinue } else { "" }
+        if ($stdout) { Write-Host $stdout.TrimEnd() }
+        if ($stderr) { Write-Host $stderr.TrimEnd() }
+
+        if ($process.ExitCode -ne 0) {
+            throw ("Command failed with exit code {0}: {1} {2}. Logs: {3} {4}" -f $process.ExitCode, $Command, ($Arguments -join ' '), $stdoutPath, $stderrPath)
+        }
+    }
+    finally {
+        if ($null -ne $process -and -not $process.HasExited) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 if (-not $SkipEncodingCheck) {
     Invoke-Check "Encoding Check" {
         $args = @($python.BaseArguments) + @("scripts/quality/check-encoding.py")
@@ -91,8 +147,13 @@ if (-not $SkipDockerConfig) {
 
 if (-not $SkipPytest) {
     Invoke-Check "Pytest" {
-        $args = @($python.BaseArguments) + @("-m", "pytest", "tests", "-q")
-        Invoke-RepoTool -Command $python.Command -Arguments $args
+        $args = @($python.BaseArguments) + @(
+            "scripts/quality/run_pytest_groups.py",
+            "--timeout-seconds",
+            "$PytestTimeoutSeconds",
+            "tests"
+        )
+        Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds
     }
 }
 

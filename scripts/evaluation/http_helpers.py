@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -186,8 +187,10 @@ def poll_job(
     timeout_seconds: int,
     poll_seconds: float,
     upload_ack_seconds: float,
+    progress_seconds: float = 30.0,
 ) -> dict[str, Any]:
     started = time.time()
+    next_progress_at = started + max(float(progress_seconds), float(poll_seconds))
     query_ready_at: float | None = None
     hybrid_ready_at: float | None = None
     ready_at: float | None = None
@@ -202,18 +205,41 @@ def poll_job(
         payload = response.json()
         last_payload = payload
         document_status = str(payload.get("document_status") or payload.get("status") or "")
+        now = time.time()
         if payload.get("query_ready") and query_ready_at is None:
-            query_ready_at = time.time()
+            query_ready_at = now
         if str(payload.get("document_enhancement_status") or payload.get("enhancement_status") or "") in {
             "summary_vectors_ready",
             "hybrid_ready",
         } and hybrid_ready_at is None:
-            hybrid_ready_at = time.time()
+            hybrid_ready_at = now
         if document_status in {"ready", "failed"} and ready_at is None:
-            ready_at = time.time()
-        if document_status in {"ready", "failed"}:
+            ready_at = now
+        if now >= next_progress_at:
+            print(
+                json.dumps(
+                    {
+                        "event": "ingest_poll_progress",
+                        "job_id": job_id,
+                        "elapsed_seconds": round(now - started, 3),
+                        "status": str(payload.get("status") or ""),
+                        "document_status": document_status,
+                        "phase": str(payload.get("phase") or ""),
+                        "query_ready": bool(payload.get("query_ready")),
+                        "enhancement_status": str(payload.get("document_enhancement_status") or payload.get("enhancement_status") or ""),
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            next_progress_at = now + max(float(progress_seconds), float(poll_seconds))
+        if document_status == "failed":
+            raise RuntimeError(f"ingest job failed: {job_id} ({_compact_job_status(payload)})")
+        if document_status == "ready":
             break
         time.sleep(poll_seconds)
+    else:
+        raise TimeoutError(f"ingest job did not become ready before timeout: {job_id} ({_compact_job_status(last_payload)})")
 
     finished = time.time()
     return {
@@ -228,6 +254,22 @@ def poll_job(
     }
 
 
+def _compact_job_status(payload: dict[str, Any]) -> str:
+    if not payload:
+        return "no job payload observed"
+    fields = {
+        "status": payload.get("status"),
+        "document_status": payload.get("document_status"),
+        "phase": payload.get("phase"),
+        "query_ready": payload.get("query_ready"),
+        "enhancement_status": payload.get("document_enhancement_status") or payload.get("enhancement_status"),
+        "error_code": payload.get("error_code"),
+        "message": payload.get("message") or payload.get("error_message"),
+    }
+    cleaned = {key: value for key, value in fields.items() if value not in (None, "")}
+    return json.dumps(cleaned, ensure_ascii=False, sort_keys=True)
+
+
 def upload_and_wait(
     client: httpx.Client,
     *,
@@ -239,6 +281,7 @@ def upload_and_wait(
     category: str = "",
     timeout_seconds: int = 900,
     poll_seconds: float = 2.0,
+    progress_seconds: float = 30.0,
 ) -> dict[str, Any]:
     upload_started = time.time()
     session = create_upload(
@@ -274,6 +317,7 @@ def upload_and_wait(
         timeout_seconds=timeout_seconds,
         poll_seconds=poll_seconds,
         upload_ack_seconds=upload_ack_seconds,
+        progress_seconds=progress_seconds,
     )
     return {
         "service": "kb",

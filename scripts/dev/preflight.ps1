@@ -27,7 +27,7 @@ try {
     Invoke-ExternalCommand -Command "python" -Arguments @("-m", "compileall", "packages/python", "apps/services/api-gateway", "apps/services/knowledge-base")
 
     Write-Info "Running backend test suite..."
-    Invoke-ExternalCommand -Command "python" -Arguments @("-m", "pytest", "tests", "-q")
+    Invoke-ExternalCommand -Command "python" -Arguments @("scripts/quality/run_pytest_groups.py", "tests")
 
     Write-Info "Validating compose config..."
     Invoke-ExternalCommand -Command "docker" -Arguments @("compose", "config", "--quiet")

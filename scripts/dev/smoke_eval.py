@@ -19,6 +19,7 @@ EVAL_SUITE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "run-eval-suite.py"
 REGRESSION_GATE_SCRIPT = REPO_ROOT / "scripts" / "evaluation" / "check-eval-regression.py"
 REGRESSION_BASELINE = REPO_ROOT / "scripts" / "evaluation" / "fixtures" / "agent_smoke_baseline.json"
 HTTP_HELPERS_DIR = REPO_ROOT / "scripts" / "evaluation"
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 900
 
 if str(HTTP_HELPERS_DIR) not in sys.path:
     sys.path.insert(0, str(HTTP_HELPERS_DIR))
@@ -118,11 +119,25 @@ def write_runtime_suite(policy_corpus_id: str, travel_corpus_id: str) -> Path:
     return runtime_suite_path
 
 
-def run_eval_suite(base_url: str, email: str, password: str, config_path: Path) -> tuple[Path, Path]:
+def run_checked_subprocess(command: list[str], *, timeout_seconds: int) -> None:
+    printable = " ".join(command)
+    print(f"[smoke-eval] running: {printable} (timeout={timeout_seconds}s)", flush=True)
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            cwd=str(REPO_ROOT),
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"subprocess timed out after {timeout_seconds}s: {printable}") from exc
+
+
+def run_eval_suite(base_url: str, email: str, password: str, config_path: Path, *, timeout_seconds: int = DEFAULT_SUBPROCESS_TIMEOUT_SECONDS) -> tuple[Path, Path]:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORT_DIR / "agent_smoke_report.json"
     summary_path = REPORT_DIR / "agent_smoke_report.md"
-    subprocess.run(
+    run_checked_subprocess(
         [
             sys.executable,
             str(EVAL_SUITE_SCRIPT),
@@ -139,17 +154,16 @@ def run_eval_suite(base_url: str, email: str, password: str, config_path: Path) 
             "--summary-output",
             str(summary_path),
         ],
-        check=True,
-        cwd=str(REPO_ROOT),
+        timeout_seconds=timeout_seconds,
     )
     return report_path, summary_path
 
 
-def run_regression_gate(report_path: Path) -> tuple[Path, Path]:
+def run_regression_gate(report_path: Path, *, timeout_seconds: int = DEFAULT_SUBPROCESS_TIMEOUT_SECONDS) -> tuple[Path, Path]:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = REPORT_DIR / "agent_smoke_regression_gate.json"
     summary_path = REPORT_DIR / "agent_smoke_regression_gate.md"
-    subprocess.run(
+    run_checked_subprocess(
         [
             sys.executable,
             str(REGRESSION_GATE_SCRIPT),
@@ -162,8 +176,7 @@ def run_regression_gate(report_path: Path) -> tuple[Path, Path]:
             "--summary-output",
             str(summary_path),
         ],
-        check=True,
-        cwd=str(REPO_ROOT),
+        timeout_seconds=timeout_seconds,
     )
     return output_path, summary_path
 
@@ -176,6 +189,7 @@ def main() -> int:
     parser.add_argument("--skip-upload", action="store_true")
     parser.add_argument("--wait-for-ready", action="store_true")
     parser.add_argument("--wait-timeout-seconds", type=int, default=180)
+    parser.add_argument("--subprocess-timeout-seconds", type=int, default=DEFAULT_SUBPROCESS_TIMEOUT_SECONDS)
     parser.add_argument("--gateway-health-url", default="")
     parser.add_argument("--kb-health-url", default="")
     args = parser.parse_args()
@@ -239,8 +253,14 @@ def main() -> int:
         )
 
     runtime_suite_path = write_runtime_suite(policy_corpus_id, travel_corpus_id)
-    report_path, _summary_path = run_eval_suite(base_url, email, password, runtime_suite_path)
-    run_regression_gate(report_path)
+    report_path, _summary_path = run_eval_suite(
+        base_url,
+        email,
+        password,
+        runtime_suite_path,
+        timeout_seconds=args.subprocess_timeout_seconds,
+    )
+    run_regression_gate(report_path, timeout_seconds=args.subprocess_timeout_seconds)
     return 0
 
 
