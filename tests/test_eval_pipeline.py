@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -373,6 +374,101 @@ def test_smoke_eval_runs_regression_gate_with_repo_baseline(monkeypatch, tmp_pat
             "timeout": 123,
         }
     ]
+
+
+def _write_smoke_evidence_pack(fixture_dir: Path, *, include_agent_fixture: bool = True) -> Path:
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    baseline = {
+        "suite_name": "agent_smoke",
+        "suite_version": "smoke-eval-2026-03-10",
+        "required_dataset_versions": [
+            "agent-smoke-grounded-2026-03-10",
+            "agent-smoke-agent-2026-03-10",
+            "agent-smoke-refusal-2026-03-10",
+        ],
+        "overall_thresholds": {"correctness": 0.85},
+        "jobs": {
+            "grounded_single": {
+                "dataset_version": "agent-smoke-grounded-2026-03-10",
+                "execution_modes": ["grounded"],
+                "thresholds": {"correctness": 0.85},
+            },
+            "agent_multi": {
+                "dataset_version": "agent-smoke-agent-2026-03-10",
+                "execution_modes": ["agent"],
+                "thresholds": {"correctness": 0.7},
+            },
+            "strict_refusal": {
+                "dataset_version": "agent-smoke-refusal-2026-03-10",
+                "execution_modes": ["grounded"],
+                "thresholds": {"correctness": 1.0},
+            },
+        },
+    }
+    fixtures = {
+        "agent_smoke_grounded.json": ("grounded_single", False, 1),
+        "agent_smoke_agent.json": ("agent_multi", False, 1),
+        "agent_smoke_refusal.json": ("strict_refusal", True, 0),
+    }
+    for file_name, (category, must_refuse, min_citations) in fixtures.items():
+        if file_name == "agent_smoke_agent.json" and not include_agent_fixture:
+            continue
+        (fixture_dir / file_name).write_text(
+            json.dumps(
+                [
+                    {
+                        "id": file_name.removesuffix(".json"),
+                        "category": category,
+                        "question": "What evidence is required?",
+                        "expected_sections": [],
+                        "min_citations": min_citations,
+                        "must_refuse_without_evidence": must_refuse,
+                    }
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    (fixture_dir / "agent_smoke_policy.txt").write_text("Expense policy evidence.\n", encoding="utf-8")
+    (fixture_dir / "agent_smoke_travel.txt").write_text("Travel policy evidence.\n", encoding="utf-8")
+    baseline_path = fixture_dir / "agent_smoke_baseline.json"
+    baseline_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8")
+    return baseline_path
+
+
+def test_agent_smoke_evidence_pack_validator_passes_for_complete_pack(tmp_path: Path) -> None:
+    validator = _load_script_module(
+        "agent_smoke_evidence_pack_pass_test",
+        "scripts/evaluation/verify-agent-smoke-evidence.py",
+    )
+    fixture_dir = tmp_path / "fixtures"
+    baseline_path = _write_smoke_evidence_pack(fixture_dir)
+
+    result = validator.validate_evidence_pack(baseline_path=baseline_path, fixture_dir=fixture_dir)
+
+    assert result["status"] == "passed"
+    assert result["failures"] == []
+    assert result["required_dataset_versions"] == result["job_dataset_versions"]
+    assert [item["case_count"] for item in result["eval_fixtures"]] == [1, 1, 1]
+
+
+def test_agent_smoke_evidence_pack_validator_fails_on_missing_fixture_and_version_mismatch(tmp_path: Path) -> None:
+    validator = _load_script_module(
+        "agent_smoke_evidence_pack_fail_test",
+        "scripts/evaluation/verify-agent-smoke-evidence.py",
+    )
+    fixture_dir = tmp_path / "fixtures"
+    baseline_path = _write_smoke_evidence_pack(fixture_dir, include_agent_fixture=False)
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline["required_dataset_versions"] = ["agent-smoke-grounded-2026-03-10"]
+    baseline_path.write_text(json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    result = validator.validate_evidence_pack(baseline_path=baseline_path, fixture_dir=fixture_dir)
+
+    assert result["status"] == "failed"
+    assert any("agent_smoke_agent.json: missing" in item for item in result["failures"])
+    assert any("required_dataset_versions must match jobs dataset_version values" in item for item in result["failures"])
 
 
 def test_smoke_eval_subprocess_timeout_has_actionable_error(monkeypatch) -> None:

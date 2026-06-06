@@ -1685,6 +1685,7 @@ python scripts/evaluation/compare-embedding-providers.py --fixture tests/fixture
 python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.json> --corpus-id kb:<uuid>
 python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
 python scripts/evaluation/check-eval-regression.py --report <suite-report.json>
+python scripts/evaluation/verify-agent-smoke-evidence.py
 python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 ```
 
@@ -1699,6 +1700,8 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 - `benchmark-local-ingest.py`：产出本地解析 sections、chunks、parse ms 和 throughput
 
 没有真实业务压测报告前，不建议把“延迟降低多少”“吞吐提升几倍”写成确定指标；面试中可以说“已有脚本和 fixture 能复现评测闭环，业务数据指标待补充”。
+
+离线证据包校验见 [`docs/reference/evaluation-evidence-pack.md`](docs/reference/evaluation-evidence-pack.md)，用于在不启动服务的情况下确认 smoke eval baseline、fixture、语料和 dataset version 仍然一致。
 
 ### smoke-eval 会做什么
 
