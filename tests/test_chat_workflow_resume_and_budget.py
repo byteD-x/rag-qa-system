@@ -554,6 +554,138 @@ def test_build_chat_response_payload_includes_hallucination_rules() -> None:
     assert hallucination["items"][0]["type"] == "fake_citation"
 
 
+def test_hallucination_deep_gate_is_disabled_by_default(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(hallucination_deep_check_enabled=False, hallucination_auto_correct_threshold=0.5),
+    )
+    prepared = {"payload": SimpleNamespace(question="How do refunds work?")}
+    response_payload = {
+        "answer": "Refunds require approval [1].",
+        "answer_mode": "grounded",
+        "citations": [{"unit_id": "unit-1", "quote": "Refunds require approval."}],
+        "hallucination": {"hallucination_score": 0.0, "passed": True, "needs_correction": False},
+    }
+
+    result = asyncio.run(
+        gateway_chat_service._apply_hallucination_deep_gate(
+            prepared=prepared,
+            response_payload=response_payload,
+        )
+    )
+
+    hallucination = result["hallucination"]
+    assert hallucination["source"] == "rules"
+    assert hallucination["gate"] == {
+        "enabled": False,
+        "status": "disabled",
+        "action": "allow",
+        "threshold": 0.5,
+    }
+
+
+def test_hallucination_deep_gate_marks_needs_correction(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    detector_calls: list[dict[str, object]] = []
+
+    class FakeSettings:
+        configured = True
+
+    class FakeDetector:
+        def __init__(self, **kwargs):
+            detector_calls.append({"init": kwargs})
+
+        async def detect(self, **kwargs):
+            detector_calls.append({"detect": kwargs})
+            return SimpleNamespace(
+                hallucination_score=0.77,
+                passed=False,
+                needs_correction=True,
+                check_dimensions={"citation_consistency": 1.0, "number_consistency": 1.0, "llm_overall": 0.23},
+                items=[
+                    SimpleNamespace(
+                        type="unsupported_claim",
+                        severity="high",
+                        description="answer includes an unsupported claim",
+                        location="sentence 1",
+                        evidence_ref="[1]",
+                        suggestion="regenerate from evidence",
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(hallucination_deep_check_enabled=True, hallucination_auto_correct_threshold=0.5),
+    )
+    monkeypatch.setattr(gateway_chat_service, "load_llm_settings", lambda: FakeSettings())
+    monkeypatch.setattr(gateway_chat_service, "HallucinationDetector", FakeDetector)
+    prepared = {"payload": SimpleNamespace(question="How do refunds work?")}
+    response_payload = {
+        "answer": "Refunds require approval [1].",
+        "answer_mode": "grounded",
+        "citations": [{"unit_id": "unit-1", "quote": "Refunds require approval."}],
+        "hallucination": {"hallucination_score": 0.0, "passed": True, "needs_correction": False},
+    }
+
+    result = asyncio.run(
+        gateway_chat_service._apply_hallucination_deep_gate(
+            prepared=prepared,
+            response_payload=response_payload,
+        )
+    )
+
+    hallucination = result["hallucination"]
+    assert detector_calls
+    assert detector_calls[1]["detect"]["question"] == "How do refunds work?"
+    assert hallucination["source"] == "rules+llm"
+    assert hallucination["hallucination_score"] == 0.77
+    assert hallucination["needs_correction"] is True
+    assert hallucination["gate"]["status"] == "needs_correction"
+    assert hallucination["gate"]["action"] == "review_or_regenerate"
+    assert hallucination["rule_check"]["source"] == "rules"
+
+
+def test_hallucination_deep_gate_skips_when_llm_is_not_configured(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+
+    class FakeSettings:
+        configured = False
+
+    class FailDetector:
+        def __init__(self, **kwargs):
+            raise AssertionError("detector should not be created when LLM is not configured")
+
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(hallucination_deep_check_enabled=True, hallucination_auto_correct_threshold=0.0),
+    )
+    monkeypatch.setattr(gateway_chat_service, "load_llm_settings", lambda: FakeSettings())
+    monkeypatch.setattr(gateway_chat_service, "HallucinationDetector", FailDetector)
+    response_payload = {
+        "answer": "Refunds require approval [1].",
+        "answer_mode": "grounded",
+        "citations": [{"unit_id": "unit-1"}],
+        "hallucination": {"hallucination_score": 0.0, "passed": True, "needs_correction": False},
+    }
+
+    result = asyncio.run(
+        gateway_chat_service._apply_hallucination_deep_gate(
+            prepared={"payload": SimpleNamespace(question="How do refunds work?")},
+            response_payload=response_payload,
+        )
+    )
+
+    assert result["hallucination"]["gate"]["enabled"] is True
+    assert result["hallucination"]["gate"]["status"] == "skipped"
+    assert result["hallucination"]["gate"]["reason"] == "llm_not_configured"
+    assert result["hallucination"]["gate"]["threshold"] == 0.0
+
+
 def test_build_chat_response_payload_includes_semantic_cache_meta() -> None:
     gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
     cache_meta = {

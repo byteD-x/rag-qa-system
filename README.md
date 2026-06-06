@@ -1662,8 +1662,15 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 
 - `GATEWAY_CHAT_MAX_IN_FLIGHT_GLOBAL`
 - `GATEWAY_CHAT_MAX_IN_FLIGHT_PER_USER`
+- `GATEWAY_AGENT_RUNTIME`
+- `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED`
+- `GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD`
 - `KB_QUERY_MAX_IN_FLIGHT_GLOBAL`
 - `KB_QUERY_MAX_IN_FLIGHT_PER_USER`
+
+说明：
+- `GATEWAY_AGENT_RUNTIME=simple` 保持现有 Agent 工具检索链路；设为 `enhanced` 时启用任务拆解/反思增强运行时，失败会自动回退 simple。
+- `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭 LLM 深度幻觉检测，避免额外成本；开启后会在规则检测后追加生成后门禁元数据。
 
 ## 评测与回归
 

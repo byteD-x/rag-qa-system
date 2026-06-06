@@ -103,7 +103,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backend-smoke-reports
-          path: artifacts/reports/agent_smoke_report.*
+          path: |
+            artifacts/reports/agent_smoke_report.*
+            artifacts/reports/agent_smoke_regression_gate.*
           if-no-files-found: ignore
 
       - name: Dump backend logs on failure

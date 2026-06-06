@@ -10,13 +10,15 @@ import httpx
 from fastapi import HTTPException
 
 from shared.auth import CurrentUser
+from shared.langchain_chat import build_chat_model
 from shared.prompt_safety import analyze_prompt_safety, apply_safety_response_policy
 from shared.tracing import current_trace_id, ensure_trace_id
 
-from .gateway_agent import run_agent_search
+from .ai_client import load_llm_settings
+from .gateway_agent import run_agent_search, run_enhanced_agent
 from .gateway_answering import classify_evidence, compact_text, generate_grounded_answer
 from .gateway_audit_support import write_gateway_audit_event
-from .hallucination_detector import detect_hallucination_rules, hallucination_report_to_dict
+from .hallucination_detector import HallucinationDetector, detect_hallucination_rules, hallucination_report_to_dict
 from .gateway_platform_store import resolve_platform_context
 from .gateway_pricing import estimate_usage_cost, usage_with_meta
 from .gateway_runtime import (
@@ -63,6 +65,73 @@ def _workflow_tool_calls(prepared: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _workflow_agent_events(prepared: dict[str, Any]) -> list[dict[str, Any]]:
     return list((((prepared.get("retrieval_meta") or {}).get("agent") or {}).get("events") or []))
+
+
+async def _run_agent_retrieval(
+    *,
+    user: CurrentUser,
+    scope_snapshot: dict[str, Any],
+    question: str,
+    history: list[dict[str, Any]],
+    focus_hint: dict[str, Any],
+    agent_profile: dict[str, Any],
+    prompt_template: dict[str, Any],
+    retrieve_scope_evidence_fn: Any,
+    fetch_corpus_documents_fn: Any,
+) -> tuple[list[dict[str, Any]], str, dict[str, Any]]:
+    agent_runtime = str(getattr(runtime_settings, "agent_runtime", "simple") or "simple").strip().lower()
+    common_kwargs = {
+        "user": user,
+        "scope_snapshot": scope_snapshot,
+        "question": question,
+        "history": history,
+        "focus_hint": focus_hint,
+        "agent_profile": agent_profile,
+        "prompt_template": prompt_template,
+        "retrieve_scope_evidence_fn": retrieve_scope_evidence_fn,
+        "fetch_corpus_documents_fn": fetch_corpus_documents_fn,
+        "kb_service_url": runtime_settings.kb_service_url,
+    }
+    if agent_runtime != "enhanced":
+        return await run_agent_search(**common_kwargs)
+    try:
+        evidence, contextualized_question, retrieval_meta = await run_enhanced_agent(**common_kwargs)
+    except Exception as exc:
+        logger.warning("enhanced agent runtime failed; falling back to simple agent", exc_info=True)
+        evidence, contextualized_question, retrieval_meta = await run_agent_search(**common_kwargs)
+        retrieval_meta = dict(retrieval_meta or {})
+        aggregate = dict(retrieval_meta.get("aggregate") or {})
+        aggregate.update(
+            {
+                "agent_runtime": "simple",
+                "requested_agent_runtime": "enhanced",
+                "agent_runtime_fallback": True,
+                "agent_runtime_fallback_reason": exc.__class__.__name__,
+            }
+        )
+        retrieval_meta["aggregate"] = aggregate
+        agent_meta = dict(retrieval_meta.get("agent") or {})
+        agent_meta.update(
+            {
+                "enhanced_requested": True,
+                "fallback": True,
+                "fallback_reason": exc.__class__.__name__,
+            }
+        )
+        retrieval_meta["agent"] = agent_meta
+        return evidence, contextualized_question, retrieval_meta
+
+    retrieval_meta = dict(retrieval_meta or {})
+    aggregate = dict(retrieval_meta.get("aggregate") or {})
+    aggregate.setdefault("execution_mode", "agent")
+    aggregate["agent_runtime"] = "enhanced"
+    aggregate["agent_runtime_fallback"] = False
+    retrieval_meta["aggregate"] = aggregate
+    agent_meta = dict(retrieval_meta.get("agent") or {})
+    agent_meta["enhanced_requested"] = True
+    agent_meta["enhanced"] = True
+    retrieval_meta["agent"] = agent_meta
+    return evidence, contextualized_question, retrieval_meta
 
 
 def _has_temporal_intent(question: str) -> bool:
@@ -1296,7 +1365,7 @@ async def prepare_chat_message(
     history = recent_history_messages_fn(session_id, user, limit=8)
     retrieval_started = time.perf_counter()
     if execution_mode == "agent":
-        evidence, contextualized_question, retrieval_meta = await run_agent_search(
+        evidence, contextualized_question, retrieval_meta = await _run_agent_retrieval(
             user=user,
             scope_snapshot=scope_snapshot,
             question=payload.question,
@@ -1306,7 +1375,6 @@ async def prepare_chat_message(
             prompt_template=dict(platform_context.get("prompt_template") or {}),
             retrieve_scope_evidence_fn=retrieve_scope_evidence_fn,
             fetch_corpus_documents_fn=fetch_corpus_documents_fn,
-            kb_service_url=runtime_settings.kb_service_url,
         )
     else:
         evidence, contextualized_question, retrieval_meta = await retrieve_scope_evidence_fn(
@@ -1471,6 +1539,83 @@ def build_chat_response_payload(
     }
 
 
+async def _apply_hallucination_deep_gate(
+    *,
+    prepared: dict[str, Any],
+    response_payload: dict[str, Any],
+) -> dict[str, Any]:
+    hallucination = dict(response_payload.get("hallucination") or {})
+    configured_threshold = getattr(runtime_settings, "hallucination_auto_correct_threshold", 0.5)
+    threshold = 0.5 if configured_threshold is None else float(configured_threshold)
+    enabled = bool(getattr(runtime_settings, "hallucination_deep_check_enabled", False))
+    hallucination.setdefault("source", "rules")
+    hallucination["gate"] = {
+        "enabled": enabled,
+        "status": "disabled",
+        "action": "allow",
+        "threshold": threshold,
+    }
+    if not enabled:
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    answer = str(response_payload.get("answer") or "").strip()
+    if not answer:
+        hallucination["gate"].update({"status": "skipped", "reason": "empty_answer"})
+        response_payload["hallucination"] = hallucination
+        return response_payload
+    if str(response_payload.get("answer_mode") or "") == "refusal":
+        hallucination["gate"].update({"status": "skipped", "reason": "refusal_answer"})
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    settings = load_llm_settings()
+    if not settings.configured:
+        hallucination["gate"].update({"status": "skipped", "reason": "llm_not_configured"})
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    try:
+        detector = HallucinationDetector(
+            build_chat_model_fn=build_chat_model,
+            settings=settings,
+            auto_correct_threshold=threshold,
+        )
+        report = await detector.detect(
+            answer=answer,
+            evidence=list(response_payload.get("citations") or []),
+            question=str(
+                (prepared.get("payload") or {}).get("question", "")
+                if isinstance(prepared.get("payload"), dict)
+                else getattr(prepared.get("payload"), "question", "")
+            ),
+            deep_check=True,
+        )
+    except Exception as exc:
+        logger.warning("hallucination deep gate failed", exc_info=True)
+        hallucination["gate"].update(
+            {
+                "status": "failed",
+                "reason": exc.__class__.__name__,
+            }
+        )
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    rule_check = dict(hallucination)
+    deep_check = hallucination_report_to_dict(report)
+    deep_check["source"] = "rules+llm"
+    deep_check["rule_check"] = rule_check
+    deep_check["gate"] = {
+        "enabled": True,
+        "status": "needs_correction" if bool(deep_check.get("needs_correction")) else "passed",
+        "action": "review_or_regenerate" if bool(deep_check.get("needs_correction")) else "allow",
+        "threshold": threshold,
+    }
+    response_payload["hallucination"] = deep_check
+    return response_payload
+
+
 def finalize_chat_message(
     *,
     prepared: dict[str, Any],
@@ -1633,6 +1778,10 @@ async def handle_chat_message(
     try:
         if generation_checkpoint:
             response_payload = dict(initial_response_payload or {})
+            response_payload = await _apply_hallucination_deep_gate(
+                prepared=prepared,
+                response_payload=response_payload,
+            )
         else:
             answer_payload, cache_meta = await _lookup_semantic_answer(prepared)
             if answer_payload is None:
@@ -1655,6 +1804,10 @@ async def handle_chat_message(
                 prepared=prepared,
                 answer_payload=answer_payload,
                 generation_ms=generation_ms,
+            )
+            response_payload = await _apply_hallucination_deep_gate(
+                prepared=prepared,
+                response_payload=response_payload,
             )
             update_workflow_run_fn(
                 run_id=str(workflow_run.get("id") or ""),

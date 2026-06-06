@@ -661,6 +661,103 @@ def test_prepare_chat_message_uses_agent_execution_mode(monkeypatch) -> None:
     assert captured["scope_snapshot"]["execution_mode"] == "agent"
 
 
+def test_run_agent_retrieval_uses_enhanced_runtime(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_enhanced_agent(**kwargs):
+        calls.append(dict(kwargs))
+        return (
+            [{"unit_id": "chunk-enhanced", "evidence_path": {"final_score": 0.91}}],
+            "enhanced expense flow",
+            {"aggregate": {"selected_candidates": 1}, "agent": {"events": []}},
+        )
+
+    async def fail_run_agent_search(**kwargs):
+        raise AssertionError("simple agent should not run when enhanced succeeds")
+
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(agent_runtime="enhanced", kb_service_url="http://kb-service:8200"),
+    )
+    monkeypatch.setattr(gateway_chat_service, "run_enhanced_agent", fake_run_enhanced_agent)
+    monkeypatch.setattr(gateway_chat_service, "run_agent_search", fail_run_agent_search)
+
+    evidence, contextualized_question, retrieval_meta = asyncio.run(
+        gateway_chat_service._run_agent_retrieval(
+            user=user,
+            scope_snapshot={"corpus_ids": ["kb:base-1"], "execution_mode": "agent"},
+            question="What is the expense flow?",
+            history=[],
+            focus_hint={},
+            agent_profile={},
+            prompt_template={},
+            retrieve_scope_evidence_fn=lambda **kwargs: None,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+        )
+    )
+
+    assert calls
+    assert evidence[0]["unit_id"] == "chunk-enhanced"
+    assert contextualized_question == "enhanced expense flow"
+    assert retrieval_meta["aggregate"]["execution_mode"] == "agent"
+    assert retrieval_meta["aggregate"]["agent_runtime"] == "enhanced"
+    assert retrieval_meta["aggregate"]["agent_runtime_fallback"] is False
+    assert retrieval_meta["agent"]["enhanced"] is True
+    assert retrieval_meta["agent"]["enhanced_requested"] is True
+
+
+def test_run_agent_retrieval_falls_back_when_enhanced_runtime_fails(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    fallback_calls: list[dict[str, object]] = []
+
+    async def fail_run_enhanced_agent(**kwargs):
+        raise RuntimeError("planner unavailable")
+
+    async def fake_run_agent_search(**kwargs):
+        fallback_calls.append(dict(kwargs))
+        return (
+            [{"unit_id": "chunk-simple", "evidence_path": {"final_score": 0.82}}],
+            "simple expense flow",
+            {"aggregate": {"selected_candidates": 1, "execution_mode": "agent"}, "agent": {"events": []}},
+        )
+
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(agent_runtime="enhanced", kb_service_url="http://kb-service:8200"),
+    )
+    monkeypatch.setattr(gateway_chat_service, "run_enhanced_agent", fail_run_enhanced_agent)
+    monkeypatch.setattr(gateway_chat_service, "run_agent_search", fake_run_agent_search)
+
+    evidence, contextualized_question, retrieval_meta = asyncio.run(
+        gateway_chat_service._run_agent_retrieval(
+            user=user,
+            scope_snapshot={"corpus_ids": ["kb:base-1"], "execution_mode": "agent"},
+            question="What is the expense flow?",
+            history=[],
+            focus_hint={},
+            agent_profile={},
+            prompt_template={},
+            retrieve_scope_evidence_fn=lambda **kwargs: None,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+        )
+    )
+
+    assert fallback_calls
+    assert evidence[0]["unit_id"] == "chunk-simple"
+    assert contextualized_question == "simple expense flow"
+    assert retrieval_meta["aggregate"]["agent_runtime"] == "simple"
+    assert retrieval_meta["aggregate"]["requested_agent_runtime"] == "enhanced"
+    assert retrieval_meta["aggregate"]["agent_runtime_fallback"] is True
+    assert retrieval_meta["aggregate"]["agent_runtime_fallback_reason"] == "RuntimeError"
+    assert retrieval_meta["agent"]["fallback"] is True
+    assert retrieval_meta["agent"]["fallback_reason"] == "RuntimeError"
+
+
 def test_handle_chat_message_persists_workflow_run(monkeypatch) -> None:
     gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
     user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")

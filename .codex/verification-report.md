@@ -45,3 +45,48 @@ git diff --check -- .
 - 当前人工接管队列数据仍来自 `chat_sessions.scope_json.handoff`，适合本地测试和接口契约验证。
 - 跨实例生产队列应替换为 Redis sorted set 或数据库 `SELECT ... FOR UPDATE SKIP LOCKED` 后端。
 - 前端平台页本次补齐 `platformApi` 兼容导出以恢复构建；部分展示型平台端点仍需后续与 Gateway 真实路由逐项联调。
+
+## AI 应用工程 P0 闭环改造
+
+完成内容：
+
+- 将 Agent 主链路改为可配置运行时：`GATEWAY_AGENT_RUNTIME=simple|enhanced`，默认保持 simple；开启 enhanced 时调用增强 Agent，失败自动回退 simple 并写入 retrieval metadata。
+- 将生成后幻觉深检做成可配置门禁：`GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭；开启后在规则检测后追加 LLM 深度一致性检查和 gate 元数据。
+- smoke eval 的 CI artifact 上传范围补充 `agent_smoke_regression_gate.*`，便于审计 golden evaluation gate 的阈值结果。
+- 同步 `.env.example` 与 `README.md`，记录新增运行时开关和默认行为。
+
+已执行验证：
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall apps/services/api-gateway/src/app/gateway_chat_service.py apps/services/api-gateway/src/app/gateway_config.py tests/test_backend_infra.py tests/test_chat_workflow_resume_and_budget.py
+.\.venv\Scripts\python.exe -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
+git diff --check -- .
+where.exe docker
+```
+
+结果：
+
+- 定向 `compileall` 通过，覆盖本次修改的 Gateway 配置、聊天服务与新增测试文件。
+- Python 后端全仓 `compileall` 顺序重跑通过。并发验证时曾出现 Windows `__pycache__` 文件锁，顺序重跑后消失。
+- `git diff --check -- .` 通过；仅出现 Git 换行符转换 warning。
+- 当前环境没有 `docker` 命令，`where.exe docker` 返回 `INFO: Could not find files for the given pattern(s).`
+
+未完成验证与限制：
+
+- 新增后端 pytest 定向命令在 60 秒内无输出超时，已停止 job 且确认没有本仓库残留 Python 进程：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/test_backend_infra.py tests/test_chat_workflow_resume_and_budget.py -q -k "agent_retrieval or hallucination_deep_gate"
+```
+
+- 编码检查在 60 秒内无输出超时，已停止 job 且确认没有本仓库残留 Python 进程：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\quality\check-encoding.py --root .
+```
+
+风险与后续补偿：
+
+- `GATEWAY_AGENT_RUNTIME=enhanced` 会增加 Agent 编排成本与延迟，当前默认仍为 `simple`，增强运行时失败会回退 simple。
+- `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=true` 会增加一次 LLM 深检调用，当前默认关闭；低置信回答只写入 gate metadata，未自动改写用户答案。
+- 需要在 pytest 不再卡住的环境补跑新增定向测试、编码检查与 `docker compose config --quiet`。

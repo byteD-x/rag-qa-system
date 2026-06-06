@@ -42,6 +42,13 @@ def _read_int_env(*names: str, default: int) -> int:
         return default
 
 
+def _read_bool_env(*names: str, default: bool = False) -> bool:
+    raw = _read_env(*names, default="")
+    if not raw:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 KB_SERVICE_URL = os.getenv("KB_SERVICE_URL", "http://kb-service:8200").rstrip("/")
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("GATEWAY_TIMEOUT_SECONDS", "180"))
 RETRIEVAL_FANOUT_LIMIT = max(_read_int_env("GATEWAY_RETRIEVAL_FANOUT_LIMIT", default=4), 1)
@@ -93,6 +100,9 @@ class GatewayRuntimeSettings:
     kb_service_url: str
     request_timeout_seconds: float
     retrieval_fanout_limit: int
+    agent_runtime: str
+    hallucination_deep_check_enabled: bool
+    hallucination_auto_correct_threshold: float
     chat_max_in_flight_global: int
     chat_max_in_flight_per_user: int
     chat_session_cost_budget: float
@@ -164,10 +174,19 @@ def _load_price_tiers() -> list[PriceTier]:
     return finite_tiers + open_ended_tiers
 
 def load_gateway_runtime_settings() -> GatewayRuntimeSettings:
+    agent_runtime = _read_env("GATEWAY_AGENT_RUNTIME", default="simple").strip().lower()
+    if agent_runtime not in {"simple", "enhanced"}:
+        agent_runtime = "simple"
     return GatewayRuntimeSettings(
         kb_service_url=os.getenv("KB_SERVICE_URL", "http://kb-service:8200").rstrip("/"),
         request_timeout_seconds=float(os.getenv("GATEWAY_TIMEOUT_SECONDS", "180")),
         retrieval_fanout_limit=max(_read_int_env("GATEWAY_RETRIEVAL_FANOUT_LIMIT", default=4), 1),
+        agent_runtime=agent_runtime,
+        hallucination_deep_check_enabled=_read_bool_env("GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED", default=False),
+        hallucination_auto_correct_threshold=max(
+            min(_read_float_env("GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD", default=0.5), 1.0),
+            0.0,
+        ),
         chat_max_in_flight_global=max(_read_int_env("GATEWAY_CHAT_MAX_IN_FLIGHT_GLOBAL", default=32), 1),
         chat_max_in_flight_per_user=max(_read_int_env("GATEWAY_CHAT_MAX_IN_FLIGHT_PER_USER", default=4), 1),
         chat_session_cost_budget=max(_read_float_env("GATEWAY_CHAT_SESSION_COST_BUDGET", default=0.0), 0.0),
