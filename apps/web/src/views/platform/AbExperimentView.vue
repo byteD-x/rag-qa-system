@@ -133,6 +133,7 @@ async function stopExperiment(exp: any) {
 }
 
 function viewReport(exp: any) {
+  void exp
   ElMessage.info('实验报告功能开发中')
 }
 

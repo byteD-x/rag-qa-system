@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from shared.embeddings import EmbeddingSettings, clear_query_embedding_cache, em
 from shared.idempotency import build_request_hash, normalize_idempotency_key
 from shared.qdrant_store import qdrant_point_id
 from shared.stack_init import _load_migration_files, _migration_checksum, _select_pending_migrations
+
+from conftest import clear_app_modules
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -104,6 +107,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _load_gateway_main(monkeypatch):
@@ -1536,6 +1540,249 @@ def test_list_session_messages_attaches_feedback_payload(monkeypatch) -> None:
     assert len(messages) == 1
     assert messages[0]["id"] == "msg-1"
     assert messages[0]["feedback"]["verdict"] == "up"
+
+
+def test_local_handoff_queue_claims_highest_priority_matching_skill_group(monkeypatch) -> None:
+    gateway_handoff = _load_gateway_module("app.gateway_handoff")
+    rows = [
+        {
+            "id": "session-low",
+            "user_id": "user-1",
+            "title": "低优先级",
+            "scope_json": {
+                "handoff": {
+                    "status": "pending",
+                    "tenant_id": "tenant-a",
+                    "skill_group": "billing",
+                    "priority": 1,
+                    "requested_at": "2026-06-06T10:00:00+00:00",
+                }
+            },
+            "created_at": "2026-06-06T10:00:00+00:00",
+            "updated_at": "2026-06-06T10:00:00+00:00",
+        },
+        {
+            "id": "session-wrong-skill",
+            "user_id": "user-2",
+            "title": "技术问题",
+            "scope_json": {
+                "handoff": {
+                    "status": "pending",
+                    "tenant_id": "tenant-a",
+                    "skill_group": "technical",
+                    "priority": 99,
+                    "requested_at": "2026-06-06T09:00:00+00:00",
+                }
+            },
+            "created_at": "2026-06-06T09:00:00+00:00",
+            "updated_at": "2026-06-06T09:00:00+00:00",
+        },
+        {
+            "id": "session-high",
+            "user_id": "user-3",
+            "title": "高优先级",
+            "scope_json": {
+                "handoff": {
+                    "status": "pending",
+                    "tenant_id": "tenant-a",
+                    "skill_group": "Billing",
+                    "priority": 8,
+                    "requested_at": "2026-06-06T11:00:00+00:00",
+                }
+            },
+            "created_at": "2026-06-06T11:00:00+00:00",
+            "updated_at": "2026-06-06T11:00:00+00:00",
+        },
+    ]
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+
+        def execute(self, query, params=None):
+            if "SELECT *" in query:
+                self._rows = [row for row in rows if row["scope_json"]["handoff"]["tenant_id"] == params[0]]
+            elif "UPDATE chat_sessions" in query:
+                session_id = params[1]
+                tenant_id = params[2]
+                for row in rows:
+                    handoff = row["scope_json"]["handoff"]
+                    if row["id"] == session_id and handoff["tenant_id"] == tenant_id and handoff["status"] == "pending":
+                        row["scope_json"] = json.loads(params[0])
+                        self._row = row
+                        return None
+                self._row = None
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def fetchone(self):
+            return self._row
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.commit_count = 0
+
+        def cursor(self):
+            return _Cursor()
+
+        def commit(self):
+            self.commit_count += 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    connection = _Connection()
+    monkeypatch.setattr(gateway_handoff.gateway_db, "connect", lambda: connection)
+
+    claimed = gateway_handoff.local_handoff_queue.claim_next(
+        tenant_id="tenant-a",
+        skill_group="billing",
+        operator_id="operator-1",
+    )
+
+    assert claimed is not None
+    assert claimed["session_id"] == "session-high"
+    assert claimed["handoff"]["status"] == "claimed"
+    assert claimed["handoff"]["claimed_by"] == "operator-1"
+    assert claimed["handoff"]["claim_backend"] == "local_session_scope"
+    assert rows[1]["scope_json"]["handoff"]["status"] == "pending"
+
+
+def test_local_handoff_queue_does_not_claim_same_session_twice(monkeypatch) -> None:
+    gateway_handoff = _load_gateway_module("app.gateway_handoff")
+    rows = [
+        {
+            "id": "session-1",
+            "user_id": "user-1",
+            "title": "待接管",
+            "scope_json": {
+                "handoff": {
+                    "status": "pending",
+                    "tenant_id": "tenant-a",
+                    "skill_group": "general",
+                    "priority": 1,
+                    "requested_at": "2026-06-06T10:00:00+00:00",
+                }
+            },
+            "created_at": "2026-06-06T10:00:00+00:00",
+            "updated_at": "2026-06-06T10:00:00+00:00",
+        }
+    ]
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+
+        def execute(self, query, params=None):
+            if "SELECT *" in query:
+                self._rows = [
+                    row
+                    for row in rows
+                    if row["scope_json"]["handoff"]["tenant_id"] == params[0]
+                    and row["scope_json"]["handoff"]["status"] == "pending"
+                ]
+            elif "UPDATE chat_sessions" in query:
+                for row in rows:
+                    handoff = row["scope_json"]["handoff"]
+                    if row["id"] == params[1] and handoff["status"] == "pending":
+                        handoff["status"] = "claimed"
+                        handoff["claimed_by"] = "operator-1"
+                        self._row = row
+                        return None
+                self._row = None
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def fetchone(self):
+            return self._row
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def commit(self):
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(gateway_handoff.gateway_db, "connect", lambda: _Connection())
+
+    first = gateway_handoff.local_handoff_queue.claim_next(
+        tenant_id="tenant-a",
+        skill_group="general",
+        operator_id="operator-1",
+    )
+    second = gateway_handoff.local_handoff_queue.claim_next(
+        tenant_id="tenant-a",
+        skill_group="general",
+        operator_id="operator-2",
+    )
+
+    assert first is not None
+    assert first["session_id"] == "session-1"
+    assert second is None
+
+
+def test_claim_next_handoff_route_returns_claim_result_and_audit(monkeypatch) -> None:
+    gateway_chat_routes = _load_gateway_module("app.gateway_chat_routes")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    audit_events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(gateway_chat_routes, "require_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        gateway_chat_routes.local_handoff_queue,
+        "claim_next",
+        lambda **kwargs: {
+            "session_id": "session-1",
+            "id": "session-1",
+            "handoff": {
+                "tenant_id": kwargs["tenant_id"],
+                "skill_group": kwargs["skill_group"],
+                "claimed_by": kwargs["operator_id"],
+            },
+        },
+    )
+    monkeypatch.setattr(gateway_chat_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(dict(kwargs)))
+
+    result = asyncio.run(
+        gateway_chat_routes.claim_next_handoff_session(
+            gateway_chat_routes.ClaimHandoffSessionRequest(
+                tenant_id="tenant-a",
+                skill_group=" Billing ",
+                operator_id="operator-1",
+            ),
+            SimpleNamespace(url=SimpleNamespace(path="/api/v1/chat/handoff/claim-next")),
+            user,
+        )
+    )
+
+    assert result["claimed"] is True
+    assert result["session"]["session_id"] == "session-1"
+    assert result["backend"] == "local_session_scope"
+    assert audit_events[-1]["action"] == "chat.handoff.claim_next"
+    assert audit_events[-1]["resource_id"] == "session-1"
+    assert audit_events[-1]["details"]["skill_group"] == "billing"
 
 
 def test_kb_analytics_dashboard_payload_aggregates_ingest_health(monkeypatch) -> None:

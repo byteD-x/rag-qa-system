@@ -62,6 +62,7 @@ class CoalescedRequest:
     _response_set: bool = False
     _event: asyncio.Event = field(default_factory=asyncio.Event)
     _error: Exception | None = None
+    _leader: "CoalescedRequest | None" = field(default=None, repr=False, compare=False)
 
     def set_response(self, response: Any) -> None:
         """leader 设置响应，通知所有 follower。"""
@@ -78,11 +79,13 @@ class CoalescedRequest:
     @property
     def response(self) -> Any:
         """等待并获取响应（follower 调用）。"""
-        return self._response
+        source = self._leader or self
+        return source._response
 
     @property
     def error(self) -> Exception | None:
-        return self._error
+        source = self._leader or self
+        return source._error
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +155,7 @@ class RequestCoalescer:
                     created_at=time.time(),
                     is_leader=False,
                     _event=existing._event,  # 共享 event
+                    _leader=existing,
                 )
 
             # 成为 leader
@@ -170,7 +174,8 @@ class RequestCoalescer:
             if cr.is_leader:
                 wait_ms = (time.time() - cr.created_at) * 1000.0
                 self._total_wait_ms += wait_ms
-            self._pending.pop(key, None)
+                if self._pending.get(key) is cr:
+                    self._pending.pop(key, None)
 
     def stats(self) -> dict[str, Any]:
         """返回合并器统计。"""

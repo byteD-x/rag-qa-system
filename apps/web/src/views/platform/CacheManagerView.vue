@@ -146,7 +146,6 @@ import { ref, reactive, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Loading, Refresh, Delete } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
-import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { getCacheStats, invalidateCache, getCacheConfig, updateCacheConfig, type CacheStats } from '@/api/platform';
 
 const loading = ref(false);

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import clear_app_modules
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -20,6 +22,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _import_gateway(module_name: str, monkeypatch) -> None:

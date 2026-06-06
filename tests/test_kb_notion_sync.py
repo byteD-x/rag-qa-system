@@ -10,6 +10,8 @@ from fastapi import HTTPException
 
 from shared import auth as auth_module
 
+from conftest import clear_app_modules
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KB_SRC = REPO_ROOT / "apps/services/knowledge-base/src"
@@ -22,6 +24,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _load_kb_module(module_name: str):

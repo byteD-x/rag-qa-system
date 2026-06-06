@@ -207,14 +207,15 @@ _BUILTIN_TEMPLATES: dict[str, SceneTemplate] = {
 
 def list_templates(*, tag: str = "") -> list[SceneTemplate]:
     """列出所有场景模板，可按 tag 过滤。"""
+    templates = {**_BUILTIN_TEMPLATES, **_custom_templates}
     if tag:
-        return [t for t in _BUILTIN_TEMPLATES.values() if tag in t.tags]
-    return list(_BUILTIN_TEMPLATES.values())
+        return [t for t in templates.values() if tag in t.tags]
+    return list(templates.values())
 
 
 def get_template(key: str) -> SceneTemplate | None:
     """按 key 获取场景模板。"""
-    return _BUILTIN_TEMPLATES.get(key)
+    return _custom_templates.get(key) or _BUILTIN_TEMPLATES.get(key)
 
 
 def get_tool_config_for_scene(scene_key: str) -> dict[str, Any]:

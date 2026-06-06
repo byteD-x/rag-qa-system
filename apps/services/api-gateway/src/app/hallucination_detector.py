@@ -170,6 +170,53 @@ def _check_number_consistency(answer: str, evidence: list[dict[str, Any]]) -> tu
     return items, min(1.0, score)
 
 
+def detect_hallucination_rules(
+    answer: str,
+    evidence: list[dict[str, Any]],
+    *,
+    threshold: float = 0.5,
+) -> HallucinationReport:
+    """执行不依赖 LLM 的规则级幻觉检测。"""
+    if not str(answer or "").strip():
+        return HallucinationReport(hallucination_score=0.0, passed=True)
+
+    cit_items, cit_score = _check_citation_consistency(answer, evidence)
+    num_items, num_score = _check_number_consistency(answer, evidence)
+    final_score = max(cit_score, num_score)
+    return HallucinationReport(
+        hallucination_score=round(final_score, 3),
+        items=cit_items + num_items,
+        check_dimensions={
+            "citation_consistency": round(1.0 - cit_score, 3),
+            "number_consistency": round(1.0 - num_score, 3),
+            "llm_overall": 1.0,
+        },
+        passed=final_score < threshold,
+        needs_correction=final_score >= threshold,
+    )
+
+
+def hallucination_report_to_dict(report: HallucinationReport) -> dict[str, Any]:
+    """序列化幻觉检测报告，便于写入 API 响应与审计日志。"""
+    return {
+        "hallucination_score": report.hallucination_score,
+        "passed": report.passed,
+        "needs_correction": report.needs_correction,
+        "check_dimensions": dict(report.check_dimensions),
+        "items": [
+            {
+                "type": item.type,
+                "severity": item.severity,
+                "description": item.description,
+                "location": item.location,
+                "evidence_ref": item.evidence_ref,
+                "suggestion": item.suggestion,
+            }
+            for item in report.items
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # LLM 深度检测
 # ---------------------------------------------------------------------------
@@ -209,11 +256,13 @@ class HallucinationDetector:
             return HallucinationReport(hallucination_score=0.0, passed=True)
 
         # Phase 1: 快速规则检测
-        cit_items, cit_score = _check_citation_consistency(answer, evidence)
-        num_items, num_score = _check_number_consistency(answer, evidence)
-
-        all_items = cit_items + num_items
-        rule_score = max(cit_score, num_score)
+        rule_report = detect_hallucination_rules(
+            answer,
+            evidence,
+            threshold=self._auto_correct_threshold,
+        )
+        all_items = list(rule_report.items)
+        rule_score = float(rule_report.hallucination_score)
 
         # Phase 2: LLM 深度检测
         llm_score = 0.0
@@ -231,8 +280,8 @@ class HallucinationDetector:
             hallucination_score=round(final_score, 3),
             items=all_items,
             check_dimensions={
-                "citation_consistency": round(1.0 - cit_score, 3),
-                "number_consistency": round(1.0 - num_score, 3),
+                "citation_consistency": float(rule_report.check_dimensions.get("citation_consistency", 1.0)),
+                "number_consistency": float(rule_report.check_dimensions.get("number_consistency", 1.0)),
                 "llm_overall": round(1.0 - llm_score, 3),
             },
             passed=final_score < self._auto_correct_threshold,

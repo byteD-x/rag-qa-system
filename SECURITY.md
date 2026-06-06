@@ -33,6 +33,21 @@
 - `.env` 文件
 - 在修复可用之前，完整公开利用链
 
+## 本地安全自检
+
+文档或配置变更至少执行：
+
+```powershell
+python scripts/quality/check-encoding.py --root .
+docker compose config --quiet
+```
+
+涉及鉴权、权限、提示注入、PII、API Key 或 Agent 护栏时，补跑相关安全回归：
+
+```powershell
+python -m pytest tests/test_safety_guardrails.py tests/test_api_error_payloads.py tests/test_platform_ecosystem_phase2.py -q
+```
+
 ## 响应目标
 
 仓库当前采用 best-effort 方式处理安全问题，目标流程如下：

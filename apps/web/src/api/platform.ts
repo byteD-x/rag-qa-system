@@ -253,3 +253,55 @@ export function getCacheConfig() {
 export function updateCacheConfig(data: { semantic_threshold?: number; default_ttl?: number; max_entries?: number }) {
   return request.patch('/platform/cache/config', data);
 }
+
+function dataEnvelope<T>(data: T): { data: T } {
+  return { data };
+}
+
+function unwrapItems(payload: any): any[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+  return [];
+}
+
+async function requestData(promise: Promise<any>): Promise<{ data: any }> {
+  return dataEnvelope(await promise);
+}
+
+async function requestItems(promise: Promise<any>): Promise<{ data: any[] }> {
+  return dataEnvelope(unwrapItems(await promise));
+}
+
+export const platformApi = {
+  listPromptTemplates: (params?: any) => requestItems(listPromptTemplates(params)),
+  applyPromptTemplate: (templateId: string) => requestData(request.post(`/platform/prompt-templates/${templateId}/apply`)),
+
+  listExperiments: () => requestItems(request.get('/platform/experiments')),
+  startExperiment: (data: any) => requestData(request.post('/platform/experiments', data)),
+  stopExperiment: (experimentId: string) => requestData(request.post(`/platform/experiments/${experimentId}/stop`)),
+
+  listOrchestrationRuns: () => requestItems(request.get('/platform/orchestration/runs')),
+
+  listApiKeys: () => requestItems(request.get('/platform/api-keys')),
+  createApiKey: (data: any) => requestData(request.post('/platform/api-keys', data)),
+  rotateApiKey: (keyId: string) => requestData(request.post(`/platform/api-keys/${keyId}/rotate`)),
+  revokeApiKey: (keyId: string) => requestData(request.post(`/platform/api-keys/${keyId}/revoke`)),
+
+  getPiiConfig: () => requestData(request.get('/platform/pii/config')),
+  savePiiConfig: (data: any) => requestData(request.patch('/platform/pii/config', data)),
+  testPiiDetection: (data: any) => requestData(request.post('/platform/pii/test', data)),
+
+  listWebhooks: () => requestItems(request.get('/platform/webhooks')),
+  webhookDeliveries: () => requestItems(request.get('/platform/webhooks/deliveries')),
+  registerWebhook: (data: any) => requestData(request.post('/platform/webhooks', data)),
+  testWebhook: (webhookId: string) => requestData(request.post(`/platform/webhooks/${webhookId}/test`)),
+  updateWebhook: (webhookId: string, data: any) => requestData(request.patch(`/platform/webhooks/${webhookId}`, data)),
+  deleteWebhook: (webhookId: string) => requestData(request.delete(`/platform/webhooks/${webhookId}`)),
+};

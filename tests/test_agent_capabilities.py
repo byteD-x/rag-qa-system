@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import clear_app_modules
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -20,6 +22,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _import_module(module_name: str, monkeypatch) -> None:
@@ -601,9 +604,9 @@ class TestIntegration:
 
         llm_tools = tr.get_llm_tools()
         assert len(llm_tools) == 1
+        assert llm_tools[0]["type"] == "function"
         func = llm_tools[0]["function"]
         # 兼容 OpenAI function-calling 格式
-        assert func["type"] == "function"
         assert "name" in func
         assert "description" in func
         assert "parameters" in func

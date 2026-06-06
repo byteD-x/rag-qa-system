@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from shared.tracing import current_trace_id, ensure_trace_id
 from .gateway_agent import run_agent_search
 from .gateway_answering import classify_evidence, compact_text, generate_grounded_answer
 from .gateway_audit_support import write_gateway_audit_event
+from .hallucination_detector import detect_hallucination_rules, hallucination_report_to_dict
 from .gateway_platform_store import resolve_platform_context
 from .gateway_pricing import estimate_usage_cost, usage_with_meta
 from .gateway_runtime import (
@@ -30,6 +32,7 @@ from .gateway_runtime import (
 )
 from .gateway_schemas import ChatScopePayload
 from .gateway_scope import normalize_execution_mode
+from .semantic_cache import CacheHit, semantic_cache
 from .gateway_transport import downstream_headers, request_service_json
 from .gateway_workflows import workflow_kind_for_turn
 
@@ -783,8 +786,10 @@ def _sanitize_answer_payload(answer_payload: dict[str, Any] | None) -> dict[str,
         "answer": str(payload.get("answer") or ""),
         "provider": str(payload.get("provider") or ""),
         "model": str(payload.get("model") or ""),
+        "citations": list(payload.get("citations") or []),
         "usage": dict(payload.get("usage") or {}),
         "llm_trace": dict(payload.get("llm_trace") or {}),
+        "semantic_cache": dict(payload.get("semantic_cache") or {}),
     }
 
 
@@ -804,6 +809,174 @@ def _build_generation_checkpoint(answer_payload: dict[str, Any], generation_ms: 
         "answer_payload": _sanitize_answer_payload(answer_payload),
         "generation_ms": max(float(generation_ms or 0.0), 0.0),
     }
+
+
+def _semantic_cache_scope_ids(prepared: dict[str, Any]) -> list[str]:
+    scope_snapshot = dict(prepared.get("scope_snapshot") or {})
+    scope_ids: set[str] = set()
+    for corpus_id in list(scope_snapshot.get("corpus_ids") or []):
+        cleaned = str(corpus_id or "").strip()
+        if cleaned:
+            scope_ids.add(cleaned)
+    for document_id in list(scope_snapshot.get("document_ids") or []):
+        cleaned = str(document_id or "").strip()
+        if cleaned:
+            scope_ids.add(f"doc:{cleaned}")
+    for item in list(prepared.get("evidence") or []):
+        document_id = str((item or {}).get("document_id") or "").strip()
+        unit_id = str((item or {}).get("unit_id") or "").strip()
+        if document_id:
+            scope_ids.add(f"doc:{document_id}")
+        if unit_id:
+            scope_ids.add(f"unit:{unit_id}")
+    return sorted(scope_ids)
+
+
+def _semantic_cache_model_key(prepared: dict[str, Any]) -> str:
+    scope_snapshot = dict(prepared.get("scope_snapshot") or {})
+    model_name = str(getattr(runtime_settings, "model", "") or os.getenv("LLM_MODEL") or os.getenv("AI_MODEL") or "")
+    parts = [
+        str(prepared.get("answer_mode") or ""),
+        str(prepared.get("execution_mode") or ""),
+        model_name,
+        str(scope_snapshot.get("prompt_template_id") or ""),
+        str(scope_snapshot.get("agent_profile_id") or ""),
+    ]
+    return ":".join(parts)
+
+
+def _semantic_cache_bypass_reason(prepared: dict[str, Any]) -> str:
+    if str(prepared.get("execution_mode") or "") != "grounded":
+        return "execution_mode_not_grounded"
+    if str(prepared.get("answer_mode") or "") != "grounded":
+        return "answer_mode_not_grounded"
+    if bool((prepared.get("safety") or {}).get("blocked")):
+        return "safety_blocked"
+    if not list(prepared.get("evidence") or []):
+        return "no_evidence"
+    if prepared.get("clarification"):
+        return "clarification_required"
+    if not _semantic_cache_scope_ids(prepared):
+        return "empty_scope"
+    return ""
+
+
+def _semantic_cache_meta(
+    *,
+    enabled: bool,
+    hit: bool = False,
+    cache_level: str = "",
+    similarity_score: float = 0.0,
+    original_question: str = "",
+    age_seconds: float = 0.0,
+    stored: bool = False,
+    bypass_reason: str = "",
+    cached_usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "enabled": enabled,
+        "hit": hit,
+        "cache_level": cache_level,
+        "similarity_score": round(float(similarity_score or 0.0), 4),
+        "original_question": original_question,
+        "age_seconds": round(float(age_seconds or 0.0), 3),
+        "stored": stored,
+        "bypass_reason": bypass_reason,
+        "cached_usage": dict(cached_usage or {}),
+    }
+
+
+def _answer_payload_from_cache_hit(hit: CacheHit, *, model_key: str) -> dict[str, Any]:
+    meta = _semantic_cache_meta(
+        enabled=True,
+        hit=True,
+        cache_level=hit.cache_level,
+        similarity_score=hit.similarity_score,
+        original_question=hit.original_question,
+        age_seconds=hit.age_seconds,
+        cached_usage=hit.cached_usage,
+    )
+    return {
+        "answer": hit.cached_answer,
+        "provider": "semantic_cache",
+        "model": model_key,
+        "citations": list(hit.cached_citations),
+        "usage": {},
+        "llm_trace": {
+            "cache_hit": True,
+            "cache_level": hit.cache_level,
+            "similarity_score": hit.similarity_score,
+            "original_question": hit.original_question,
+        },
+        "semantic_cache": meta,
+    }
+
+
+async def _lookup_semantic_answer(
+    prepared: dict[str, Any],
+    *,
+    cache: Any = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    cache = cache or semantic_cache
+    bypass_reason = _semantic_cache_bypass_reason(prepared)
+    if bypass_reason:
+        return None, _semantic_cache_meta(enabled=False, bypass_reason=bypass_reason)
+    model_key = _semantic_cache_model_key(prepared)
+    try:
+        hit = await cache.lookup(
+            question=str(prepared.get("contextualized_question") or ""),
+            corpus_ids=_semantic_cache_scope_ids(prepared),
+            model_name=model_key,
+        )
+    except Exception as exc:
+        logger.warning("semantic_cache_lookup_failed err=%s", exc)
+        return None, _semantic_cache_meta(enabled=False, bypass_reason="lookup_failed")
+    if hit is None:
+        return None, _semantic_cache_meta(enabled=True)
+    return _answer_payload_from_cache_hit(hit, model_key=model_key), _semantic_cache_meta(
+        enabled=True,
+        hit=True,
+        cache_level=hit.cache_level,
+        similarity_score=hit.similarity_score,
+        original_question=hit.original_question,
+        age_seconds=hit.age_seconds,
+        cached_usage=hit.cached_usage,
+    )
+
+
+async def _store_semantic_answer(
+    prepared: dict[str, Any],
+    answer_payload: dict[str, Any],
+    *,
+    cache_meta: dict[str, Any] | None = None,
+    cache: Any = None,
+) -> dict[str, Any]:
+    cache = cache or semantic_cache
+    meta = dict(cache_meta or {})
+    bypass_reason = _semantic_cache_bypass_reason(prepared)
+    if bypass_reason:
+        return _semantic_cache_meta(enabled=False, bypass_reason=bypass_reason)
+    answer = str(answer_payload.get("answer") or "").strip()
+    if not answer:
+        return _semantic_cache_meta(enabled=False, bypass_reason="empty_answer")
+    if bool((answer_payload.get("semantic_cache") or {}).get("hit")):
+        return dict(answer_payload.get("semantic_cache") or {})
+    try:
+        await cache.store(
+            question=str(prepared.get("contextualized_question") or ""),
+            answer=answer,
+            answer_mode=str(prepared.get("answer_mode") or ""),
+            citations=list(prepared.get("evidence") or []),
+            usage=dict(answer_payload.get("usage") or {}),
+            corpus_ids=_semantic_cache_scope_ids(prepared),
+            model_name=_semantic_cache_model_key(prepared),
+        )
+    except Exception as exc:
+        logger.warning("semantic_cache_store_failed err=%s", exc)
+        meta.update(_semantic_cache_meta(enabled=False, bypass_reason="store_failed"))
+        return meta
+    meta.update(_semantic_cache_meta(enabled=True, stored=True))
+    return meta
 
 
 def _resume_target_for_stage(stage: str, *, generation_checkpoint: dict[str, Any] | None = None) -> str:
@@ -1256,6 +1429,14 @@ def build_chat_response_payload(
     )
     answer_basis = _build_answer_basis(prepared)
     final_answer = _apply_answer_basis(answer_payload["answer"], answer_basis)
+    response_evidence = (
+        list(answer_payload.get("citations") or [])
+        if "citations" in answer_payload
+        else list(prepared["evidence"])
+    )
+    hallucination = hallucination_report_to_dict(
+        detect_hallucination_rules(final_answer, response_evidence)
+    )
     return {
         "session_id": prepared["session_id"],
         "execution_mode": prepared["execution_mode"],
@@ -1267,13 +1448,15 @@ def build_chat_response_payload(
         "refusal_reason": prepared["refusal_reason"],
         "safety": prepared["safety"],
         "resume": dict(prepared.get("resume") or {}),
-        "citations": prepared["evidence"],
-        "evidence_path": [item.get("evidence_path") or {} for item in prepared["evidence"]],
+        "citations": response_evidence,
+        "evidence_path": [item.get("evidence_path") or {} for item in response_evidence],
         "provider": answer_payload["provider"],
         "model": answer_payload["model"],
         "usage": answer_payload["usage"],
         "llm_trace": dict(answer_payload.get("llm_trace") or {}),
+        "semantic_cache": dict(answer_payload.get("semantic_cache") or {}),
         "answer_basis": answer_basis,
+        "hallucination": hallucination,
         "scope_snapshot": prepared["scope_snapshot"],
         "trace_id": prepared["trace_id"],
         "retrieval": prepared["retrieval_meta"],
@@ -1335,6 +1518,8 @@ def finalize_chat_message(
             "selected_candidates": int((prepared["retrieval_meta"].get("aggregate") or {}).get("selected_candidates", 0) or 0),
             "resumed_from_run_id": str((prepared.get("resume") or {}).get("source_run_id") or ""),
             "resumed_from_stage": str((prepared.get("resume") or {}).get("source_stage") or ""),
+            "hallucination_score": float((response_payload.get("hallucination") or {}).get("hallucination_score") or 0.0),
+            "hallucination_needs_correction": bool((response_payload.get("hallucination") or {}).get("needs_correction")),
         },
     )
     aggregate = dict(prepared["retrieval_meta"].get("aggregate") or {})
@@ -1449,14 +1634,21 @@ async def handle_chat_message(
         if generation_checkpoint:
             response_payload = dict(initial_response_payload or {})
         else:
-            answer_payload = await generate_grounded_answer(
-                question=prepared["contextualized_question"],
-                history=prepared["history"],
-                evidence=prepared["evidence"],
-                answer_mode=prepared["answer_mode"],
-                safety=prepared["safety"],
-                settings_prompt_append=str(prepared.get("settings_prompt_append") or ""),
-            )
+            answer_payload, cache_meta = await _lookup_semantic_answer(prepared)
+            if answer_payload is None:
+                answer_payload = await generate_grounded_answer(
+                    question=prepared["contextualized_question"],
+                    history=prepared["history"],
+                    evidence=prepared["evidence"],
+                    answer_mode=prepared["answer_mode"],
+                    safety=prepared["safety"],
+                    settings_prompt_append=str(prepared.get("settings_prompt_append") or ""),
+                )
+                answer_payload["semantic_cache"] = await _store_semantic_answer(
+                    prepared,
+                    answer_payload,
+                    cache_meta=cache_meta,
+                )
             generation_ms = round((time.perf_counter() - generation_started) * 1000.0, 3)
             generation_checkpoint = _build_generation_checkpoint(answer_payload, generation_ms)
             response_payload = build_chat_response_payload(

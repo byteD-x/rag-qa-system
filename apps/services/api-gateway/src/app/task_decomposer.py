@@ -55,7 +55,7 @@ class DecompositionResult:
 
     original_question: str
     complexity_score: int  # 1-5，1=极简单，5=极复杂
-    requires_decomposition: bool  # 是否需要拆解（≥3 触发）
+    requires_decomposition: bool = False  # 是否需要拆解（≥3 触发）
     sub_tasks: list[SubTask] = field(default_factory=list)
     execution_order: list[list[str]] = field(default_factory=list)  # [[task-1,task-2],[task-3]] 表示并行组
     reasoning: str = ""  # LLM 拆解理由

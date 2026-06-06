@@ -71,7 +71,7 @@
           <!-- DAG 执行顺序 -->
           <h4 style="margin-top: 20px">执行顺序（拓扑排序）</h4>
           <div v-for="(group, idx) in selectedRun.execution_order || []" :key="idx" class="exec-group">
-            <el-tag type="warning" size="small">并行组 {{ idx + 1 }}</el-tag>
+            <el-tag type="warning" size="small">并行组 {{ parallelGroupLabel(idx) }}</el-tag>
             <div class="group-tasks">
               <el-tag v-for="tid in group" :key="tid" size="small" effect="dark" style="margin: 2px 4px">
                 {{ tid }}
@@ -143,6 +143,10 @@ async function loadData() {
 function showRunDetail(row: any) {
   selectedRun.value = row
   showDetail.value = true
+}
+
+function parallelGroupLabel(index: string | number) {
+  return Number(index) + 1
 }
 
 onMounted(loadData)

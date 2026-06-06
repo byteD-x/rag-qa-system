@@ -4,6 +4,8 @@ import importlib
 import sys
 from pathlib import Path
 
+from conftest import clear_app_modules
+
 
 PRICE_TIERS_JSON = (
     '[{"max_input_tokens":131072,"input_price_per_1k_tokens":0.0008,"output_price_per_1k_tokens":0.0048},'
@@ -21,6 +23,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _load_gateway_main(monkeypatch):

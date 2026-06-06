@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import prioritize_service_src
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -27,11 +29,12 @@ def _import_gateway(monkeypatch) -> None:
     monkeypatch.setenv("POSTGRES_DSN", "postgresql://test:test@localhost:5432/test")
     monkeypatch.setenv("GATEWAY_GRAPH_CHECKPOINTER", "memory")
     monkeypatch.setenv("GATEWAY_TIMEOUT_SECONDS", "30")
-    for p in [str(GATEWAY_SRC), str(SHARED_SRC)]:
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    prioritize_service_src(GATEWAY_SRC)
+    shared_path = str(SHARED_SRC)
+    if shared_path not in sys.path:
+        sys.path.insert(1, shared_path)
     for name in list(sys.modules.keys()):
-        if name.startswith("app.") or name.startswith("shared."):
+        if name.startswith("shared."):
             sys.modules.pop(name, None)
 
 

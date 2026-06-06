@@ -98,7 +98,6 @@ import { ref, computed, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Loading } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
-import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listAgentProfiles, updateAgentProfile } from '@/api/platform';
 
 interface SceneItem {
@@ -144,14 +143,14 @@ const filteredScenes = computed(() => {
 });
 
 const tierLabel = (t: string) => ({ economy: '经济', standard: '标准', premium: '高级' })[t] || t;
-const retrievalLabel = (p: string) => ({ structure: '结构优先', full_text: '全文优先', vector: '向量优先', balanced: '均衡' })[p] || p;
+const retrievalLabel = (p?: string) => ({ structure: '结构优先', full_text: '全文优先', vector: '向量优先', balanced: '均衡' })[p || ''] || p || '均衡';
 const truncate = (text: string, max: number) => text.length > max ? text.slice(0, max) + '...' : text;
 
 const loadScenes = async () => {
   loading.value = true;
   try {
     // 尝试从后端加载，失败则用内置
-    const res: any = await listAgentProfiles().catch(() => ({}));
+    await listAgentProfiles().catch(() => ({}));
     scenes.value = builtinScenes;
   } finally {
     loading.value = false;

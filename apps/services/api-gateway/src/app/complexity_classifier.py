@@ -65,6 +65,11 @@ _SIMPLE_INDICATORS = [
     "定义", "含义",
 ]
 
+_GROUNDED_QUERY_INDICATORS = [
+    "流程", "规则", "政策", "制度", "审批", "权限", "配置",
+    "文档", "知识库", "条款", "SOP", "退款", "报销", "合同",
+]
+
 # 高复杂度信号
 _COMPLEX_KW = {
     "compare": ["比较", "对比", "差异", "区别", "vs", "versus", "哪个更好", "优缺点"],
@@ -153,6 +158,8 @@ def classify_complexity(
         if simple_count >= 1:
             score = max(1, score - 1)
             features.append("simple_query")
+        if any(kw in q for kw in _GROUNDED_QUERY_INDICATORS):
+            features.append("grounded_query")
 
     # 5. 实体密度
     entities = _ENTITY_DENSITY_RE.findall(q)
@@ -184,7 +191,7 @@ def classify_complexity(
 
     # 推荐路由和模型层级
     if score <= 1:
-        route = "common_knowledge"
+        route = "grounded" if "grounded_query" in features else "common_knowledge"
         tier = "economy"
         should_cache = True
         can_small = True

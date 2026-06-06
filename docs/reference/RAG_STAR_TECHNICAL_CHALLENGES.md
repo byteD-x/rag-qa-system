@@ -1,16 +1,16 @@
 # RAG-QA STAR 技术难点与解决方案
 
 > 面向岗位：AI 应用 / RAG 后端工程师  
-> 更新日期：2026-05-18  
+> 更新日期：2026-06-06
 > 使用方式：这份文档是面试时讲“我做了什么、难在哪里、怎么解决、如何验证”的主材料。所有结论必须能回到代码、测试、CI 或评测脚本；没有真实业务报告支撑的指标，只能写“待验证”。
 
 ## 口径边界
 
 | 分类 | 当前口径 |
 |---|---|
-| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、三层语义缓存、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK** |
-| 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；**75+ pytest用例覆盖Agent能力/推理优化/平台生态** |
-| 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测 |
+| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、三层语义缓存、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK** |
+| 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
+| 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
 | 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省 |
 
 ## STAR 1：把 RAG 演示链路从“能跑”打磨成“能解释”
@@ -307,9 +307,9 @@
 
 **Result**：
 
-- 三层缓存预估命中率>30%（真实场景），命中时0 Token消耗
+- 三层缓存已具备精确/语义/Prompt Cache 分层与统计能力；真实命中率需要以目标业务数据和压测报告确认
 - 模型故障<3次连续失败自动摘除，恢复后自动重新上线
-- 简单问候类问题自动路由到经济模型，综合成本可降低30-40%
+- 简单问候类问题可路由到经济模型；综合成本收益不写固定百分比，需以部署环境报告为准
 
 **技术难点**：语义缓存的误命中风险（相似但不同的问题返回相同答案）和缓存失效时机。
 
@@ -324,8 +324,9 @@
 - 补齐 RAG 离线评测闭环，新增 deterministic retrieval fixture 和 local ingest fixture，打通 retrieval ablation、embedding benchmark、local ingest benchmark 与 CI smoke，输出 recall@K、MRR、NDCG 和 ingest throughput 报告。
 - 建立面试材料的指标诚实边界，将未压测的延迟、吞吐、命中率提升、幻觉率下降标为待验证，避免把最小 fixture 的验证结果包装成真实业务收益。
 - 设计可扩展 Agent 工具注册中心，支持装饰器注册、MCP 协议兼容、结果缓存与并行调用，新增工具仅需 5 行代码。
+- 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
-- 构建三层语义缓存体系（L1 精确/L2 语义/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），预估降低 30%+ 重复推理成本。
+- 构建三层语义缓存体系（L1 精确/L2 语义/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
 
 ## 验证命令
 
@@ -355,6 +356,7 @@ cd apps\web; npm run test:unit; npm run build
 - 并发压测报告，包括 mean/p95 retrieval latency、QPS、错误率。
 - 成本报告，包括本地 embedding、外部 embedding、Cross-Encoder 增强的单位成本对比。
 - 人工抽样或自动 judge 的 faithfulness / citation alignment 报告。
+- 人工接管队列的生产后端联调报告，包括 Redis sorted set 或数据库 `SELECT ... FOR UPDATE SKIP LOCKED` 的多实例认领验证。
 
 ## 简历资料维护口径
 

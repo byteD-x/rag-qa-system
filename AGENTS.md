@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 本文件定义本仓库的人机协作协议（Owner / AI Agent / Reviewer）。
-> Last updated: 2026-06-02
+> Last updated: 2026-06-06
 
 ## 1. 目标与范围
 
@@ -61,7 +61,7 @@
 
 在仓库根目录执行：
 
-- `python scripts/quality/check-encoding.py`
+- `python scripts/quality/check-encoding.py --root .`
 - `cd apps/web && npm run test:unit`
 - `cd apps/web && npm run build`
 - `python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base`
@@ -106,16 +106,26 @@
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | 工具注册中心 | `apps/services/api-gateway/src/app/tool_registry.py` | 可扩展工具注册/发现/执行/MCP兼容 |
+| 工具发现与沙箱 | `apps/services/api-gateway/src/app/tool_discovery.py`、`tool_pipeline.py`、`tool_sandbox.py` | 工具发现、流水线执行与安全边界 |
+| Agent 编排 | `apps/services/api-gateway/src/app/agent_orchestrator.py` | 多步骤 Agent 规划、证据聚合与预算估算 |
+| Agent 元认知 | `apps/services/api-gateway/src/app/agent_metacognition.py` | 不确定性识别、澄清建议与错误恢复动作 |
+| 人工接管队列 | `apps/services/api-gateway/src/app/gateway_handoff.py` | 本地会话接管队列抽象、优先级排序与原子认领 |
 | 任务拆解引擎 | `apps/services/api-gateway/src/app/task_decomposer.py` | 复杂度评估+LLM拆解+DAG并行 |
 | 反思闭环 | `apps/services/api-gateway/src/app/agent_reflection.py` | 输出自检+失败分析+策略记忆 |
 | 记忆系统 | `apps/services/api-gateway/src/app/memory_extractor.py` | 三层记忆提取+Qdrant检索 |
+| 记忆增强 | `apps/services/api-gateway/src/app/memory_importance.py`、`memory_injection.py`、`memory_integrator.py` | 重要性评分、遗忘曲线、上下文注入 |
 | 语义缓存 | `apps/services/api-gateway/src/app/semantic_cache.py` | L1-L3三层缓存+LRU淘汰 |
 | 模型监控 | `apps/services/api-gateway/src/app/model_health.py` | 延迟追踪+自动熔断+健康评分 |
 | 复杂度分类 | `apps/services/api-gateway/src/app/complexity_classifier.py` | 7维特征快速评估+模型层级推荐 |
 | 请求合并 | `apps/services/api-gateway/src/app/request_coalescer.py` | 窗口合并+leader-follower模式 |
 | 指令体系 | `apps/services/api-gateway/src/app/instruction_merger.py` | 五层指令合并+冲突检测+变量系统 |
+| 指令热更新与评估 | `apps/services/api-gateway/src/app/instruction_hotreload.py`、`instruction_evaluator.py` | 指令版本追踪、热更新事件与 A/B 评估 |
 | 场景模板 | `apps/services/api-gateway/src/app/scene_templates.py` | 6大场景模板+一键切换 |
 | 幻觉检测 | `apps/services/api-gateway/src/app/hallucination_detector.py` | 规则+LLM双路径幻觉检测 |
+| 成本治理 | `apps/services/api-gateway/src/app/cost_attribution.py`、`cost_budget.py`、`gateway_pricing.py` | 成本归因、预算控制与 LLM 定价估算 |
+| 平台安全 | `apps/services/api-gateway/src/app/api_key_manager.py`、`pii_detector.py`、`agent_guardrails.py` | API Key 生命周期、PII 检测与 Agent 护栏 |
+| 上下文优化 | `apps/services/api-gateway/src/app/context_window.py`、`context_compressor.py`、`context_prioritizer.py` | 上下文窗口管理、压缩与优先级选择 |
+| TTFT 优化 | `apps/services/api-gateway/src/app/ttft_optimizer.py` | 首 token 延迟追踪与健康判断 |
 | Agent增强 | `apps/services/api-gateway/src/app/gateway_agent.py` | run_enhanced_agent()统一入口 |
 
 测试覆盖：
@@ -123,3 +133,7 @@
 - `tests/test_agent_capabilities.py` — Agent 核心能力（工具注册/任务拆解/反思/记忆）
 - `tests/test_inference_optimization.py` — 推理优化（缓存/健康监控/复杂度/合并）
 - `tests/test_platform_ecosystem.py` — 平台生态（指令/场景/幻觉/SDK）
+- `tests/test_agent_orchestration.py`、`tests/test_agent_metacognition.py` — Agent 编排、预算与元认知
+- `tests/test_memory_enhancement.py`、`tests/test_context_optimization.py` — 记忆增强与上下文优化
+- `tests/test_cost_management.py`、`tests/test_platform_ecosystem_phase2.py` — 成本治理、API Key、PII、指令热更新与 TTFT
+- `tests/test_backend_infra.py` — Gateway/KB 基础设施、人工接管队列和治理聚合回归

@@ -26,7 +26,8 @@ from .gateway_chat_service import (
 from .gateway_idempotency import begin_gateway_idempotency, complete_gateway_idempotency, fail_gateway_idempotency
 from .gateway_retrieval import retrieve_scope_evidence
 from .gateway_runtime import CHAT_PERMISSION, GATEWAY_BACKPRESSURE_TOTAL, GATEWAY_CHAT_REQUESTS_TOTAL, gateway_db, logger, runtime_settings
-from .gateway_schemas import CreateSessionRequest, MessageFeedbackRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
+from .gateway_handoff import local_handoff_queue
+from .gateway_schemas import ClaimHandoffSessionRequest, CreateSessionRequest, MessageFeedbackRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
 from .gateway_scope import default_scope, fetch_corpora, fetch_corpus_documents, normalize_execution_mode, resolve_scope_snapshot
 from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages, upsert_chat_message_feedback
 from .gateway_workflows import create_workflow_run, list_session_workflow_runs, load_workflow_run_for_user, update_workflow_run
@@ -181,6 +182,37 @@ async def list_chat_sessions(request: Request, user: CurrentUser) -> dict[str, A
             cur.execute("SELECT * FROM chat_sessions WHERE user_id = %s ORDER BY updated_at DESC", (user.user_id,))
             rows = cur.fetchall()
     return {"items": rows}
+
+
+@router.post("/api/v1/chat/handoff/claim-next")
+async def claim_next_handoff_session(payload: ClaimHandoffSessionRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
+    require_permission(request, user, CHAT_PERMISSION, action="chat.handoff.claim_next", resource_type="chat_handoff_queue")
+    session = local_handoff_queue.claim_next(
+        tenant_id=payload.tenant_id,
+        skill_group=payload.skill_group,
+        operator_id=payload.operator_id,
+    )
+    write_gateway_audit_event(
+        action="chat.handoff.claim_next",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="chat_session" if session else "chat_handoff_queue",
+        resource_id=str((session or {}).get("session_id") or ""),
+        scope="operator",
+        details={
+            "tenant_id": payload.tenant_id,
+            "skill_group": payload.skill_group,
+            "operator_id": payload.operator_id,
+            "claimed": bool(session),
+            "backend": "local_session_scope",
+        },
+    )
+    return {
+        "claimed": bool(session),
+        "session": session,
+        "backend": "local_session_scope",
+    }
 
 
 @router.get("/api/v1/chat/sessions/{session_id}")

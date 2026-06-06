@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import httpx
 from contextlib import asynccontextmanager

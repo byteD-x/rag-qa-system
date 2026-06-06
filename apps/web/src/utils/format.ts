@@ -25,6 +25,6 @@ export function readableText(value: unknown, fallback: string): string {
   }
 
   const questionMarks = (text.match(/\?/g) || []).length;
-  const looksCorrupted = text.includes('�') || questionMarks >= Math.max(3, Math.floor(text.length / 3));
+  const looksCorrupted = text.includes('\uFFFD') || questionMarks >= Math.max(3, Math.floor(text.length / 3));
   return looksCorrupted ? fallback : text;
 }

@@ -5,13 +5,16 @@ from pathlib import Path
 
 from PIL import Image
 
+from conftest import prioritize_service_src
+
 ROOT = Path(__file__).resolve().parents[1]
 KB_SRC = ROOT / "apps/services/knowledge-base/src"
 PY_PACKAGES = ROOT / "packages/python"
-for candidate in (KB_SRC, PY_PACKAGES):
-    value = str(candidate)
-    if value not in sys.path:
-        sys.path.insert(0, value)
+
+prioritize_service_src(KB_SRC)
+packages_path = str(PY_PACKAGES)
+if packages_path not in sys.path:
+    sys.path.insert(1, packages_path)
 
 from app import kb_resource_store
 from app.kb_resource_store import serialize_visual_asset

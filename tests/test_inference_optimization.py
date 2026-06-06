@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import clear_app_modules
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_SRC = REPO_ROOT / "apps/services/api-gateway/src"
@@ -21,6 +23,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _import_gateway(module_name: str, monkeypatch) -> None:
@@ -169,7 +172,7 @@ class TestSemanticCache:
         from app.semantic_cache import _cosine_similarity
 
         assert _cosine_similarity([], []) == 0.0
-        assert _cosine_similarity([1.0], [2.0]) == 0.0  # length mismatch
+        assert _cosine_similarity([1.0], [2.0, 3.0]) == 0.0  # length mismatch
 
     def test_lru_eviction(self, monkeypatch) -> None:
         _import_gateway("app.semantic_cache", monkeypatch)

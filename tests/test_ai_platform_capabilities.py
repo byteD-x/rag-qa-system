@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+from conftest import prioritize_service_src
 
 from shared.llm_settings import LLMSettings
 from shared.model_routing import resolve_model_route_plan, settings_with_model_route
@@ -176,10 +177,7 @@ def test_external_cross_encoder_rerank_prefers_provider_scores(monkeypatch) -> N
 
 def test_visual_layout_regions_are_promoted_to_region_units() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
-    sys.path.insert(0, str(kb_src))
-    for module_name in list(sys.modules):
-        if module_name == "app" or module_name.startswith("app."):
-            sys.modules.pop(module_name, None)
+    prioritize_service_src(kb_src)
     import importlib
 
     worker = importlib.import_module("app.worker")

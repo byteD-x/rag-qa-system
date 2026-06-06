@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import clear_app_modules
 from shared import auth as auth_module
 
 
@@ -22,6 +23,7 @@ def _prioritize_sys_path(path: Path) -> None:
     except ValueError:
         pass
     sys.path.insert(0, target)
+    clear_app_modules()
 
 
 def _load_gateway_module(module_name: str):
@@ -511,6 +513,287 @@ def test_build_chat_response_payload_marks_answer_basis_for_compare_mode() -> No
     assert response_payload["answer_basis"]["compare_summary"] == "Approver changed from finance lead to finance director."
     assert "v2 vs v1" in response_payload["answer"]
     assert "Approver changed from finance lead to finance director." in response_payload["answer"]
+
+
+def test_build_chat_response_payload_includes_hallucination_rules() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    prepared = {
+        "session_id": "session-1",
+        "execution_mode": "grounded",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "safety": {"risk_level": "low", "reason_codes": []},
+        "scope_snapshot": {"mode": "single"},
+        "trace_id": "trace-1",
+        "retrieval_meta": {"aggregate": {"selected_candidates": 1}},
+        "evidence": [{"document_title": "退款流程", "quote": "退款流程包括申请、审批、打款三步。"}],
+        "comparison_summary": "",
+        "payload": SimpleNamespace(question="退款流程是什么？", focus_hint={}),
+        "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0, "resume_ms": 0.0},
+        "resume": {"resumed": False},
+    }
+    answer_payload = {
+        "answer": "退款流程包括申请、审批、打款三步 [1]，另见不存在的证据 [2]。",
+        "provider": "mock",
+        "model": "mock-model",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+        "llm_trace": {"prompt_key": "chat_grounded_answer"},
+    }
+
+    response_payload = gateway_chat_service.build_chat_response_payload(
+        prepared=prepared,
+        answer_payload=answer_payload,
+        generation_ms=18.0,
+    )
+
+    hallucination = response_payload["hallucination"]
+    assert hallucination["hallucination_score"] > 0.0
+    assert hallucination["check_dimensions"]["citation_consistency"] < 1.0
+    assert hallucination["items"][0]["type"] == "fake_citation"
+
+
+def test_build_chat_response_payload_includes_semantic_cache_meta() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    cache_meta = {
+        "enabled": True,
+        "hit": False,
+        "cache_level": "",
+        "similarity_score": 0.0,
+        "original_question": "",
+        "age_seconds": 0.0,
+        "stored": True,
+        "bypass_reason": "",
+        "cached_usage": {},
+    }
+    prepared = {
+        "session_id": "session-1",
+        "execution_mode": "grounded",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "safety": {"risk_level": "low", "reason_codes": []},
+        "scope_snapshot": {"mode": "single"},
+        "trace_id": "trace-1",
+        "retrieval_meta": {"aggregate": {"selected_candidates": 1}},
+        "evidence": [{"document_title": "Refund policy", "quote": "Refunds require approval."}],
+        "comparison_summary": "",
+        "payload": SimpleNamespace(question="How do refunds work?", focus_hint={}),
+        "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0, "resume_ms": 0.0},
+        "resume": {"resumed": False},
+    }
+    answer_payload = {
+        "answer": "Refunds require approval [1].",
+        "provider": "mock",
+        "model": "mock-model",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+        "llm_trace": {"prompt_key": "chat_grounded_answer"},
+        "semantic_cache": cache_meta,
+    }
+
+    response_payload = gateway_chat_service.build_chat_response_payload(
+        prepared=prepared,
+        answer_payload=answer_payload,
+        generation_ms=18.0,
+    )
+
+    assert response_payload["semantic_cache"] == cache_meta
+
+
+def test_lookup_semantic_answer_returns_cache_hit_payload() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    hit = gateway_chat_service.CacheHit(
+        cache_level="exact",
+        cached_answer="Refunds require approval [1].",
+        cached_answer_mode="grounded",
+        cached_citations=[{"document_id": "doc-1", "unit_id": "unit-1"}],
+        cached_usage={"prompt_tokens": 33, "completion_tokens": 12},
+        similarity_score=1.0,
+        original_question="How do refunds work?",
+        age_seconds=4.2,
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeCache:
+        async def lookup(self, **kwargs):
+            calls.append(dict(kwargs))
+            return hit
+
+    prepared = {
+        "execution_mode": "grounded",
+        "answer_mode": "grounded",
+        "contextualized_question": "How do refunds work?",
+        "scope_snapshot": {"corpus_ids": ["kb:base-1"], "document_ids": ["doc-1"]},
+        "evidence": [{"document_id": "doc-1", "unit_id": "unit-1"}],
+        "safety": {"blocked": False},
+        "clarification": None,
+    }
+
+    answer_payload, cache_meta = asyncio.run(
+        gateway_chat_service._lookup_semantic_answer(prepared, cache=FakeCache())
+    )
+
+    assert calls[0]["question"] == "How do refunds work?"
+    assert "kb:base-1" in calls[0]["corpus_ids"]
+    assert "doc:doc-1" in calls[0]["corpus_ids"]
+    assert "unit:unit-1" in calls[0]["corpus_ids"]
+    assert answer_payload["provider"] == "semantic_cache"
+    assert answer_payload["usage"] == {}
+    assert answer_payload["semantic_cache"]["hit"] is True
+    assert answer_payload["semantic_cache"]["cached_usage"] == {"prompt_tokens": 33, "completion_tokens": 12}
+    assert cache_meta["hit"] is True
+
+
+def test_store_semantic_answer_records_grounded_answer() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    store_calls: list[dict[str, object]] = []
+
+    class FakeCache:
+        async def store(self, **kwargs):
+            store_calls.append(dict(kwargs))
+
+    prepared = {
+        "execution_mode": "grounded",
+        "answer_mode": "grounded",
+        "contextualized_question": "How do refunds work?",
+        "scope_snapshot": {"corpus_ids": ["kb:base-1"], "document_ids": ["doc-1"]},
+        "evidence": [{"document_id": "doc-1", "unit_id": "unit-1", "quote": "Refunds require approval."}],
+        "safety": {"blocked": False},
+        "clarification": None,
+    }
+    answer_payload = {
+        "answer": "Refunds require approval [1].",
+        "provider": "mock",
+        "model": "mock-model",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+    }
+
+    cache_meta = asyncio.run(
+        gateway_chat_service._store_semantic_answer(
+            prepared,
+            answer_payload,
+            cache_meta={"enabled": True, "hit": False},
+            cache=FakeCache(),
+        )
+    )
+
+    assert cache_meta["enabled"] is True
+    assert cache_meta["stored"] is True
+    assert store_calls[0]["question"] == "How do refunds work?"
+    assert store_calls[0]["answer"] == "Refunds require approval [1]."
+    assert store_calls[0]["usage"] == {"prompt_tokens": 10, "completion_tokens": 20}
+    assert store_calls[0]["citations"] == prepared["evidence"]
+    assert "kb:base-1" in store_calls[0]["corpus_ids"]
+    assert "doc:doc-1" in store_calls[0]["corpus_ids"]
+    assert "unit:unit-1" in store_calls[0]["corpus_ids"]
+
+
+def test_handle_chat_message_uses_semantic_cache_hit_without_generation(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    workflow_updates: list[dict[str, object]] = []
+    lookup_calls: list[dict[str, object]] = []
+
+    async def fake_prepare_chat_message(**kwargs):
+        return {
+            "session_id": "session-1",
+            "payload": SimpleNamespace(question="How do refunds work?", focus_hint={}),
+            "trace_id": "gateway-trace-cache-1",
+            "scope_snapshot": {
+                "mode": "single",
+                "execution_mode": "grounded",
+                "corpus_ids": ["kb:base-1"],
+                "document_ids": ["doc-1"],
+            },
+            "execution_mode": "grounded",
+            "history": [],
+            "evidence": [{"document_id": "doc-1", "unit_id": "unit-1", "quote": "Refunds require approval."}],
+            "contextualized_question": "How do refunds work?",
+            "retrieval_meta": {"aggregate": {"selected_candidates": 1, "partial_failure": False}},
+            "answer_mode": "grounded",
+            "evidence_status": "grounded",
+            "grounding_score": 0.91,
+            "refusal_reason": "",
+            "safety": {"risk_level": "low", "reason_codes": [], "blocked": False},
+            "clarification": None,
+            "comparison_summary": "",
+            "timing": {"total_started": 0.0, "scope_ms": 1.0, "retrieval_ms": 2.0, "resume_ms": 0.0},
+            "resume": {"resumed": False},
+        }
+
+    async def fail_generate_grounded_answer(**kwargs):
+        raise AssertionError("cache hit should skip generation")
+
+    class FakeCache:
+        async def lookup(self, **kwargs):
+            lookup_calls.append(dict(kwargs))
+            return gateway_chat_service.CacheHit(
+                cache_level="exact",
+                cached_answer="Refunds require approval [1].",
+                cached_answer_mode="grounded",
+                cached_citations=[{"document_id": "doc-1", "unit_id": "unit-1"}],
+                cached_usage={"prompt_tokens": 33, "completion_tokens": 12},
+                similarity_score=1.0,
+                original_question="How do refunds work?",
+                age_seconds=3.0,
+            )
+
+        async def store(self, **kwargs):
+            raise AssertionError("cache hit should not be stored again")
+
+    def fake_finalize_chat_message(**kwargs):
+        response_payload = dict(kwargs["response_payload"])
+        response_payload["message"] = {"id": "message-cache-1", "content": response_payload["answer"]}
+        return response_payload
+
+    def fake_start_workflow_run_fn(**kwargs):
+        return {"id": "run-cache-1", "status": "running", "stage": "retrieval_completed"}
+
+    def fake_update_workflow_run_fn(**kwargs):
+        workflow_updates.append(dict(kwargs))
+        state = dict(kwargs["workflow_state"])
+        return {
+            "id": kwargs["run_id"],
+            "status": kwargs["status"],
+            "stage": state.get("stage", ""),
+            "message_id": kwargs.get("message_id", ""),
+            "workflow_state": state,
+            "workflow_events": list(kwargs.get("workflow_events") or []),
+            "tool_calls": list(kwargs.get("tool_calls") or []),
+        }
+
+    monkeypatch.setattr(gateway_chat_service, "prepare_chat_message", fake_prepare_chat_message)
+    monkeypatch.setattr(gateway_chat_service, "generate_grounded_answer", fail_generate_grounded_answer)
+    monkeypatch.setattr(gateway_chat_service, "semantic_cache", FakeCache())
+    monkeypatch.setattr(gateway_chat_service, "finalize_chat_message", fake_finalize_chat_message)
+
+    result = asyncio.run(
+        gateway_chat_service.handle_chat_message(
+            session_id="session-1",
+            payload=SimpleNamespace(question="How do refunds work?"),
+            request=SimpleNamespace(),
+            user=user,
+            load_session_fn=lambda *args, **kwargs: {},
+            default_scope_fn=lambda: {"mode": "all"},
+            resolve_scope_snapshot_fn=lambda *args, **kwargs: {},
+            recent_history_messages_fn=lambda *args, **kwargs: [],
+            retrieve_scope_evidence_fn=lambda *args, **kwargs: None,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+            persist_chat_turn_fn=lambda *args, **kwargs: {},
+            start_workflow_run_fn=fake_start_workflow_run_fn,
+            update_workflow_run_fn=fake_update_workflow_run_fn,
+        )
+    )
+
+    assert lookup_calls
+    assert result["provider"] == "semantic_cache"
+    assert result["usage"] == {}
+    assert result["semantic_cache"]["hit"] is True
+    assert result["semantic_cache"]["cached_usage"] == {"prompt_tokens": 33, "completion_tokens": 12}
+    assert result["workflow_run"]["status"] == "completed"
+    assert workflow_updates[0]["workflow_state"]["resume_checkpoint"]["generation_checkpoint"]["answer_payload"]["semantic_cache"]["hit"] is True
 
 
 def test_retrieve_scope_evidence_prioritizes_compare_focus_with_visual_region() -> None:

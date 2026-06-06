@@ -82,6 +82,22 @@ class RetryWorkflowRunRequest(BaseModel):
     reuse_scope: bool = True
 
 
+class ClaimHandoffSessionRequest(BaseModel):
+    tenant_id: str = Field(min_length=1, max_length=128)
+    skill_group: str = Field(default="general", min_length=1, max_length=64)
+    operator_id: str = Field(min_length=1, max_length=128)
+
+    @field_validator("tenant_id", "operator_id")
+    @classmethod
+    def normalize_required_identifier(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("skill_group")
+    @classmethod
+    def normalize_skill_group(cls, value: str) -> str:
+        return value.strip().lower().replace(" ", "_")
+
+
 class SubmitInterruptRequest(BaseModel):
     question: str = Field(default="", max_length=12000)
     free_text: str = Field(default="", max_length=12000)

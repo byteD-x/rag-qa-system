@@ -16,7 +16,13 @@ from langgraph.types import Command, interrupt
 from shared.auth import AuthUser, serialize_user
 
 from .gateway_answering import generate_grounded_answer
-from .gateway_chat_service import build_chat_response_payload, finalize_chat_message, prepare_chat_message
+from .gateway_chat_service import (
+    _lookup_semantic_answer,
+    _store_semantic_answer,
+    build_chat_response_payload,
+    finalize_chat_message,
+    prepare_chat_message,
+)
 from .gateway_runtime import gateway_db, logger
 from .gateway_schemas import ChatScopePayload, SendMessageRequest
 from .gateway_workflows import (
@@ -349,16 +355,25 @@ def build_gateway_chat_graph(*, deps: GatewayGraphDependencies, checkpointer: An
     def generate_answer(state: ChatGraphState) -> dict[str, Any]:
         prepared = _deserialize_prepared(dict(state.get("prepared") or {}))
         generation_started = time.perf_counter()
-        answer_payload = asyncio.run(
-            generate_grounded_answer(
-                question=str(prepared.get("contextualized_question") or ""),
-                history=list(prepared.get("history") or []),
-                evidence=list(prepared.get("evidence") or []),
-                answer_mode=str(prepared.get("answer_mode") or ""),
-                safety=dict(prepared.get("safety") or {}),
-                settings_prompt_append=str(prepared.get("settings_prompt_append") or ""),
+        answer_payload, cache_meta = asyncio.run(_lookup_semantic_answer(prepared))
+        if answer_payload is None:
+            answer_payload = asyncio.run(
+                generate_grounded_answer(
+                    question=str(prepared.get("contextualized_question") or ""),
+                    history=list(prepared.get("history") or []),
+                    evidence=list(prepared.get("evidence") or []),
+                    answer_mode=str(prepared.get("answer_mode") or ""),
+                    safety=dict(prepared.get("safety") or {}),
+                    settings_prompt_append=str(prepared.get("settings_prompt_append") or ""),
+                )
             )
-        )
+            answer_payload["semantic_cache"] = asyncio.run(
+                _store_semantic_answer(
+                    prepared,
+                    answer_payload,
+                    cache_meta=cache_meta,
+                )
+            )
         generation_ms = round((time.perf_counter() - generation_started) * 1000.0, 3)
         response_payload = build_chat_response_payload(
             prepared=prepared,

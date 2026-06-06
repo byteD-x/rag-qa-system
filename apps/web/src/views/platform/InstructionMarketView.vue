@@ -41,7 +41,7 @@
               <span>v{{ tmpl.version }}</span>
             </div>
             <div class="template-actions">
-              <el-button link size="small" @click="previewTemplate(tmpl)">预览</el-button>
+              <el-button link size="small" @click="showTemplatePreview(tmpl)">预览</el-button>
               <el-button link size="small" type="primary" @click="useTemplate(tmpl)">使用</el-button>
               <el-button v-if="tmpl.visibility === 'public'" link size="small" @click="starTemplate(tmpl)">
                 ⭐ 收藏
@@ -56,9 +56,9 @@
 
     <!-- 预览对话框 -->
     <el-dialog v-model="showPreview" title="模板预览" width="640px">
-      <div v-if="previewTemplate" class="preview-box">
-        <h4>{{ previewTemplate.name }}</h4>
-        <pre class="preview-content">{{ previewTemplate.content }}</pre>
+      <div v-if="previewData" class="preview-box">
+        <h4>{{ previewData.name }}</h4>
+        <pre class="preview-content">{{ previewData.content }}</pre>
       </div>
     </el-dialog>
   </div>
@@ -98,7 +98,7 @@ async function loadData() {
   } catch { /* ignore */ }
 }
 
-function previewTemplate(tmpl: any) {
+function showTemplatePreview(tmpl: any) {
   previewData.value = tmpl
   showPreview.value = true
 }

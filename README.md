@@ -60,6 +60,7 @@
 - [常见问题](#常见问题)
 - [验证命令](#验证命令)
 - [更多说明](#更多说明)
+- [企业聊天 v2 补充说明](#企业聊天-v2-补充说明)
 
 ## 项目能做什么
 
@@ -77,9 +78,9 @@
 - 支持个人视角与管理员视角的运营分析看板
 - 支持提示词版本管理、模型路由、重排、视觉 OCR
 - 支持评测基线、回归门禁和反馈闭环
-- **🆕 Agent 自主决策**：任务拆解（DAG并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
-- **🆕 推理优化**：L1精确/L2语义/L3 Prompt三层缓存、模型健康监控（自动熔断）、请求合并
-- **🆕 平台化**：五层分层指令引擎、6大场景模板（企业QA/技术/合规/培训/数据/代码审查）、RAG幻觉检测、Python SDK
+- **Agent 自主决策**：任务拆解（DAG 并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
+- **推理优化**：L1 精确 / L2 语义 / L3 Prompt 三层缓存、模型健康监控（自动熔断）、请求合并
+- **平台化**：五层分层指令引擎、6 大场景模板（企业 QA/技术支持/合规/培训/数据分析/代码审查）、RAG 幻觉检测、Python SDK
 
 ## 技术栈
 
@@ -516,7 +517,7 @@ make down
 
 ### 本地默认账号
 
-默认账号来自 [`.env.example`](/E:/Project/rag-qa-system/.env.example)。
+默认账号来自 [`.env.example`](.env.example)。
 
 - 管理员：`admin@local`
 - 普通成员：`member@local`
@@ -565,7 +566,7 @@ LLM_MODEL=qwen3.5-plus
 
 ### Vercel 展示型 `.env` 模板
 
-仓库新增了 [`.env.vercel.example`](/E:/Project/rag-qa-system/.env.vercel.example)。
+仓库提供了 [`.env.vercel.example`](.env.vercel.example)。
 
 这份模板只用于技术展示和部署补全，不用于真实生效的生产发布。约束如下：
 
@@ -573,7 +574,7 @@ LLM_MODEL=qwen3.5-plus
 - `LLM`、`Embedding`、`Rerank`、`OCR`、对象存储、向量库、数据库都使用第三方或托管资源占位值
 - 不包含真实密钥，也不会替代正式的生产发布配置
 
-对应的展示型 CI 在 [`.github/workflows/vercel-showcase.yml`](/E:/Project/rag-qa-system/.github/workflows/vercel-showcase.yml)：
+对应的展示型 CI 在 [`.github/workflows/vercel-showcase.yml`](.github/workflows/vercel-showcase.yml)：
 
 - 只校验 `Vercel` 专用环境模板是否满足“全部走第三方资源”的约束
 - 只执行前端 `vercel mode` 构建并上传产物
@@ -1511,7 +1512,29 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 - `search_corpus`
 - `calculator`
 
-**🆕 增强 Agent 能力**（v2.1+）：
+### 6. 人工接管队列
+
+Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运营人员按租户与技能组认领待处理会话。
+
+- 核心实现：`apps/services/api-gateway/src/app/gateway_handoff.py`
+- API 入口：`POST /api/v1/chat/handoff/claim-next`
+- 本地队列来源：`chat_sessions.scope_json.handoff`
+- 认领条件：`handoff.status = "pending"`，并匹配 `tenant_id` 与规范化后的 `skill_group`
+- 排序规则：`priority` 高优先，其次按 `requested_at` 早优先，再按 `session_id` 稳定排序
+
+请求示例：
+
+```json
+{
+  "tenant_id": "tenant-a",
+  "skill_group": "billing",
+  "operator_id": "operator-1"
+}
+```
+
+响应中 `claimed=false` 表示当前没有可认领会话，不代表接口失败。当前实现使用本地进程锁与 `chat_sessions` 条件更新保证测试环境内不会重复认领同一会话；生产环境建议替换为 Redis sorted set（如 `ZADD`/`ZPOPMIN`）或数据库 `SELECT ... FOR UPDATE SKIP LOCKED` 后端，不把本地实现宣称为跨实例队列。
+
+**增强 Agent 能力**：
 
 系统现在内置了完整的 AI Agent 开发所需能力：
 
@@ -1526,7 +1549,7 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 
 详见 [AI_HIGHLIGHTS.md](AI_HIGHLIGHTS.md) 和 [AGENTS.md](AGENTS.md)。
 
-### 6. 提示词和模型路由
+### 7. 提示词和模型路由
 
 系统支持：
 
@@ -1539,7 +1562,7 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 - `PROMPT_REGISTRY_JSON`
 - `PROMPT_REGISTRY_PATH`
 
-### 7. 运营分析看板
+### 8. 运营分析看板
 
 后端已经提供统一分析接口：
 
@@ -1557,7 +1580,7 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 - `view=personal` 适合个人使用分析
 - `view=admin` 适合管理员看团队整体情况，需要管理员权限
 
-### 8. 知识库运维总览工作台
+### 9. 知识库运维总览工作台
 
 面向知识库管理员，Web 端新增了 `/workspace/kb/operations` 运维值班页，优先解决“有信号、但不方便处置”的问题。
 
@@ -1847,7 +1870,9 @@ scripts/
   dev/                  本地开发脚本
   evaluation/           评测与回归脚本
   quality/              质量检查脚本
-tests/                  测试（5个文件，75+用例）
+tests/                  Python 后端与能力测试（22 个 test_*.py）
+apps/web/src/**/*.test.ts
+                        前端 Vitest 单测（9 个测试文件）
 docs/reference/         API 文档、STAR、面试材料
 ```
 
@@ -1971,15 +1996,16 @@ docs/reference/         API 文档、STAR、面试材料
 文档改动的最小验证：
 
 ```powershell
-python scripts/quality/check-encoding.py
-cd apps/web && npm run test:unit
+python scripts/quality/check-encoding.py --root .
 docker compose config --quiet
 ```
+
+如果文档同步了前端页面、API 行为或 Python 后端能力，再补跑对应专项命令。
 
 完整基线验证：
 
 ```powershell
-python scripts/quality/check-encoding.py
+python scripts/quality/check-encoding.py --root .
 cd apps/web && npm run test:unit
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
@@ -2001,11 +2027,13 @@ powershell -File scripts/quality/ci-check.ps1
 
 ## 更多说明
 
-- API 文档：[docs/reference/api-specification.md](/E:/Project/rag-qa-system/docs/reference/api-specification.md)
-- 协作规范：[AGENTS.md](/E:/Project/rag-qa-system/AGENTS.md)
-- 贡献说明：[CONTRIBUTING.md](/E:/Project/rag-qa-system/CONTRIBUTING.md)
-- 安全说明：[SECURITY.md](/E:/Project/rag-qa-system/SECURITY.md)
-- 开源协议：[LICENSE](/E:/Project/rag-qa-system/LICENSE)
+- 文档总览：[docs/README.md](docs/README.md)
+- API 文档：[docs/reference/api-specification.md](docs/reference/api-specification.md)
+- 协作规范：[AGENTS.md](AGENTS.md)
+- 贡献说明：[CONTRIBUTING.md](CONTRIBUTING.md)
+- 安全说明：[SECURITY.md](SECURITY.md)
+- 开源协议：[LICENSE](LICENSE)
+
 ## 企业聊天 v2 补充说明
 
 当前仓库已经接入第一阶段企业级澄清闭环，重点覆盖多版本文档与截图区域场景。
@@ -2016,4 +2044,4 @@ powershell -File scripts/quality/ci-check.ps1
 - 最终回答会附带 `answer_basis`，比较模式下会先给出版本差异摘要，再输出结论。
 - 上传完成与连接器同步结果都可能返回 `version_assist`；高置信连续版本会自动应用，低置信建议则写入 `stats_json.version_assist` 供人工确认。
 
-更完整的接口与载荷说明见 [docs/reference/enterprise-chat-v2.md](/E:/Project/rag-qa-system/docs/reference/enterprise-chat-v2.md)
+更完整的接口与载荷说明见 [docs/reference/enterprise-chat-v2.md](docs/reference/enterprise-chat-v2.md)。

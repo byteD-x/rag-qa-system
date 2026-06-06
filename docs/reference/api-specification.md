@@ -2,12 +2,12 @@
 
 本文档是仓库唯一的 API 文档，覆盖当前项目对前端开放的核心接口，包括：
 
-- 认证与健康检查
-- 统一聊天与工作流
+- 认证、登录态与健康检查
+- 统一聊天、工作流与人工接管
 - 知识库、文档上传、检索与调试
-- 连接器与同步调度
+- 连接器、同步调度与知识治理
 - Prompt Template 与 Agent Profile
-- 运营分析看板
+- 运营分析看板、审计与指标接口
 
 默认本地地址：
 
@@ -27,6 +27,10 @@ Authorization: Bearer <ACCESS_TOKEN>
 登录接口：
 
 - `POST /api/v1/auth/login`
+
+当前用户接口：
+
+- `GET /api/v1/auth/me`
 
 ### 内容类型
 
@@ -60,6 +64,11 @@ Authorization: Bearer <ACCESS_TOKEN>
 - KB Service 会检查数据库、对象存储与 Qdrant
 - 关键依赖未就绪时返回 `503`
 
+### `GET /metrics`
+
+- Gateway 与 KB Service 均暴露 Prometheus 文本格式指标
+- 本地默认分别位于 `http://localhost:8080/metrics` 与 `http://localhost:8300/metrics`
+
 ## 3. 认证
 
 ### `POST /api/v1/auth/login`
@@ -78,6 +87,16 @@ Authorization: Bearer <ACCESS_TOKEN>
 - `access_token`
 - `token_type`
 - `user`
+
+### `GET /api/v1/auth/me`
+
+返回当前 token 对应用户与权限信息。
+
+响应关键字段：
+
+- `user`
+- `permissions`
+- `role`
 
 ## 4. 统一聊天与工作流
 
@@ -135,6 +154,49 @@ Authorization: Bearer <ACCESS_TOKEN>
 }
 ```
 
+### 会话与语料辅助端点
+
+- `GET /api/v1/chat/corpora`
+- `GET /api/v1/chat/corpora/{corpus_id}/documents`
+- `GET /api/v1/chat/sessions`
+- `GET /api/v1/chat/sessions/{id}`
+- `DELETE /api/v1/chat/sessions/{id}`
+- `GET /api/v1/chat/sessions/{id}/messages`
+- `POST /api/v1/chat/handoff/claim-next`
+
+说明：
+
+- `corpora` 端点用于前端构建聊天作用域选择器。
+- 会话查询、删除和消息列表端点用于聊天侧边栏、历史消息恢复和会话清理。
+
+### `POST /api/v1/chat/handoff/claim-next`
+
+按租户和技能组认领下一条待人工接管会话。
+
+请求字段：
+
+- `tenant_id`：租户标识，必填。
+- `skill_group`：技能组，默认可用 `general`，服务端会去空格、小写并把空格替换为 `_`。
+- `operator_id`：坐席或运营人员标识，必填。
+
+请求示例：
+
+```json
+{
+  "tenant_id": "tenant-a",
+  "skill_group": "billing",
+  "operator_id": "operator-1"
+}
+```
+
+响应关键字段：
+
+- `claimed`：是否成功认领到会话。
+- `session`：认领到的会话摘要；没有可认领项时为 `null`。
+- `backend`：当前后端标识，现阶段为 `local_session_scope`。
+
+本地实现读取 `chat_sessions.scope_json.handoff`，仅认领 `status="pending"` 且匹配 `tenant_id` / `skill_group` 的会话。排序规则为 `priority` 降序、`requested_at` 升序、`session_id` 稳定兜底。当前使用本地进程锁和条件更新防止测试环境重复认领；生产多实例部署建议替换为 Redis sorted set 或数据库 `SELECT ... FOR UPDATE SKIP LOCKED` 后端。
+
 ### `PATCH /api/v1/chat/sessions/{id}`
 
 可更新字段：
@@ -162,13 +224,19 @@ Authorization: Bearer <ACCESS_TOKEN>
 - `refusal_reason`
 - `safety`
 - `citations`
+- `hallucination`
 - `retrieval`
 - `latency`
 - `cost`
 - `trace_id`
 - `llm_trace`
+- `semantic_cache`
 - `message`
 - `workflow_run`
+
+`hallucination` 为规则级 RAG 幻觉检测摘要，包含 `hallucination_score`、`passed`、`needs_correction`、`check_dimensions` 与 `items`。当前同步、流式与 LangGraph 回答路径都会在生成最终响应时写入该字段。
+
+`semantic_cache` 为回答级语义缓存元数据，包含 `enabled`、`hit`、`cache_level`、`similarity_score`、`stored`、`bypass_reason` 与 `cached_usage`。当前同步与 LangGraph 非流式回答路径会在命中时跳过 LLM 生成，在未命中且回答具备 grounded 证据时写入缓存。
 
 ### `POST /api/v1/chat/sessions/{id}/messages/stream`
 
@@ -260,6 +328,7 @@ SSE 流式回答，事件顺序：
 ### 文档
 
 - `GET /api/v1/kb/bases/{base_id}/documents`
+- `POST /api/v1/kb/documents/batch-update`
 - `GET /api/v1/kb/documents/{document_id}`
 - `GET /api/v1/kb/documents/{document_id}/versions`
 - `GET /api/v1/kb/documents/{document_id}/versions/{version_id}/content`
@@ -268,6 +337,21 @@ SSE 流式回答，事件顺序：
 - `DELETE /api/v1/kb/documents/{document_id}`
 - `GET /api/v1/kb/documents/{document_id}/events`
 - `GET /api/v1/kb/documents/{document_id}/visual-assets`
+
+### `POST /api/v1/kb/documents/batch-update`
+
+批量更新文档治理字段，适合知识库治理页做多选状态调整。
+
+请求关键字段：
+
+- `document_ids`
+- `patch`
+
+响应关键字段：
+
+- `updated`
+- `failed`
+- `items`
 
 文档对象新增的版本治理字段：
 
@@ -334,6 +418,18 @@ SSE 流式回答，事件顺序：
 - `fast_index_ready`
 - `hybrid_ready`
 - `ready`
+
+### 视觉资产
+
+- `GET /api/v1/kb/documents/{document_id}/visual-assets`
+- `GET /api/v1/kb/visual-assets/{asset_id}/thumbnail`
+- `GET /api/v1/kb/visual-assets/{asset_id}/regions`
+
+说明：
+
+- `visual-assets` 用于列出文档解析阶段提取的图片、页面截图或区域资产。
+- `thumbnail` 返回缩略图二进制内容。
+- `regions` 返回 OCR / layout 解析出的区域列表，用于截图区域问答和治理工作台。
 
 ## 7. 上传与 Ingest
 
@@ -734,6 +830,23 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
   -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
+#### `GET /api/v1/kb/analytics/governance`
+
+用途：
+
+- 为知识治理工作台提供低置信 OCR 区域、待处理切片、批处理事件等聚合读模型。
+- 支持个人视角与管理员视角。
+
+相关事件端点：
+
+- `GET /api/v1/kb/analytics/governance/batch-events`
+- `GET /api/v1/kb/analytics/governance/batch-events/{task_id}`
+
+说明：
+
+- 批处理事件详情包含重试时间线、过滤条件和分页结果。
+- 低置信视觉区域仍复用 `visual-assets/{asset_id}/regions`，不新增独立批量区域接口。
+
 ### 指标说明
 
 - `knowledge_bases_created`：按知识库创建时间统计
@@ -754,7 +867,13 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 ## 13. 审计与运维接口
 
 - `GET /api/v1/audit/events`
+- `GET /api/v1/kb/audit/events`
 - `GET /metrics`
+
+说明：
+
+- Gateway 审计接口聚合网关侧会话、反馈、重试和平台操作事件。
+- KB 审计接口记录知识库、上传、连接器、ingest 与治理相关事件。
 
 ## 14. 背压与安全
 
@@ -782,7 +901,7 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 在仓库根目录执行：
 
 ```powershell
-python scripts/quality/check-encoding.py
+python scripts/quality/check-encoding.py --root .
 cd apps/web && npm run test:unit
 cd apps/web && npm run build
 python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
@@ -842,4 +961,4 @@ docker compose config --quiet
   - `reasons[]`
   - `auto_apply`
 
-更完整的交互说明见 [enterprise-chat-v2.md](/E:/Project/rag-qa-system/docs/reference/enterprise-chat-v2.md)。
+更完整的交互说明见 [enterprise-chat-v2.md](enterprise-chat-v2.md)。

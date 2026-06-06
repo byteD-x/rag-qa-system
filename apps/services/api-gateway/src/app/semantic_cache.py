@@ -357,3 +357,6 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot_product / (norm_a * norm_b)
+
+
+semantic_cache = SemanticCache()
