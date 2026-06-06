@@ -16,6 +16,7 @@
 | `eval_regression_gate.json` | 通用评测回归门禁 | 否 |
 | `agent_smoke_regression_gate.json` | smoke eval 回归门禁 | 否 |
 | `multipart_resume_report.json` | 分片上传恢复验证 | 否 |
+| `pytest-groups-summary.json` | pytest 分组执行摘要、慢组、失败组和日志路径 | 否 |
 
 ## 常用命令
 
@@ -42,6 +43,7 @@ JSON 输出包含：
 - `metrics.eval_suite`：在线评测 job 的 accuracy、correctness、faithfulness、p95 latency
 - `metrics.regression_gate` / `metrics.agent_smoke_regression_gate`：门禁状态与失败原因
 - `metrics.multipart_resume`：分片上传恢复是否通过
+- `metrics.pytest_groups`：pytest 分组状态、完成组数、失败/超时组数和最慢组日志路径
 
 ## 推荐顺序
 
@@ -50,6 +52,7 @@ python scripts/evaluation/benchmark-local-ingest.py --kb-path tests/fixtures/eva
 python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/compare-embedding-providers.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/verify-agent-smoke-evidence.py
+.venv\Scripts\python.exe scripts/quality/run_pytest_groups.py --timeout-seconds 90 --heartbeat-seconds 10 --summary-output artifacts/reports/pytest-groups-summary.json tests/test_eval_pipeline.py tests/test_observability_report.py
 python scripts/observability/rag-daily-report.py --output artifacts/reports/rag_daily_report.md --json-output artifacts/reports/rag_daily_report.json --strict
 ```
 

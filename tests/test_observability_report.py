@@ -104,6 +104,26 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
             "overall_metrics": {"correctness": 0.9},
         },
     )
+    _write_json(
+        reports_dir / "pytest-groups-summary.json",
+        {
+            "status": "passed",
+            "scheduled_groups": 2,
+            "completed_groups": 2,
+            "failed_groups": 0,
+            "timed_out_groups": 0,
+            "elapsed_seconds": 12.3456,
+            "slowest_groups": [
+                {
+                    "group": "tests/test_eval_pipeline.py",
+                    "status": "passed",
+                    "elapsed_seconds": 8.1,
+                    "stdout_log": "logs/quality/test_eval_pipeline.stdout.log",
+                    "stderr_log": "logs/quality/test_eval_pipeline.stderr.log",
+                }
+            ],
+        },
+    )
 
     report = report_module.build_daily_report(reports_dir)
     markdown = report_module.render_markdown_report(report)
@@ -113,9 +133,12 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
     assert report["metrics"]["retrieval"]["best_config"] == "rewrite_plus_fusion"
     assert report["metrics"]["evidence_pack"]["eval_case_count"] == 3
     assert report["metrics"]["eval_suite"]["jobs"][0]["p95_latency_ms"] == 42.0
+    assert report["metrics"]["pytest_groups"]["status"] == "passed"
+    assert report["metrics"]["pytest_groups"]["completed_groups"] == 2
     assert "# RAG Daily Report" in markdown
     assert "## Report Inventory" in markdown
     assert "## Evidence Pack" in markdown
+    assert "## Pytest Groups" in markdown
 
 
 def test_rag_daily_report_marks_missing_required_reports_as_partial(tmp_path: Path) -> None:
@@ -136,6 +159,57 @@ def test_rag_daily_report_marks_missing_required_reports_as_partial(tmp_path: Pa
     assert "embedding_retrieval_benchmark.json" in report["missing_required_reports"]
     assert "agent_smoke_evidence_pack.json" in report["missing_required_reports"]
     assert "Missing required reports" in markdown
+
+
+def test_rag_daily_report_marks_incomplete_pytest_groups_as_failed(tmp_path: Path) -> None:
+    report_module = _load_report_module()
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    _write_json(
+        reports_dir / "local_ingest_benchmark.json",
+        {"kb": {"file_count": 1, "throughput_mib_per_s": 0.5, "chunks": 1, "sections": 1}},
+    )
+    _write_json(
+        reports_dir / "retrieval_ablation_report.json",
+        {"summary": {"baseline": {"recall_at_1": 1.0, "recall_at_3": 1.0, "mrr": 1.0}}},
+    )
+    _write_json(
+        reports_dir / "embedding_retrieval_benchmark.json",
+        {"backends": [{"label": "local-projection", "summary": {"recall_at_1": 1.0, "mrr": 1.0}}]},
+    )
+    _write_json(
+        reports_dir / "agent_smoke_evidence_pack.json",
+        {
+            "suite_name": "agent_smoke",
+            "suite_version": "smoke-eval-2026-03-10",
+            "status": "passed",
+            "failures": [],
+            "eval_fixtures": [{"case_count": 1}],
+            "corpus_fixtures": [{}],
+        },
+    )
+    _write_json(
+        reports_dir / "pytest-groups-summary.json",
+        {
+            "status": "incomplete",
+            "scheduled_groups": 3,
+            "completed_groups": 2,
+            "failed_groups": 0,
+            "timed_out_groups": 0,
+            "elapsed_seconds": 12.3,
+            "slowest_groups": [],
+        },
+    )
+
+    report = report_module.build_daily_report(reports_dir)
+    markdown = report_module.render_markdown_report(report)
+
+    assert report["status"] == "failed"
+    assert report["missing_required_reports"] == []
+    assert "pytest-groups-summary.json: status incomplete" in report["failures"]
+    assert "## Pytest Groups" in markdown
+    assert "pytest-groups-summary.json: status incomplete" in markdown
 
 
 def test_rag_daily_report_cli_writes_markdown_and_json(monkeypatch, tmp_path: Path) -> None:

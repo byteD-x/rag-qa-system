@@ -21,6 +21,7 @@ REPORT_SPECS = {
     "regression_gate": {"file": "eval_regression_gate.json", "required": False},
     "agent_smoke_regression_gate": {"file": "agent_smoke_regression_gate.json", "required": False},
     "multipart_resume": {"file": "multipart_resume_report.json", "required": False},
+    "pytest_groups": {"file": "pytest-groups-summary.json", "required": False},
 }
 
 
@@ -73,6 +74,8 @@ def _status_from_payload(key: str, payload: dict[str, Any]) -> str:
         return str(payload.get("status") or "unknown")
     if key == "multipart_resume":
         return "passed" if bool(payload.get("resume_verified")) else "failed"
+    if key == "pytest_groups":
+        return str(payload.get("status") or "unknown")
     return "present"
 
 
@@ -171,6 +174,18 @@ def _summarize_multipart_resume(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summarize_pytest_groups(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(payload.get("status") or "unknown"),
+        "scheduled_groups": _int(payload.get("scheduled_groups")),
+        "completed_groups": _int(payload.get("completed_groups")),
+        "failed_groups": _int(payload.get("failed_groups")),
+        "timed_out_groups": _int(payload.get("timed_out_groups")),
+        "elapsed_seconds": round(_float(payload.get("elapsed_seconds")), 4),
+        "slowest_groups": list(payload.get("slowest_groups") or [])[:5],
+    }
+
+
 def build_daily_report(reports_dir: Path) -> dict[str, Any]:
     resolved_dir = reports_dir.resolve()
     reports: dict[str, dict[str, Any]] = {}
@@ -203,6 +218,9 @@ def build_daily_report(reports_dir: Path) -> dict[str, Any]:
         if load_status != "present":
             failures.append(f"{spec['file']}: {load_status}")
             continue
+        if key == "pytest_groups" and payload_status != "passed":
+            failures.append(f"{spec['file']}: status {payload_status}")
+            continue
         if payload_status in {"failed", "unknown"}:
             failures.append(f"{spec['file']}: status {payload_status}")
 
@@ -223,6 +241,8 @@ def build_daily_report(reports_dir: Path) -> dict[str, Any]:
         metrics["agent_smoke_regression_gate"] = _summarize_regression_gate(reports["agent_smoke_regression_gate"])
     if reports["multipart_resume"]:
         metrics["multipart_resume"] = _summarize_multipart_resume(reports["multipart_resume"])
+    if reports["pytest_groups"]:
+        metrics["pytest_groups"] = _summarize_pytest_groups(reports["pytest_groups"])
 
     status = "passed"
     if failures:
@@ -357,6 +377,37 @@ def render_markdown_report(report: dict[str, Any]) -> str:
                 "",
             ]
         )
+
+    pytest_groups = dict(metrics.get("pytest_groups") or {})
+    if pytest_groups:
+        lines.extend(
+            [
+                "## Pytest Groups",
+                "",
+                f"- Status: `{pytest_groups.get('status') or 'unknown'}`",
+                f"- Scheduled groups: `{_int(pytest_groups.get('scheduled_groups'))}`",
+                f"- Completed groups: `{_int(pytest_groups.get('completed_groups'))}`",
+                f"- Failed groups: `{_int(pytest_groups.get('failed_groups'))}`",
+                f"- Timed out groups: `{_int(pytest_groups.get('timed_out_groups'))}`",
+                f"- Elapsed seconds: `{_float(pytest_groups.get('elapsed_seconds')):.2f}`",
+                "",
+            ]
+        )
+        slowest = list(pytest_groups.get("slowest_groups") or [])
+        if slowest:
+            lines.extend(
+                [
+                    "| group | status | elapsed seconds | stdout | stderr |",
+                    "| --- | --- | ---: | --- | --- |",
+                ]
+            )
+            for item in slowest:
+                lines.append(
+                    f"| `{item.get('group') or 'unknown'}` | {item.get('status') or 'unknown'} | "
+                    f"{_float(item.get('elapsed_seconds')):.2f} | `{item.get('stdout_log') or ''}` | "
+                    f"`{item.get('stderr_log') or ''}` |"
+                )
+            lines.append("")
 
     if list(report.get("failures") or []):
         lines.extend(["## Failures", ""])
