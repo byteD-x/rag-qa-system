@@ -1686,6 +1686,7 @@ python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.js
 python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
 python scripts/evaluation/check-eval-regression.py --report <suite-report.json>
 python scripts/evaluation/verify-agent-smoke-evidence.py
+python scripts/observability/rag-daily-report.py --output artifacts/reports/rag_daily_report.md --json-output artifacts/reports/rag_daily_report.json
 python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 ```
 
@@ -1702,6 +1703,8 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 没有真实业务压测报告前，不建议把“延迟降低多少”“吞吐提升几倍”写成确定指标；面试中可以说“已有脚本和 fixture 能复现评测闭环，业务数据指标待补充”。
 
 离线证据包校验见 [`docs/reference/evaluation-evidence-pack.md`](docs/reference/evaluation-evidence-pack.md)，用于在不启动服务的情况下确认 smoke eval baseline、fixture、语料和 dataset version 仍然一致。
+
+可观测日报见 [`docs/reference/observability-daily-report.md`](docs/reference/observability-daily-report.md)，用于把 ingest、retrieval、embedding、evidence pack、eval suite 与 regression gate 报告汇总成 Markdown/JSON。
 
 ### smoke-eval 会做什么
 
@@ -1848,6 +1851,7 @@ python scripts/dev/reindex-qdrant.py
 - `scripts/dev/down.ps1`
 - `scripts/dev/smoke-eval.ps1`
 - `scripts/dev/smoke_eval.py`
+- `scripts/observability/rag-daily-report.py`
 
 ## 项目结构
 
@@ -1879,6 +1883,7 @@ sdk/
 scripts/
   dev/                  本地开发脚本
   evaluation/           评测与回归脚本
+  observability/        日报与日志聚合脚本
   quality/              质量检查脚本
 tests/                  Python 后端与能力测试（22 个 test_*.py）
 apps/web/src/**/*.test.ts
