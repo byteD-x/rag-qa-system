@@ -69,6 +69,8 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 - Gateway 与 KB Service 均暴露 Prometheus 文本格式指标
 - 本地默认分别位于 `http://localhost:8080/metrics` 与 `http://localhost:8300/metrics`
+- Gateway 运行时治理指标族包括 `rag_gateway_governance_events_total`、`rag_gateway_governance_event_duration_ms` 与 `rag_gateway_governance_failure_reasons_total`
+- 运行时治理指标只记录 `prompt_rollback` 与 `tool_workflow` 的聚合结果、耗时和短失败原因，不包含 prompt、payload、工具输出或异常全文
 
 ### `GET /api/v1/system/metrics-summary`
 
