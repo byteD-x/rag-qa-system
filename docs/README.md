@@ -10,6 +10,7 @@
 |---|---|---|
 | 了解项目和本地启动 | [README.md](../README.md) | 项目能力、快速开始、环境变量、验证命令 |
 | 查接口契约 | [reference/api-specification.md](reference/api-specification.md) | Gateway 与 KB Service 的核心 HTTP API |
+| 查路由索引 | [API_ROUTE_INDEX.md](API_ROUTE_INDEX.md) | 静态生成的 FastAPI path、method、handler 与源码位置清单 |
 | 理解企业聊天补问 | [reference/enterprise-chat-v2.md](reference/enterprise-chat-v2.md) | LangGraph v2 线程、运行、中断、恢复与 `answer_basis` |
 | 理解人工接管队列 | [reference/api-specification.md](reference/api-specification.md) | Gateway 本地接管队列、认领请求与生产后端边界 |
 | 理解知识库智能提问 | [reference/kb-smart-ask-workflow.md](reference/kb-smart-ask-workflow.md) | 文档详情页到聊天页的结构化提问链路 |

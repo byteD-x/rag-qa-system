@@ -9,6 +9,8 @@
 - Prompt Template、Agent Profile 与 Tool Workflow
 - 运营分析看板、审计与指标接口
 
+静态路由总览见 [../API_ROUTE_INDEX.md](../API_ROUTE_INDEX.md)。该清单由脚本解析当前 FastAPI 路由装饰器生成，只用于快速查找 path、method、handler 与源码位置，不替代本文档中的接口契约说明。
+
 默认本地地址：
 
 - Gateway：`http://localhost:8080`

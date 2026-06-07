@@ -549,7 +549,10 @@ def test_fast_test_selector_prunes_nodeids_covered_by_file_target() -> None:
 
     targets = selector.select_targets(["apps/services/api-gateway/src/app/gateway_admin_routes.py"])
 
-    assert targets == ["tests/test_backend_infra.py"]
+    assert targets == [
+        "tests/test_backend_infra.py",
+        "tests/test_api_route_index.py",
+    ]
 
 
 def test_fast_test_selector_keeps_focused_targets_when_not_covered() -> None:
@@ -764,6 +767,7 @@ def test_fast_test_selector_routes_tool_workflow_and_mcp_modules_to_owned_suites
         "tests/test_backend_infra.py::test_gateway_mcp_route_lists_readonly_tools_and_writes_audit",
         "tests/test_backend_infra.py::test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments",
         "tests/test_backend_infra.py::test_gateway_mcp_route_requires_chat_permission",
+        "tests/test_api_route_index.py",
     ]
     assert "tests/test_backend_infra.py" not in targets
 
@@ -801,9 +805,23 @@ def test_fast_test_selector_routes_kb_system_routes_to_metrics_smoke() -> None:
 
     assert targets == [
         "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
+        "tests/test_api_route_index.py",
     ]
     assert "tests/test_ai_platform_capabilities.py" not in targets
     assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_api_route_index_files_to_drift_tests() -> None:
+    selector = _load_script_module("fast_test_selector_api_route_index_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "scripts/generate_api_route_index.py",
+            "docs/API_ROUTE_INDEX.md",
+        ]
+    )
+
+    assert targets == ["tests/test_api_route_index.py"]
 
 
 def test_fast_test_selector_routes_dockerignore_to_container_asset_tests() -> None:

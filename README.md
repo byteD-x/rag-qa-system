@@ -2108,6 +2108,7 @@ powershell -File scripts/quality/ci-check.ps1
 
 - 文档总览：[docs/README.md](docs/README.md)
 - API 文档：[docs/reference/api-specification.md](docs/reference/api-specification.md)
+- API 路由索引：[docs/API_ROUTE_INDEX.md](docs/API_ROUTE_INDEX.md)
 - 协作规范：[AGENTS.md](AGENTS.md)
 - 贡献说明：[CONTRIBUTING.md](CONTRIBUTING.md)
 - 安全说明：[SECURITY.md](SECURITY.md)

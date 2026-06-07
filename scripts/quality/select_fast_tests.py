@@ -229,6 +229,12 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "scripts/quality/select_fast_tests.py": [
         "tests/test_eval_pipeline.py",
     ],
+    "scripts/generate_api_route_index.py": [
+        "tests/test_api_route_index.py",
+    ],
+    "docs/API_ROUTE_INDEX.md": [
+        "tests/test_api_route_index.py",
+    ],
     "scripts/quality/ci-check.ps1": [
         "tests/test_eval_pipeline.py",
     ],
@@ -261,17 +267,26 @@ def targets_for_changed_path(changed_path: str) -> list[str]:
     if _is_test_file(path):
         return [path]
     if path in _EXACT_TARGETS:
-        return list(_EXACT_TARGETS[path])
+        targets = list(_EXACT_TARGETS[path])
+        if _is_fastapi_route_source(path):
+            targets.append("tests/test_api_route_index.py")
+        return targets
     if path.startswith("apps/services/api-gateway/database/migrations/"):
         return ["tests/test_backend_infra.py"]
     if path.startswith("apps/services/api-gateway/src/app/") and path.endswith(".py"):
-        return ["tests/test_backend_infra.py"]
+        targets = ["tests/test_backend_infra.py"]
+        if _is_fastapi_route_source(path):
+            targets.append("tests/test_api_route_index.py")
+        return targets
     if path.startswith("apps/services/knowledge-base/src/app/connectors/local"):
         return ["tests/test_kb_local_sync.py"]
     if path.startswith("apps/services/knowledge-base/src/app/connectors/notion"):
         return ["tests/test_kb_notion_sync.py"]
     if path.startswith("apps/services/knowledge-base/src/app/") and path.endswith(".py"):
-        return ["tests/test_ai_platform_capabilities.py", "tests/test_backend_infra.py"]
+        targets = ["tests/test_ai_platform_capabilities.py", "tests/test_backend_infra.py"]
+        if _is_fastapi_route_source(path):
+            targets.append("tests/test_api_route_index.py")
+        return targets
     if path.startswith("packages/python/shared/") and path.endswith(".py"):
         return ["tests/test_shared_stack.py", "tests/test_backend_infra.py"]
     if path.startswith("scripts/evaluation/") and path.endswith(".py"):
@@ -327,6 +342,13 @@ def normalize_repo_path(path: str) -> str:
     while raw.startswith("./"):
         raw = raw[2:]
     return raw.strip("/")
+
+
+def _is_fastapi_route_source(path: str) -> bool:
+    return (
+        path.startswith("apps/services/api-gateway/src/app/")
+        or path.startswith("apps/services/knowledge-base/src/app/")
+    ) and path.endswith("routes.py")
 
 
 def changed_paths_from_git(*, staged: bool = False, base: str = "") -> list[str]:
