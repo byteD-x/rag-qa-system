@@ -21,12 +21,16 @@ L3 Prompt Cache：利用 LLM API 的 prompt caching 缓存 system prompt 前缀
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
+from shared.embeddings import embed_query_text
+
+from .gateway_config import load_gateway_runtime_settings
 from .gateway_runtime import logger
 
 
@@ -54,6 +58,7 @@ class CacheEntry:
     """缓存条目"""
 
     cache_key: str  # 精确缓存键
+    corpus_key: str
     question_embedding: list[float]  # 问题 embedding
     question: str  # 原始问题
     answer: str
@@ -73,7 +78,7 @@ class CacheEntry:
 
 
 class SemanticCache:
-    """三层语义缓存，集成 Qdrant 向量检索。
+    """回答级缓存，支持精确命中与可选语义命中。
 
     缓存键 = sha256(问题 + 知识库版本 + 模型名)
     语义匹配 = embedding 余弦相似度
@@ -84,6 +89,7 @@ class SemanticCache:
         *,
         qdrant_client: Any = None,
         embedding_fn: Any = None,
+        semantic_enabled: bool = False,
         semantic_threshold: float = 0.92,
         default_ttl: float = 3600.0,  # 默认 1 小时
         max_entries: int = 10000,
@@ -91,6 +97,7 @@ class SemanticCache:
     ) -> None:
         self._qdrant = qdrant_client
         self._embed_fn = embedding_fn
+        self._semantic_enabled = semantic_enabled
         self._semantic_threshold = semantic_threshold
         self._default_ttl = default_ttl
         self._max_entries = max_entries
@@ -104,6 +111,9 @@ class SemanticCache:
         self._writes = 0
         self._expired = 0
         self._clears = 0
+        self._semantic_hits = 0
+        self._semantic_misses = 0
+        self._semantic_skipped = 0
 
     # ---- 查询 ---------------------------------------------------------------
 
@@ -132,11 +142,14 @@ class SemanticCache:
             return hit
 
         # L2: 语义缓存
-        if self._embed_fn is not None:
+        if self._semantic_enabled and self._embed_fn is not None:
             hit = await self._lookup_semantic(question, corpus_key, model_name)
             if hit is not None:
                 logger.debug("cache_hit_semantic similarity=%.3f q=%s", hit.similarity_score, question[:60])
                 return hit
+            self._semantic_misses += 1
+        elif self._embed_fn is not None:
+            self._semantic_skipped += 1
 
         self._misses += 1
         return None
@@ -160,7 +173,8 @@ class SemanticCache:
 
         entry = CacheEntry(
             cache_key=exact_key,
-            question_embedding=await self._embed(question) if self._embed_fn else [],
+            corpus_key=corpus_key,
+            question_embedding=await self._embed(question) if self._semantic_enabled and self._embed_fn else [],
             question=question,
             answer=answer,
             answer_mode=answer_mode,
@@ -180,7 +194,7 @@ class SemanticCache:
         self._evict_lru()
 
         # 写入 Qdrant（如果有）
-        if self._qdrant is not None and self._embed_fn is not None and entry.question_embedding:
+        if self._qdrant is not None and self._semantic_enabled and self._embed_fn is not None and entry.question_embedding:
             await self._qdrant_store(entry)
 
         logger.debug("cache_store key=%s ttl=%.0fs", exact_key[:32], ttl)
@@ -230,6 +244,11 @@ class SemanticCache:
             "expired": self._expired,
             "clears": self._clears,
             "hit_rate": hit_rate,
+            "semantic_enabled": self._semantic_enabled,
+            "semantic_threshold": round(float(self._semantic_threshold), 4),
+            "semantic_hits": self._semantic_hits,
+            "semantic_misses": self._semantic_misses,
+            "semantic_skipped": self._semantic_skipped,
             "expired_entries": expired_entries,
             "total_entries": len(entries),
             "total_hits": self._hits,
@@ -287,6 +306,8 @@ class SemanticCache:
                 continue
             if model_name and entry.model_name != model_name:
                 continue
+            if entry.corpus_key != corpus_key:
+                continue
             if not entry.question_embedding:
                 continue
             score = _cosine_similarity(query_embedding, entry.question_embedding)
@@ -297,6 +318,7 @@ class SemanticCache:
         if best_entry is not None:
             best_entry.hit_count += 1
             self._hits += 1
+            self._semantic_hits += 1
             self._remove_expired_keys(expired_keys)
             return CacheHit(
                 cache_level="semantic",
@@ -340,6 +362,7 @@ class SemanticCache:
                         "cache_key": entry.cache_key,
                         "question": entry.question,
                         "corpus_ids": entry.corpus_ids,
+                        "corpus_key": entry.corpus_key,
                         "model_name": entry.model_name,
                         "created_at": entry.created_at,
                     },
@@ -405,4 +428,17 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot_product / (norm_a * norm_b)
 
 
-semantic_cache = SemanticCache()
+def _build_default_cache() -> SemanticCache:
+    settings = load_gateway_runtime_settings()
+    return SemanticCache(
+        embedding_fn=_default_embed_query if settings.response_cache_semantic_enabled else None,
+        semantic_enabled=settings.response_cache_semantic_enabled,
+        semantic_threshold=settings.response_cache_semantic_threshold,
+    )
+
+
+async def _default_embed_query(text: str) -> list[float]:
+    return await asyncio.to_thread(embed_query_text, text)
+
+
+semantic_cache = _build_default_cache()

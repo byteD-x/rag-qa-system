@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import time
@@ -1027,12 +1028,17 @@ def _semantic_cache_meta(
     bypass_reason: str = "",
     cached_usage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    original_question_hash = (
+        hashlib.sha256(original_question.strip().encode("utf-8")).hexdigest()
+        if original_question.strip()
+        else ""
+    )
     return {
         "enabled": enabled,
         "hit": hit,
         "cache_level": cache_level,
         "similarity_score": round(float(similarity_score or 0.0), 4),
-        "original_question": original_question,
+        "original_question_hash": original_question_hash,
         "age_seconds": round(float(age_seconds or 0.0), 3),
         "stored": stored,
         "bypass_reason": bypass_reason,
@@ -1060,7 +1066,7 @@ def _answer_payload_from_cache_hit(hit: CacheHit, *, model_key: str) -> dict[str
             "cache_hit": True,
             "cache_level": hit.cache_level,
             "similarity_score": hit.similarity_score,
-            "original_question": hit.original_question,
+            "original_question_hash": meta["original_question_hash"],
         },
         "semantic_cache": meta,
     }

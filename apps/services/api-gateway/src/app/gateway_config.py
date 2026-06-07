@@ -102,6 +102,8 @@ class GatewayRuntimeSettings:
     retrieval_fanout_limit: int
     agent_runtime: str
     final_answer_tools_enabled: bool
+    response_cache_semantic_enabled: bool
+    response_cache_semantic_threshold: float
     hallucination_deep_check_enabled: bool
     hallucination_auto_correct_threshold: float
     answer_verifier_enabled: bool
@@ -190,6 +192,11 @@ def load_gateway_runtime_settings() -> GatewayRuntimeSettings:
         retrieval_fanout_limit=max(_read_int_env("GATEWAY_RETRIEVAL_FANOUT_LIMIT", default=4), 1),
         agent_runtime=agent_runtime,
         final_answer_tools_enabled=_read_bool_env("GATEWAY_FINAL_ANSWER_TOOLS_ENABLED", default=False),
+        response_cache_semantic_enabled=_read_bool_env("GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED", default=False),
+        response_cache_semantic_threshold=max(
+            min(_read_float_env("GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD", default=0.92), 1.0),
+            0.0,
+        ),
         hallucination_deep_check_enabled=_read_bool_env("GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED", default=False),
         hallucination_auto_correct_threshold=max(
             min(_read_float_env("GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD", default=0.5), 1.0),

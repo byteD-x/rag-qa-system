@@ -269,21 +269,29 @@ def _load_gateway_module(module_name: str):
 
 def test_gateway_runtime_settings_answer_verifier_env_defaults_and_invalid_action(monkeypatch) -> None:
     monkeypatch.delenv("GATEWAY_FINAL_ANSWER_TOOLS_ENABLED", raising=False)
+    monkeypatch.delenv("GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED", raising=False)
+    monkeypatch.delenv("GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD", raising=False)
     monkeypatch.delenv("GATEWAY_ANSWER_VERIFIER_ENABLED", raising=False)
     monkeypatch.delenv("GATEWAY_ANSWER_VERIFIER_ACTION", raising=False)
     gateway_config = _load_gateway_module("app.gateway_config")
 
     defaults = gateway_config.load_gateway_runtime_settings()
     assert defaults.final_answer_tools_enabled is False
+    assert defaults.response_cache_semantic_enabled is False
+    assert defaults.response_cache_semantic_threshold == 0.92
     assert defaults.answer_verifier_enabled is False
     assert defaults.answer_verifier_action == "fallback"
 
     monkeypatch.setenv("GATEWAY_FINAL_ANSWER_TOOLS_ENABLED", "true")
+    monkeypatch.setenv("GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED", "true")
+    monkeypatch.setenv("GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD", "1.5")
     monkeypatch.setenv("GATEWAY_ANSWER_VERIFIER_ENABLED", "true")
     monkeypatch.setenv("GATEWAY_ANSWER_VERIFIER_ACTION", "invalid")
 
     settings = gateway_config.load_gateway_runtime_settings()
     assert settings.final_answer_tools_enabled is True
+    assert settings.response_cache_semantic_enabled is True
+    assert settings.response_cache_semantic_threshold == 1.0
     assert settings.answer_verifier_enabled is True
     assert settings.answer_verifier_action == "fallback"
 

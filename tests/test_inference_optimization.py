@@ -100,6 +100,86 @@ class TestSemanticCache:
         assert hit is None or hit.cache_level != "exact"
 
     @pytest.mark.asyncio
+    async def test_semantic_lookup_default_disabled(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import SemanticCache
+
+        calls: list[str] = []
+
+        async def fake_embed(text: str) -> list[float]:
+            calls.append(text)
+            return [1.0, 0.0]
+
+        cache = SemanticCache(embedding_fn=fake_embed)
+
+        await cache.store(
+            question="退款流程是什么？",
+            answer="退款流程需要审批。",
+            answer_mode="grounded",
+            corpus_ids=["kb:abc"],
+            model_name="qwen-plus",
+        )
+
+        hit = await cache.lookup(question="退货流程怎么走？", corpus_ids=["kb:abc"], model_name="qwen-plus")
+        stats = cache.stats()
+
+        assert hit is None
+        assert calls == []
+        assert stats["semantic_enabled"] is False
+        assert stats["semantic_skipped"] == 1
+
+    @pytest.mark.asyncio
+    async def test_semantic_lookup_hits_same_scope_when_enabled(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import SemanticCache
+
+        async def fake_embed(_: str) -> list[float]:
+            return [1.0, 0.0]
+
+        cache = SemanticCache(embedding_fn=fake_embed, semantic_enabled=True, semantic_threshold=0.9)
+
+        await cache.store(
+            question="退款流程是什么？",
+            answer="退款流程需要审批。",
+            answer_mode="grounded",
+            corpus_ids=["kb:abc"],
+            model_name="qwen-plus",
+        )
+
+        hit = await cache.lookup(question="退货流程怎么走？", corpus_ids=["kb:abc"], model_name="qwen-plus")
+        stats = cache.stats()
+
+        assert hit is not None
+        assert hit.cache_level == "semantic"
+        assert hit.cached_answer == "退款流程需要审批。"
+        assert stats["semantic_enabled"] is True
+        assert stats["semantic_hits"] == 1
+
+    @pytest.mark.asyncio
+    async def test_semantic_lookup_does_not_cross_scope(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import SemanticCache
+
+        async def fake_embed(_: str) -> list[float]:
+            return [1.0, 0.0]
+
+        cache = SemanticCache(embedding_fn=fake_embed, semantic_enabled=True, semantic_threshold=0.9)
+
+        await cache.store(
+            question="退款流程是什么？",
+            answer="退款流程需要审批。",
+            answer_mode="grounded",
+            corpus_ids=["kb:abc"],
+            model_name="qwen-plus",
+        )
+
+        hit = await cache.lookup(question="退货流程怎么走？", corpus_ids=["kb:xyz"], model_name="qwen-plus")
+        stats = cache.stats()
+
+        assert hit is None
+        assert stats["semantic_misses"] == 1
+
+    @pytest.mark.asyncio
     async def test_ttl_expiry(self, monkeypatch) -> None:
         _import_gateway("app.semantic_cache", monkeypatch)
         from app.semantic_cache import SemanticCache
@@ -189,6 +269,7 @@ class TestSemanticCache:
         for i in range(5):
             entry = CacheEntry(
                 cache_key=f"key-{i}",
+                corpus_key="kb:x",
                 question_embedding=[],
                 question=f"q{i}",
                 answer=f"a{i}",
@@ -218,7 +299,7 @@ class TestSemanticCache:
 
         from app.semantic_cache import CacheEntry
         entry = CacheEntry(
-            cache_key="k1", question_embedding=[], question="q", answer="a",
+            cache_key="k1", corpus_key="kb:x", question_embedding=[], question="q", answer="a",
             answer_mode="g", citations=[], usage={}, corpus_ids=["kb:x"],
             model_name="t", created_at=time.time(), ttl_seconds=999,
         )
@@ -233,6 +314,8 @@ class TestSemanticCache:
         assert stats["writes"] == 0
         assert stats["expired"] == 0
         assert stats["clears"] == 0
+        assert stats["semantic_enabled"] is False
+        assert stats["semantic_hits"] == 0
         assert stats["total_entries"] >= 1
         assert "hit_rate_estimate" in stats
 

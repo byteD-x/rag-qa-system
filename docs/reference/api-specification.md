@@ -74,7 +74,7 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 - Gateway JSON 指标摘要，适合前端、CI 或本地排障脚本直接读取
 - 当前包含 `response_cache_summary`
-- `response_cache_summary` 描述回答级语义缓存运行时状态，字段包括 `enabled`、`ttl_seconds`、`size`、`max_entries`、`hits`、`misses`、`writes`、`expired`、`clears` 与 `hit_rate`
+- `response_cache_summary` 描述回答级缓存运行时状态，字段包括 `enabled`、`ttl_seconds`、`size`、`max_entries`、`hits`、`misses`、`writes`、`expired`、`clears`、`hit_rate`、`semantic_enabled`、`semantic_threshold`、`semantic_hits`、`semantic_misses` 与 `semantic_skipped`。L2 相似问法语义命中默认关闭，默认阈值为 `0.92`
 
 ## 3. 认证
 
@@ -243,7 +243,7 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 `hallucination` 为规则级 RAG 幻觉检测摘要，包含 `hallucination_score`、`passed`、`needs_correction`、`check_dimensions` 与 `items`。当前同步、流式与 LangGraph 回答路径都会在生成最终响应时写入该字段。
 
-`semantic_cache` 为回答级语义缓存元数据，包含 `enabled`、`hit`、`cache_level`、`similarity_score`、`stored`、`bypass_reason` 与 `cached_usage`。当前同步与 LangGraph 非流式回答路径会在命中时跳过 LLM 生成，在未命中且回答具备 grounded 证据时写入缓存。
+`semantic_cache` 为回答级缓存元数据，包含 `enabled`、`hit`、`cache_level`、`similarity_score`、`original_question_hash`、`stored`、`bypass_reason` 与 `cached_usage`。当前同步与 LangGraph 非流式回答路径会在 L1 精确命中或显式开启的 L2 同 scope/corpus key 语义命中时跳过 LLM 生成，在未命中且回答具备 grounded 证据时写入缓存；状态只返回原问题 hash，不返回原问题明文。
 
 ### `POST /api/v1/chat/sessions/{id}/messages/stream`
 

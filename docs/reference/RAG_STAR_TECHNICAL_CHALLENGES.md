@@ -8,7 +8,7 @@
 
 | 分类 | 当前口径 |
 |---|---|
-| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、三层语义缓存、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
+| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
 | 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
 | 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
 | 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取或财务级结算完成 |
@@ -299,7 +299,7 @@
 
 **Action**：
 
-- `SemanticCache`：L1 sha256精确匹配（0延迟）、L2余弦相似度语义匹配（≥0.92阈值）、L3利用API prompt caching特性
+- `SemanticCache`：L1 sha256精确匹配、L2 余弦相似度语义匹配（默认关闭，需设置 `GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED=true`；默认阈值 `GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD=0.92`）、L3 利用 API prompt caching 特性；L2 只允许同 scope/corpus key 命中
 - 缓存失效：知识库文档更新时主动失效相关缓存、TTL过期自动清理、LRU淘汰
 - `ModelHealthMonitor`：滑动窗口P50/P95/P99延迟追踪、连续失败自动熔断（冷却期30s）、健康评分EMA平滑
 - `ComplexityClassifier`：7维特征快速评估（<1ms），驱动经济/标准/高级三档模型路由
@@ -307,14 +307,14 @@
 
 **Result**：
 
-- 三层缓存已具备精确/语义/Prompt Cache 分层与统计能力；真实命中率需要以目标业务数据和压测报告确认
+- 回答级缓存已具备精确/可选语义/Prompt Cache 分层与统计能力；真实命中率需要以目标业务数据和压测报告确认
 - 模型故障<3次连续失败自动摘除，恢复后自动重新上线
 - 简单问候类问题可路由到经济模型；综合成本收益不写固定百分比，需以部署环境报告为准
 - `usage_reconciliation` 可在运营看板里并列展示本地估算成本与导入 provider billing 记录，用作诊断对账；自动账单拉取、完整租户结算和真实节省比例仍保持待验证边界。
 
 **技术难点**：语义缓存的误命中风险（相似但不同的问题返回相同答案）和缓存失效时机。
 
-**解决方案**：语义阈值可配置（默认0.92），用户反馈点踩时主动失效；知识库更新时按corpus_id批量失效。
+**解决方案**：语义命中默认关闭，开启后仍要求同 scope/corpus key；语义阈值可配置（默认0.92），用户反馈点踩时主动失效；知识库更新时按corpus_id批量失效。
 
 ---
 
@@ -327,7 +327,7 @@
 - 设计可扩展 Agent 工具注册中心，支持装饰器注册、MCP 协议兼容、结果缓存与并行调用，新增工具仅需 5 行代码。
 - 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
-- 构建三层语义缓存体系（L1 精确/L2 语义/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
+- 构建回答级缓存体系（L1 精确/L2 可选语义命中/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
 
 ## 验证命令
 

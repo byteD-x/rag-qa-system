@@ -79,7 +79,7 @@
 - 支持提示词版本管理、模型路由、重排、视觉 OCR
 - 支持评测基线、回归门禁和反馈闭环
 - **Agent 自主决策**：任务拆解（DAG 并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
-- **推理优化**：L1 精确 / L2 语义 / L3 Prompt 三层缓存、模型健康监控（自动熔断）、请求合并
+- **推理优化**：回答级缓存体系（L1 精确；L2 相似问法语义命中可选开启；L3 Prompt Cache）、模型健康监控（自动熔断）、请求合并
 - **平台化**：五层分层指令引擎、6 大场景模板（企业 QA/技术支持/合规/培训/数据分析/代码审查）、RAG 幻觉检测与可配置答案校验门禁、Python SDK
 
 ## 技术栈
@@ -1679,6 +1679,8 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `GATEWAY_CHAT_MAX_IN_FLIGHT_PER_USER`
 - `GATEWAY_AGENT_RUNTIME`
 - `GATEWAY_FINAL_ANSWER_TOOLS_ENABLED`
+- `GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED`
+- `GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD`
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED`
 - `GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD`
 - `GATEWAY_ANSWER_VERIFIER_ENABLED`
@@ -1689,6 +1691,8 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 说明：
 - `GATEWAY_AGENT_RUNTIME=simple` 保持现有 Agent 工具检索链路；设为 `enhanced` 时启用任务拆解/反思增强运行时，失败会自动回退 simple。
 - `GATEWAY_FINAL_ANSWER_TOOLS_ENABLED=false` 默认关闭最终回答阶段模型工具调用；开启后仅在非流式 grounded 回答中暴露只读 `system` 白名单工具（如知识库范围摘要、工作流 trace 摘要、工具注册统计），最多执行一轮受控 ToolRegistry 调用，并只记录脱敏工具 trace。
+- `GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED=false` 默认关闭 L2 相似问法语义命中，L1 精确回答缓存行为不变；开启后仅允许同 scope/corpus key 的条目按 embedding 相似度命中。
+- `GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD=0.92` 控制 L2 语义命中的余弦相似度阈值，加载时会裁剪到 `0.0` 到 `1.0`。
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭 LLM 深度幻觉检测，避免额外成本；开启后会在规则检测后追加生成后门禁元数据。
 - `GATEWAY_ANSWER_VERIFIER_ENABLED=false` 默认关闭答案校验门禁；开启后根据规则/LLM 幻觉检测结果执行 `GATEWAY_ANSWER_VERIFIER_ACTION`，支持 `annotate`（仅标记）、`fallback`（降级为保守证据回答）和 `refuse`（拒答并清空引用）。
 
@@ -1890,7 +1894,7 @@ apps/
       ├─ memory_extractor.py       三层记忆提取
       ├─ instruction_merger.py     五层分层指令合并
       ├─ scene_templates.py        场景模板库（6大场景）
-      ├─ semantic_cache.py         三层语义缓存
+      ├─ semantic_cache.py         回答级缓存（L1 精确；L2 语义命中可选开启）
       ├─ model_health.py           模型健康监控（熔断）
       ├─ complexity_classifier.py  问题复杂度分类
       ├─ request_coalescer.py      请求合并器

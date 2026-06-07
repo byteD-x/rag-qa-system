@@ -855,7 +855,7 @@ def test_build_chat_response_payload_includes_semantic_cache_meta() -> None:
         "hit": False,
         "cache_level": "",
         "similarity_score": 0.0,
-        "original_question": "",
+        "original_question_hash": "",
         "age_seconds": 0.0,
         "stored": True,
         "bypass_reason": "",
@@ -936,6 +936,10 @@ def test_lookup_semantic_answer_returns_cache_hit_payload() -> None:
     assert answer_payload["provider"] == "semantic_cache"
     assert answer_payload["usage"] == {}
     assert answer_payload["semantic_cache"]["hit"] is True
+    assert "original_question" not in answer_payload["semantic_cache"]
+    assert len(answer_payload["semantic_cache"]["original_question_hash"]) == 64
+    assert answer_payload["llm_trace"]["original_question_hash"] == answer_payload["semantic_cache"]["original_question_hash"]
+    assert "original_question" not in answer_payload["llm_trace"]
     assert answer_payload["semantic_cache"]["cached_usage"] == {"prompt_tokens": 33, "completion_tokens": 12}
     assert cache_meta["hit"] is True
 
