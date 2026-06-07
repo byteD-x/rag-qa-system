@@ -242,23 +242,24 @@
 
 ## STAR 6：从硬编码工具到可扩展 Agent 工具生态
 
-**Situation**：原 Agent 仅有 4 个硬编码工具（search_scope/list_scope_documents/search_corpus/calculator），新增工具需要修改核心 Agent 代码，无法动态扩展、无法接入外部工具系统。
+**Situation**：原 Agent 检索侧工具集中在固定代码路径里，新增工具需要修改核心 Agent 逻辑，最终回答阶段也缺少可控的工具准入与 trace 口径。
 
-**Task**：设计可扩展的工具注册中心，支持装饰器注册、MCP 协议兼容、结果缓存和并行调用，同时保持与现有 LangChain StructuredTool 的兼容性。
+**Task**：设计可扩展的工具注册中心，支持装饰器注册、OpenAI function-calling schema、LangChain StructuredTool 和受控执行统计；同时通过本机只读 MCP adapter 对外暴露安全摘要工具，而不是开放动态插件市场。
 
 **Action**：
 
 - 设计 `ToolRegistry` 单例，支持 `@registry.register()` 装饰器一键注册
 - 实现 `get_llm_tools()` 生成 OpenAI function-calling 格式，`get_langchain_tools()` 生成 LangChain StructuredTool 格式
-- 支持 MCP 协议：`register_mcp_server(endpoint)` 自动发现远程工具
+- 新增 `/api/v1/mcp` 本机只读 JSON-RPC adapter，仅支持 `initialize`、`tools/list`、`tools/call`
+- MCP adapter 只暴露 `kb_scope_summary`、`workflow_trace_summary`、`tool_registry_stats` 三个摘要工具
 - 内置工具结果缓存（相同参数+TTL）、LRU 驱逐、执行统计（成功率/平均延迟）
 - `execute_parallel()` 支持无依赖工具并发执行
 
 **Result**：
 
-- 新工具只需 5 行代码即可注册，无需修改 Agent 核心逻辑
-- 工具执行支持超时、重试、缓存，统计信息可在前端工具管理页可视化
-- 28+ 测试用例覆盖注册/执行/缓存/统计全流程
+- 新工具可通过注册中心独立扩展，无需在最终回答链路里新增任意执行入口
+- 工具执行支持超时、缓存和统计，最终回答阶段默认关闭工具调用并只允许一轮受控只读摘要工具调用
+- 测试覆盖注册/执行/缓存/统计、最终回答工具准入、Tool Workflow 和只读 MCP adapter
 
 **技术难点**：需要同时兼容 OpenAI function-calling 和 LangChain StructuredTool 两种格式。
 
@@ -324,7 +325,7 @@
 - 修复并完善检索调试工作台，统一前后端 `/kb/retrieve/debug` 契约，展示文档标题、章节、引用原文、信号分数、证据路径和 retrieval stats，使 RAG 召回过程可演示、可追问、可定位。
 - 补齐 RAG 离线评测闭环，新增 deterministic retrieval fixture 和 local ingest fixture，打通 retrieval ablation、embedding benchmark、local ingest benchmark 与 CI smoke，输出 recall@K、MRR、NDCG 和 ingest throughput 报告。
 - 建立面试材料的指标诚实边界，将未压测的延迟、吞吐、命中率提升、幻觉率下降标为待验证，避免把最小 fixture 的验证结果包装成真实业务收益。
-- 设计可扩展 Agent 工具注册中心，支持装饰器注册、MCP 协议兼容、结果缓存与并行调用，新增工具仅需 5 行代码。
+- 设计可扩展 Agent 工具注册中心，支持装饰器注册、OpenAI/LangChain schema 生成、结果缓存、执行统计与只读 MCP adapter，新增工具可在注册中心内独立扩展。
 - 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
 - 构建回答级缓存体系（L1 精确/L2 可选语义命中/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。

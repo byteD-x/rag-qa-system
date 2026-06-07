@@ -15,6 +15,10 @@
 | 理解知识库智能提问 | [reference/kb-smart-ask-workflow.md](reference/kb-smart-ask-workflow.md) | 文档详情页到聊天页的结构化提问链路 |
 | 理解知识库运维页 | [reference/kb-governance-workbench.md](reference/kb-governance-workbench.md) | 治理、队列、低置信视觉区域与批处理事件 |
 | 准备项目展示 | [../AI_HIGHLIGHTS.md](../AI_HIGHLIGHTS.md) | AI 能力亮点、工程边界与作品集表达 |
+| 快速校准面试口径 | [interview-playbook.md](interview-playbook.md) | 最新 Tool Calling、MCP、缓存、Docker 与 trace 边界 |
+| 查看一页式亮点 | [PROJECT_HIGHLIGHTS_SUMMARY.md](PROJECT_HIGHLIGHTS_SUMMARY.md) | 简历可写能力、证据路径和边界说明 |
+| 查看仓库盘点 | [STAR_REPO_INVENTORY.md](STAR_REPO_INVENTORY.md) | tracked source、入口点、文档和质量门禁 |
+| 查看 STAR 主材料 | [STAR_REPO_STAR.md](STAR_REPO_STAR.md) | 当前仓库 STAR 条目、Action/Result 与证据 |
 | 准备 STAR 面试 | [reference/RAG_STAR_TECHNICAL_CHALLENGES.md](reference/RAG_STAR_TECHNICAL_CHALLENGES.md) | 技术难点、解决方案、证据路径、验证命令 |
 | 准备完整问答 | [reference/RAG_INTERVIEW_MATERIAL.md](reference/RAG_INTERVIEW_MATERIAL.md) | 深度面试材料和追问索引 |
 | 练习面试问答 | [reference/rag-ai-engineer-interview-master-qa.md](reference/rag-ai-engineer-interview-master-qa.md) | 主审问答顺序 |

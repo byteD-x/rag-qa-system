@@ -58,7 +58,7 @@
 - **任务拆解引擎**：自动评估问题复杂度（1-5级），复杂问题自动拆解为DAG子任务并行执行
 - **反思闭环**：输出自检（完整性/准确性/引用三维度评分）+ 失败根因分析 + 策略记忆
 - **三层记忆系统**：短期（会话窗口）/长期（三元组提取+Qdrant检索）/工作记忆（Scratchpad）
-- **可扩展工具注册中心**：装饰器注册 + MCP协议兼容 + 结果缓存 + 并行调用
+- **可扩展工具注册中心**：装饰器注册 + OpenAI/LangChain schema 生成 + 结果缓存 + 执行统计，并通过只读 MCP adapter 暴露安全摘要工具
 
 ### 10. 推理性能优化
 - **三层语义缓存**：L1精确/L2语义（余弦相似度）/L3 Prompt Cache，命中收益通过缓存统计与压测报告确认，不在无数据时写固定百分比
@@ -115,7 +115,7 @@
 | 回答可信度不能只靠 prompt | 使用证据块、引用、grounded answer 与安全测试约束回答边界 | `grounded_answering.py`、`test_safety_guardrails.py` |
 | 长链路故障难定位 | Gateway 与 KB 侧拆成可观测阶段，保留 trace、retrieval stats、warnings | `gateway_chat_service.py`、`retrieve.py`、`test_langgraph_runtime.py` |
 | 人工接管容易重复分配 | 本地接管队列抽象（租户+技能组过滤、优先级排序、条件更新认领） | `gateway_handoff.py`、`tests/test_backend_infra.py` |
-| **Agent工具缺乏可扩展性** | **工具注册中心（装饰器注册+MCP兼容+缓存+并行）** | `tool_registry.py`、`test_agent_capabilities.py` |
+| **Agent工具缺乏可扩展性** | **工具注册中心（装饰器注册+schema生成+只读MCP adapter+缓存统计）** | `tool_registry.py`、`test_agent_capabilities.py`、`test_mcp_adapter.py` |
 | **复杂问题缺乏自主拆解** | **任务拆解引擎（复杂度评估+DAG+并行执行）** | `task_decomposer.py`、`test_agent_capabilities.py` |
 | **重复问题浪费Token成本** | **三层语义缓存（L1精确/L2语义/L3 Prompt Cache）** | `semantic_cache.py`、`test_inference_optimization.py` |
 | **缺乏Agent输出质量自检** | **反思闭环（三维评分+失败分析+策略记忆）** | `agent_reflection.py`、`test_agent_capabilities.py` |
