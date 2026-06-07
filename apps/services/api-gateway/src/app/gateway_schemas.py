@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 ALLOWED_EXECUTION_MODES = {"grounded", "agent"}
 ALLOWED_AGENT_TOOLS = {"search_scope", "list_scope_documents", "search_corpus", "calculator"}
+ALLOWED_TOOL_WORKFLOW_MODES = {"direct", "plan_reflect_repair"}
 
 
 class LoginRequest(BaseModel):
@@ -81,6 +82,28 @@ class CreateRunRequest(SendMessageRequest):
 
 class RetryWorkflowRunRequest(BaseModel):
     reuse_scope: bool = True
+
+
+class ToolWorkflowRequest(BaseModel):
+    tool_name: str = Field(min_length=1, max_length=128)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    workflow_mode: str = Field(default="direct", max_length=32)
+
+    @field_validator("tool_name")
+    @classmethod
+    def normalize_tool_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("tool_name must not be blank")
+        return normalized
+
+    @field_validator("workflow_mode")
+    @classmethod
+    def validate_workflow_mode(cls, value: str) -> str:
+        normalized = value.strip().lower() or "direct"
+        if normalized not in ALLOWED_TOOL_WORKFLOW_MODES:
+            raise ValueError(f"unsupported workflow_mode: {normalized}")
+        return normalized
 
 
 class ClaimHandoffSessionRequest(BaseModel):

@@ -6,7 +6,7 @@
 - 统一聊天、工作流与人工接管
 - 知识库、文档上传、检索与调试
 - 连接器、同步调度与知识治理
-- Prompt Template 与 Agent Profile
+- Prompt Template、Agent Profile 与 Tool Workflow
 - 运营分析看板、审计与指标接口
 
 默认本地地址：
@@ -700,6 +700,50 @@ LangGraph 编排版知识库问答接口。
   "prompt_template_id": "template-uuid"
 }
 ```
+
+### Tool Workflow
+
+- `POST /api/v1/agents/tool-workflow`
+
+权限：
+- 需要 `chat.use`
+
+请求体：
+```json
+{
+  "tool_name": "data_controls_dry_run",
+  "workflow_mode": "plan_reflect_repair",
+  "payload": {
+    "scopes": [],
+    "action": "audit"
+  }
+}
+```
+
+字段说明：
+- `tool_name`：必填，受控只读业务工具名，服务端会去除首尾空白并拒绝空白名称。
+- `payload`：可选对象，传给工具的参数；非对象请求会被参数校验拒绝。
+- `workflow_mode`：可选，取值为 `direct` 或 `plan_reflect_repair`，默认 `direct`。
+
+响应顶层字段：
+- `workflow_mode`
+- `tool_name`
+- `success`
+- `data`
+- `error`
+- `metadata`
+
+`plan_reflect_repair` 模式可能额外返回：
+- `planning`：单工具规划元数据。
+- `reflection`：失败原因与是否可修复。
+- `repair`：一次受控修复的执行摘要。
+
+说明：
+- HTTP `200` 只表示工具工作流请求已被服务端处理，工具本身是否成功以响应体 `success` 为准。
+- `direct` 是默认模式，只执行受控只读业务工具白名单，不返回 `planning`、`reflection` 或 `repair`。
+- `plan_reflect_repair` 需要显式传入；当前自动修复只覆盖 `data_controls_dry_run` 的空 `scopes` dry-run 场景，会修复为 `memory`、`usage`、`export_rag`，且最多尝试一次。
+- 该入口不会绕过 `requires_confirmation`，需要确认的工具不会被自动修复执行。
+- 该入口不开放 shell、文件写入、任意 HTTP、动态插件或非 dry-run 写操作，也不暴露 `prompt_preview`、配置审计明细、密钥、连接串或原始目标列表。
 
 ## 12. 运营分析看板
 

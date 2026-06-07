@@ -20,10 +20,38 @@ from .gateway_platform_store import (
     update_agent_profile,
     update_prompt_template,
 )
-from .gateway_schemas import AgentProfileRequest, PromptTemplateRequest, UpdateAgentProfileRequest, UpdatePromptTemplateRequest
+from .gateway_schemas import (
+    AgentProfileRequest,
+    PromptTemplateRequest,
+    ToolWorkflowRequest,
+    UpdateAgentProfileRequest,
+    UpdatePromptTemplateRequest,
+)
+from .tool_workflow import run_tool_workflow
 
 
 router = APIRouter()
+
+
+@router.post("/api/v1/agents/tool-workflow")
+async def post_tool_workflow(payload: ToolWorkflowRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    require_permission(request, user, CHAT_PERMISSION, action="agent.tool_workflow.run", resource_type="tool_workflow")
+    result = await run_tool_workflow(
+        tool_name=payload.tool_name,
+        payload=payload.payload,
+        workflow_mode=payload.workflow_mode,
+    )
+    write_gateway_audit_event(
+        action="agent.tool_workflow.run",
+        outcome="success" if bool(result.get("success")) else "failed",
+        request=request,
+        user=user,
+        resource_type="tool_workflow",
+        resource_id=payload.tool_name,
+        scope=str(result.get("workflow_mode") or payload.workflow_mode),
+        details={"repair_count": (result.get("metadata") or {}).get("repair_count", 0)},
+    )
+    return result
 
 
 @router.get("/api/v1/platform/prompt-templates")

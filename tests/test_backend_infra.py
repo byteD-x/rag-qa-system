@@ -238,7 +238,17 @@ def _prioritize_sys_path(path: Path) -> None:
 def _load_gateway_main(monkeypatch):
     _prioritize_sys_path(GATEWAY_SRC)
 
-    for name in ("app.main", "app.ai_client", "app.db", "app.gateway_chat_routes", "app.gateway_chat_service", "app.gateway_workflows", "app"):
+    for name in (
+        "app.main",
+        "app.ai_client",
+        "app.db",
+        "app.gateway_chat_routes",
+        "app.gateway_chat_service",
+        "app.gateway_platform_routes",
+        "app.gateway_schemas",
+        "app.gateway_workflows",
+        "app",
+    ):
         sys.modules.pop(name, None)
 
     module = importlib.import_module("app.main")
@@ -3302,6 +3312,89 @@ def test_gateway_dashboard_route_requires_chat_permission(monkeypatch) -> None:
     assert response.status_code == 403
     payload = response.json()
     assert payload["code"] == "permission_denied"
+
+
+def test_gateway_tool_workflow_route_passes_workflow_mode(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_platform_routes = importlib.import_module("app.gateway_platform_routes")
+    audit_events: list[dict[str, object]] = []
+    monkeypatch.setattr(gateway_platform_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(kwargs))
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/agents/tool-workflow",
+        headers=_auth_headers(user),
+        json={
+            "tool_name": "data_controls_dry_run",
+            "workflow_mode": "plan_reflect_repair",
+            "payload": {"scopes": [], "action": "audit"},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["workflow_mode"] == "plan_reflect_repair"
+    assert payload["metadata"]["repair_count"] == 1
+    assert payload["planning"]["tool_name"] == "data_controls_dry_run"
+    assert payload["reflection"]["repairable"] is True
+    assert payload["repair"]["applied"] is True
+    assert payload["data"]["scopes"] == ["memory", "usage", "export_rag"]
+    assert audit_events
+    assert audit_events[0]["action"] == "agent.tool_workflow.run"
+    assert audit_events[0]["outcome"] == "success"
+    assert audit_events[0]["resource_type"] == "tool_workflow"
+    assert audit_events[0]["resource_id"] == "data_controls_dry_run"
+    assert audit_events[0]["scope"] == "plan_reflect_repair"
+    assert audit_events[0]["details"] == {"repair_count": 1}
+
+
+def test_gateway_tool_workflow_route_requires_chat_permission(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_audit_support = importlib.import_module("app.gateway_audit_support")
+    monkeypatch.setattr(gateway_audit_support, "write_gateway_audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="audit-1",
+        email="audit@local",
+        role="audit_viewer",
+        permissions=auth_module.permissions_for_role("audit_viewer"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/agents/tool-workflow",
+        headers=_auth_headers(user),
+        json={"tool_name": "data_controls_dry_run", "payload": {}},
+    )
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
+
+
+def test_gateway_tool_workflow_route_rejects_blank_tool_name(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/agents/tool-workflow",
+        headers=_auth_headers(user),
+        json={"tool_name": "   ", "payload": {}},
+    )
+
+    assert response.status_code == 422
 
 
 def test_kb_analytics_dashboard_route_requires_kb_read_permission(monkeypatch) -> None:

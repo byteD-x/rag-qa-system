@@ -75,6 +75,7 @@
 - 支持文档切片人工治理、切片禁用、手工合并/拆分和检索调试工作台
 - 支持统一连接器注册表，可配置 Web、飞书、钉钉和 SQL 数据源同步
 - 支持 Agent Profile、Prompt 模板库和工具开关
+- 支持受控 Tool Workflow，以 `direct` 或 `plan_reflect_repair` 模式执行只读维护工具
 - 支持个人视角与管理员视角的运营分析看板
 - 支持提示词版本管理、模型路由、重排、视觉 OCR
 - 支持评测基线、回归门禁和反馈闭环
@@ -1519,6 +1520,8 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 
 其中 `backup_cleanup_dry_run` 与 `data_controls_dry_run` 是维护类系统工具，只用于预览备份清理和数据治理影响面。它们固定返回 `dry_run=true`、`apply=false`，只输出数量、容量、scope 和脱敏后的文件名摘要，不执行删除、导出或状态修改。
 
+Gateway 还提供 `POST /api/v1/agents/tool-workflow` 作为受控工具工作流入口。默认 `workflow_mode=direct`，只执行只读业务工具白名单；显式传入 `workflow_mode=plan_reflect_repair` 时，会返回单工具规划、失败反思与一次受控修复元数据。目前修复仅覆盖 `data_controls_dry_run` 的空 `scopes` dry-run 场景，不开放 shell、文件写入、任意 HTTP、动态插件或非 dry-run 写操作，也不影响聊天和微信快回复链路。
+
 ### 6. 人工接管队列
 
 Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运营人员按租户与技能组认领待处理会话。
@@ -1546,6 +1549,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 系统现在内置了完整的 AI Agent 开发所需能力：
 
 - **工具注册中心**：装饰器注册 + MCP 协议兼容 + 结果缓存 + 执行统计，支持只读维护 dry-run 工具并对路径/目标引用做脱敏摘要
+- **Planner/Reflect/Repair 工具流**：对受支持的只读维护工具提供规划元数据、失败反思和一次性安全修复
 - **任务拆解引擎**：自动评估复杂度（1-5级），复杂问题拆为 DAG 子任务并行执行
 - **反思闭环**：输出自检（完整性/准确性/引用三维评分） + 失败根因分析 + 策略记忆
 - **三层记忆**：短期（会话窗口）+ 长期（三元组提取+Qdrant检索）+ 工作记忆（Scratchpad）
