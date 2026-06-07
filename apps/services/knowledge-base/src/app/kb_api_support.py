@@ -18,7 +18,7 @@ from .kb_runtime import (
     logger,
     storage,
 )
-from .vector_store import check_vector_store
+from .vector_store import check_vector_runtime_config, check_vector_store
 from .kb_support import (
     IdempotencyState,
     begin_kb_idempotency,
@@ -34,7 +34,12 @@ from .kb_support import (
 
 
 def check_readiness() -> dict[str, Any]:
-    return kb_readiness_checks(db=db, storage=storage, vector_store_checker=check_vector_store)
+    return kb_readiness_checks(
+        db=db,
+        storage=storage,
+        vector_store_checker=check_vector_store,
+        vector_runtime_config_checker=check_vector_runtime_config,
+    )
 
 
 def refresh_metrics_snapshot() -> None:

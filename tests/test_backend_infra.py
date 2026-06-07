@@ -18,7 +18,7 @@ from shared import auth as auth_module
 from shared import embeddings as embeddings_module
 from shared.embeddings import EmbeddingSettings, clear_query_embedding_cache, embed_query_text
 from shared.idempotency import build_request_hash, normalize_idempotency_key
-from shared.qdrant_store import qdrant_point_id
+from shared.qdrant_store import check_qdrant_runtime_config, qdrant_point_id
 from shared.stack_init import _load_migration_files, _migration_checksum, _select_pending_migrations
 
 from conftest import clear_app_modules
@@ -1564,12 +1564,95 @@ def test_kb_readiness_checks_require_storage(monkeypatch) -> None:
     monkeypatch.setattr(kb_main.db, "connect", lambda: _Connection())
     monkeypatch.setattr(kb_main.storage, "check_bucket_access", lambda: (_ for _ in ()).throw(RuntimeError("bucket missing")))
     monkeypatch.setitem(kb_main._kb_readiness_checks.__globals__, "check_vector_store", lambda: {"collection": "kb-evidence"})
+    monkeypatch.setitem(
+        kb_main._kb_readiness_checks.__globals__,
+        "check_vector_runtime_config",
+        lambda: {"collection": "kb-evidence", "api_key_configured": False},
+    )
 
     checks = kb_main._kb_readiness_checks()
 
     assert checks["database"]["status"] == "ok"
     assert checks["object_storage"]["status"] == "failed"
     assert checks["vector_store"]["status"] == "ok"
+    assert checks["qdrant_runtime_config"]["status"] == "ok"
+    assert checks["qdrant_runtime_config"]["api_key_configured"] is False
+
+
+def test_qdrant_runtime_config_uses_safe_defaults(monkeypatch) -> None:
+    for name in (
+        "QDRANT_URL",
+        "QDRANT_API_KEY",
+        "QDRANT_COLLECTION",
+        "QDRANT_PREFER_GRPC",
+        "QDRANT_TIMEOUT_SECONDS",
+        "FASTEMBED_MODEL_NAME",
+        "FASTEMBED_SPARSE_MODEL_NAME",
+        "FASTEMBED_VECTOR_SIZE",
+        "FASTEMBED_THREADS",
+        "FASTEMBED_CACHE_DIR",
+        "FASTEMBED_BATCH_SIZE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = check_qdrant_runtime_config()
+
+    assert config["status"] == "ok"
+    assert config["endpoint"] == "http://qdrant:6333"
+    assert config["collection"] == "kb-evidence"
+    assert config["prefer_grpc"] is False
+    assert config["timeout_seconds"] == 10.0
+    assert config["api_key_configured"] is False
+    assert config["fastembed_model"] == "BAAI/bge-small-zh-v1.5"
+    assert config["fastembed_sparse_model"] == "Qdrant/bm25"
+    assert config["fastembed_vector_size"] == 0
+    assert config["fastembed_threads"] == 4
+    assert config["fastembed_cache_dir_configured"] is False
+    assert config["index_batch_size"] == 64
+
+
+def test_qdrant_runtime_config_masks_sensitive_endpoint_and_key(monkeypatch) -> None:
+    monkeypatch.setenv("QDRANT_URL", "https://user:credential@example.test:6333/private?debug=hidden")
+    monkeypatch.setenv("QDRANT_API_KEY", "opaque-qdrant-key")
+    monkeypatch.setenv("QDRANT_COLLECTION", "finance-kb")
+    monkeypatch.setenv("QDRANT_PREFER_GRPC", "yes")
+    monkeypatch.setenv("QDRANT_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("FASTEMBED_MODEL_NAME", "custom-dense")
+    monkeypatch.setenv("FASTEMBED_SPARSE_MODEL_NAME", "custom-sparse")
+    monkeypatch.setenv("FASTEMBED_VECTOR_SIZE", "768")
+    monkeypatch.setenv("FASTEMBED_THREADS", "8")
+    monkeypatch.setenv("FASTEMBED_CACHE_DIR", "E:\\fastembed-cache")
+    monkeypatch.setenv("FASTEMBED_BATCH_SIZE", "32")
+
+    config = check_qdrant_runtime_config()
+
+    assert config["endpoint"] == "https://example.test:6333/private"
+    assert config["collection"] == "finance-kb"
+    assert config["prefer_grpc"] is True
+    assert config["timeout_seconds"] == 2.5
+    assert config["api_key_configured"] is True
+    assert config["fastembed_model"] == "custom-dense"
+    assert config["fastembed_sparse_model"] == "custom-sparse"
+    assert config["fastembed_vector_size"] == 768
+    assert config["fastembed_threads"] == 8
+    assert config["fastembed_cache_dir_configured"] is True
+    assert config["index_batch_size"] == 32
+    assert "opaque-qdrant-key" not in str(config)
+    assert "credential" not in config["endpoint"]
+
+
+def test_qdrant_runtime_config_falls_back_for_invalid_numbers(monkeypatch) -> None:
+    monkeypatch.setenv("QDRANT_TIMEOUT_SECONDS", "bad")
+    monkeypatch.setenv("FASTEMBED_VECTOR_SIZE", "bad")
+    monkeypatch.setenv("FASTEMBED_THREADS", "bad")
+    monkeypatch.setenv("FASTEMBED_BATCH_SIZE", "bad")
+
+    config = check_qdrant_runtime_config()
+
+    assert config["timeout_seconds"] == 10.0
+    assert config["fastembed_vector_size"] == 0
+    assert config["fastembed_threads"] == 4
+    assert config["index_batch_size"] == 64
 
 
 def test_auth_configuration_allows_default_credentials_in_local_runtime(monkeypatch) -> None:

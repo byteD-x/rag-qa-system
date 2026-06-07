@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import NAMESPACE_URL, uuid5
 
 from fastembed import TextEmbedding
@@ -67,6 +68,43 @@ def load_qdrant_settings(prefix: str = "QDRANT") -> QdrantSettings:
         fastembed_cache_dir=os.getenv("FASTEMBED_CACHE_DIR", "").strip(),
         index_batch_size=index_batch_size,
     )
+
+
+def check_qdrant_runtime_config(*, settings: QdrantSettings | None = None, prefix: str = "QDRANT") -> dict[str, Any]:
+    config = settings or load_qdrant_settings(prefix=prefix)
+    return {
+        "status": "ok",
+        "endpoint": _safe_endpoint(config.url),
+        "collection": config.collection,
+        "prefer_grpc": config.prefer_grpc,
+        "timeout_seconds": config.timeout_seconds,
+        "api_key_configured": bool(config.api_key),
+        "fastembed_model": config.fastembed_model_name,
+        "fastembed_sparse_model": config.fastembed_sparse_model_name,
+        "fastembed_vector_size": config.fastembed_vector_size,
+        "fastembed_threads": config.fastembed_threads,
+        "fastembed_cache_dir_configured": bool(config.fastembed_cache_dir),
+        "index_batch_size": config.index_batch_size,
+    }
+
+
+def _safe_endpoint(url: str) -> str:
+    cleaned = str(url or "").strip()
+    if not cleaned:
+        return ""
+    try:
+        parts = urlsplit(cleaned)
+    except ValueError:
+        return cleaned.split("@", 1)[-1]
+    if not parts.scheme or not parts.netloc:
+        return cleaned.split("@", 1)[-1]
+    host = parts.hostname or ""
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    netloc = f"{host}:{port}" if port else host
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
 
 
 def qdrant_point_id(*, unit_type: str, unit_id: str) -> str:

@@ -516,6 +516,8 @@ make down
 - KB Service `readyz`: `http://localhost:8300/readyz`
 - KB Service `metrics`: `http://localhost:8300/metrics`
 
+KB Service `readyz` 的 `checks` 会包含 `database`、`object_storage`、`vector_store` 与 `qdrant_runtime_config`。其中 `qdrant_runtime_config` 只返回 Qdrant endpoint、collection、FastEmbed 参数和 `api_key_configured` 布尔值，不返回 API key 原文。
+
 ### 本地默认账号
 
 默认账号来自 [`.env.example`](.env.example)。
@@ -536,7 +538,7 @@ make down
 - 认证与基础环境：`APP_ENV`、`JWT_SECRET`
 - 数据库：`KB_DATABASE_DSN`、`GATEWAY_DATABASE_DSN`
 - 对象存储：`OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_ACCESS_KEY`、`OBJECT_STORAGE_SECRET_KEY`、`OBJECT_STORAGE_BUCKET`
-- 向量检索：`QDRANT_URL`、`QDRANT_COLLECTION`、`FASTEMBED_MODEL_NAME`、`FASTEMBED_SPARSE_MODEL_NAME`
+- 向量检索：`QDRANT_URL`、`QDRANT_COLLECTION`、`QDRANT_TIMEOUT_SECONDS`、`QDRANT_PREFER_GRPC`、`FASTEMBED_MODEL_NAME`、`FASTEMBED_SPARSE_MODEL_NAME`
 - LLM：`LLM_ENABLED`、`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`
 
 ### 一份本地可运行的最小示例
@@ -1598,7 +1600,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 
 该页面复用现有能力，不额外引入外部监控栈，当前聚合以下 4 类值班信息：
 
-- 服务健康：直接读取 KB `readyz` 依赖检查结果，展示 `database`、`storage`、`vector_store` 等状态
+- 服务健康：直接读取 KB `readyz` 依赖检查结果，展示 `database`、`object_storage`、`vector_store`、`qdrant_runtime_config` 等状态
 - Ingest 风险队列：展示失败可重试 job、dead-letter 文档、长时间未推进文档
 - Connector 运行看板：展示连接器总数、启用调度数、当前到期数、最近失败情况
 - 事故事件流：展示最近失败、重试、降级相关审计事件，并附带 `trace_id`
@@ -1839,6 +1841,8 @@ make smoke-eval
 - `QDRANT_COLLECTION`
 - `FASTEMBED_MODEL_NAME`
 - `FASTEMBED_SPARSE_MODEL_NAME`
+
+如果 `checks.qdrant_runtime_config` 异常，优先核对 Qdrant endpoint、collection、timeout、gRPC 偏好和 FastEmbed 参数是否符合当前部署；该检查只报告 `api_key_configured`，不会显示 API key 内容。
 
 #### 4. 如果向量检索异常
 

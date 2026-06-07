@@ -97,6 +97,22 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/tool_sandbox.py": [
         "tests/test_platform_ecosystem_phase2.py",
     ],
+    "apps/services/knowledge-base/src/app/kb_api_support.py": [
+        "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
+    ],
+    "apps/services/knowledge-base/src/app/kb_support.py": [
+        "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
+    ],
+    "apps/services/knowledge-base/src/app/vector_store.py": [
+        "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",
+        "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
+    ],
+    "packages/python/shared/qdrant_store.py": [
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_uses_safe_defaults",
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_masks_sensitive_endpoint_and_key",
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_falls_back_for_invalid_numbers",
+        "tests/test_backend_infra.py::test_qdrant_point_id_is_stable_uuid",
+    ],
     "scripts/quality/run_pytest_groups.py": [
         "tests/test_eval_pipeline.py",
     ],

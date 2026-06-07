@@ -15,6 +15,7 @@ from shared.qdrant_store import (
     SPARSE_VECTOR_NAME,
     QdrantSettings,
     check_qdrant_access,
+    check_qdrant_runtime_config,
     ensure_qdrant_collection,
     get_qdrant_client,
     load_qdrant_settings,
@@ -85,6 +86,10 @@ def ensure_vector_store() -> dict[str, Any]:
 
 def check_vector_store() -> dict[str, Any]:
     return check_qdrant_access(settings=QDRANT_SETTINGS)
+
+
+def check_vector_runtime_config() -> dict[str, Any]:
+    return check_qdrant_runtime_config(settings=QDRANT_SETTINGS)
 
 
 def delete_document_vectors(document_id: str) -> None:

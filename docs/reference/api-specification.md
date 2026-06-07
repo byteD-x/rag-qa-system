@@ -61,7 +61,8 @@ Authorization: Bearer <ACCESS_TOKEN>
 ### `GET /readyz`
 
 - Gateway 会检查数据库、KB Service 与模型配置
-- KB Service 会检查数据库、对象存储与 Qdrant
+- KB Service 会检查数据库、对象存储、Qdrant 连通性与 Qdrant 运行时配置
+- `qdrant_runtime_config` 只暴露 endpoint、collection、FastEmbed 参数和 `api_key_configured`，不返回 API key 原文
 - 关键依赖未就绪时返回 `503`
 
 ### `GET /metrics`
@@ -849,7 +850,7 @@ Query 参数：
 字段说明：
 
 - `service_health.status`：聚合状态，取值 `ok | degraded | failed`
-- `service_health.checks`：透传 `readyz` 依赖检查项，包含 `database`、`storage`、`vector_store` 等
+- `service_health.checks`：透传 `readyz` 依赖检查项，包含 `database`、`object_storage`、`vector_store`、`qdrant_runtime_config` 等
 - `ingest_ops.retryable_jobs`：仅包含当前可人工重试的 `failed | dead_letter` ingest job
 - `ingest_ops.stalled_documents`：超过阈值仍未推进的文档及其最近 job 状态
 - `connector_ops.items`：连接器当前运行视图，包含 `next_run_at`、`last_run_outcome`、`last_error`

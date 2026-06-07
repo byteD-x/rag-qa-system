@@ -23,7 +23,13 @@ class IdempotencyState:
         return bool(self.key)
 
 
-def kb_readiness_checks(*, db: Any, storage: Any, vector_store_checker: Any | None = None) -> dict[str, Any]:
+def kb_readiness_checks(
+    *,
+    db: Any,
+    storage: Any,
+    vector_store_checker: Any | None = None,
+    vector_runtime_config_checker: Any | None = None,
+) -> dict[str, Any]:
     checks: dict[str, Any] = {}
     try:
         with db.connect() as conn:
@@ -45,6 +51,12 @@ def kb_readiness_checks(*, db: Any, storage: Any, vector_store_checker: Any | No
             checks["vector_store"] = {"status": "ok", **dict(vector_store_checker() or {})}
         except Exception as exc:
             checks["vector_store"] = {"status": "failed", "detail": str(exc)}
+
+    if vector_runtime_config_checker is not None:
+        try:
+            checks["qdrant_runtime_config"] = {"status": "ok", **dict(vector_runtime_config_checker() or {})}
+        except Exception as exc:
+            checks["qdrant_runtime_config"] = {"status": "failed", "detail": str(exc)}
 
     return checks
 

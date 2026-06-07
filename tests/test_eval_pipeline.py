@@ -664,6 +664,29 @@ def test_fast_test_selector_routes_optimization_modules_to_owned_suites() -> Non
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_qdrant_readiness_modules_to_focused_tests() -> None:
+    selector = _load_script_module("fast_test_selector_qdrant_readiness_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "packages/python/shared/qdrant_store.py",
+            "apps/services/knowledge-base/src/app/kb_support.py",
+            "apps/services/knowledge-base/src/app/kb_api_support.py",
+            "apps/services/knowledge-base/src/app/vector_store.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_uses_safe_defaults",
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_masks_sensitive_endpoint_and_key",
+        "tests/test_backend_infra.py::test_qdrant_runtime_config_falls_back_for_invalid_numbers",
+        "tests/test_backend_infra.py::test_qdrant_point_id_is_stable_uuid",
+        "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
+        "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",
+    ]
+    assert "tests/test_shared_stack.py" not in targets
+
+
 def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
     selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
 
