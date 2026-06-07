@@ -100,6 +100,131 @@ def test_message_feedback_request_normalizes_fields() -> None:
     assert payload.notes == "needs citations"
 
 
+def test_provider_billing_import_request_normalizes_records() -> None:
+    gateway_schemas = _load_gateway_module("app.gateway_schemas")
+
+    payload = gateway_schemas.ProviderBillingImportRequest(
+        records=[
+            {
+                "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "external_id": " bill-001 ",
+                "tenant_id": " tenant-a ",
+                "user_id": " user-1 ",
+                "provider": " openai ",
+                "model": " gpt-4.1-mini ",
+                "route_key": " grounded ",
+                "prompt_key": " chat_grounded_answer ",
+                "currency": " usd ",
+                "billed_cost_cents": 123,
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "billed_at": " 2026-06-07T10:00:00Z ",
+                "metadata": {"invoice": "inv-1"},
+            }
+        ]
+    )
+
+    record = payload.records[0]
+    assert record.id == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    assert record.external_id == "bill-001"
+    assert record.tenant_id == "tenant-a"
+    assert record.user_id == "user-1"
+    assert record.provider == "openai"
+    assert record.model == "gpt-4.1-mini"
+    assert record.route_key == "grounded"
+    assert record.prompt_key == "chat_grounded_answer"
+    assert record.currency == "USD"
+    assert record.billed_at == "2026-06-07T10:00:00Z"
+    assert record.metadata == {"invoice": "inv-1"}
+
+
+def test_import_provider_billing_route_requires_platform_admin(monkeypatch) -> None:
+    gateway_admin_routes = _load_gateway_module("app.gateway_admin_routes")
+    audit_events: list[dict[str, object]] = []
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/admin/costs/provider-billing-records"))
+    payload = gateway_admin_routes.ProviderBillingImportRequest(
+        records=[
+            {
+                "provider": "openai",
+                "billed_cost_cents": 12,
+            }
+        ]
+    )
+
+    monkeypatch.setattr(gateway_admin_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(dict(kwargs)))
+    monkeypatch.setattr(
+        gateway_admin_routes,
+        "import_provider_billing_records",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("non-admin should not import billing records")),
+    )
+
+    try:
+        asyncio.run(gateway_admin_routes.import_provider_billing(payload, request, user))
+    except HTTPException as exc:
+        assert exc.status_code == 403
+        assert exc.detail["code"] == "permission_denied"
+    else:
+        raise AssertionError("expected non-admin billing import to be rejected")
+
+    assert audit_events[-1]["action"] == "admin.cost.provider_billing.import"
+    assert audit_events[-1]["outcome"] == "denied"
+    assert audit_events[-1]["details"]["required_role"] == "platform_admin"
+
+
+def test_import_provider_billing_route_imports_records_and_audits(monkeypatch) -> None:
+    gateway_admin_routes = _load_gateway_module("app.gateway_admin_routes")
+    audit_events: list[dict[str, object]] = []
+    captured: dict[str, object] = {}
+    user = auth_module.AuthUser(
+        user_id="admin-1",
+        email="admin@local",
+        role="platform_admin",
+        permissions=auth_module.permissions_for_role("platform_admin"),
+    )
+    request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/admin/costs/provider-billing-records"))
+    payload = gateway_admin_routes.ProviderBillingImportRequest(
+        records=[
+            {
+                "external_id": " bill-001 ",
+                "provider": " openai ",
+                "model": " gpt-4.1-mini ",
+                "route_key": " grounded ",
+                "currency": " usd ",
+                "billed_cost_cents": 456,
+                "input_tokens": 1200,
+                "output_tokens": 300,
+            }
+        ]
+    )
+
+    def fake_import(records, *, imported_by_user_id: str):
+        captured["records"] = records
+        captured["imported_by_user_id"] = imported_by_user_id
+        return {"imported": len(records), "record_ids": ["record-1"]}
+
+    monkeypatch.setattr(gateway_admin_routes, "import_provider_billing_records", fake_import)
+    monkeypatch.setattr(gateway_admin_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(dict(kwargs)))
+
+    result = asyncio.run(gateway_admin_routes.import_provider_billing(payload, request, user))
+
+    assert result == {"imported": 1, "record_ids": ["record-1"]}
+    assert captured["imported_by_user_id"] == "admin-1"
+    record = captured["records"][0]
+    assert record["external_id"] == "bill-001"
+    assert record["provider"] == "openai"
+    assert record["currency"] == "USD"
+    assert record["billed_cost_cents"] == 456
+    assert audit_events[-1]["action"] == "admin.cost.provider_billing.import"
+    assert audit_events[-1]["outcome"] == "success"
+    assert audit_events[-1]["details"]["imported"] == 1
+
+
 def _prioritize_sys_path(path: Path) -> None:
     target = str(path)
     try:
@@ -2516,6 +2641,144 @@ def test_gateway_qa_quality_stats_handles_empty_window(monkeypatch) -> None:
     assert payload["answer_mode_distribution"] == []
     assert payload["evidence_status_distribution"] == []
     assert payload["clarification"]["kind_distribution"] == []
+
+
+def test_gateway_usage_stats_includes_provider_billing(monkeypatch) -> None:
+    gateway_analytics = _load_gateway_module("app.gateway_analytics_routes")
+    user = auth_module.AuthUser(
+        user_id="user-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    executed: list[tuple[str, tuple[object, ...]]] = []
+
+    class _Cursor:
+        def __init__(self) -> None:
+            self._row = None
+            self._rows = []
+
+        def execute(self, query, params=None):
+            normalized = " ".join(str(query).split())
+            params_tuple = tuple(params or ())
+            executed.append((normalized, params_tuple))
+            if "DATE(created_at) AS day" in query:
+                assert params_tuple == ("user-1", 14)
+                self._rows = [
+                    {
+                        "day": "2026-06-07",
+                        "prompt_tokens": 1200,
+                        "completion_tokens": 300,
+                        "estimated_cost": 0.42,
+                    }
+                ]
+                self._row = None
+            elif "COUNT(*) AS assistant_turns" in query:
+                assert params_tuple == ("user-1", 14)
+                self._row = {
+                    "assistant_turns": 2,
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 300,
+                    "estimated_cost": 0.42,
+                }
+                self._rows = []
+            elif "COUNT(*) AS provider_billing_records" in query:
+                assert params_tuple == ("user-1", 14)
+                self._row = {
+                    "provider_billing_records": 3,
+                    "provider_billed_cost_cents": 987,
+                    "provider_input_tokens": 2200,
+                    "provider_output_tokens": 500,
+                }
+                self._rows = []
+            elif "GROUP BY provider, currency" in query:
+                assert params_tuple == ("user-1", 14)
+                self._rows = [
+                    {
+                        "provider": "openai",
+                        "currency": "USD",
+                        "record_count": 2,
+                        "billed_cost_cents": 700,
+                        "input_tokens": 1800,
+                        "output_tokens": 420,
+                    }
+                ]
+                self._row = None
+            elif "GROUP BY route_key, currency" in query:
+                assert params_tuple == ("user-1", 14)
+                self._rows = [
+                    {
+                        "route_key": "grounded",
+                        "currency": "USD",
+                        "record_count": 2,
+                        "billed_cost_cents": 700,
+                    }
+                ]
+                self._row = None
+            elif "DATE(billed_at) AS day" in query:
+                assert params_tuple == ("user-1", 14)
+                self._rows = [
+                    {
+                        "day": "2026-06-07",
+                        "currency": "USD",
+                        "record_count": 3,
+                        "billed_cost_cents": 987,
+                    }
+                ]
+                self._row = None
+            elif "GROUP BY currency" in query:
+                assert params_tuple == ("user-1", 14)
+                self._rows = [
+                    {
+                        "currency": "USD",
+                        "record_count": 3,
+                        "billed_cost_cents": 987,
+                    }
+                ]
+                self._row = None
+            else:
+                raise AssertionError(f"unexpected query: {query}")
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return list(self._rows)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(gateway_analytics.gateway_db, "connect", lambda: _Connection())
+
+    payload = gateway_analytics._usage_stats(user, view="personal", days=14)
+
+    assert len(executed) == 7
+    assert payload["summary"]["assistant_turns"] == 2
+    assert payload["summary"]["estimated_cost"] == 0.42
+    assert payload["summary"]["provider_billing_records"] == 3
+    assert payload["summary"]["provider_billed_cost_cents"] == 987
+    assert payload["summary"]["provider_billed_cost"] == 9.87
+    assert payload["summary"]["provider_input_tokens"] == 2200
+    assert payload["summary"]["provider_output_tokens"] == 500
+    assert payload["summary"]["cost_source_counts"] == {"chat_estimated": 2, "provider_billing": 3}
+    assert payload["provider_billing"]["by_provider"][0]["provider"] == "openai"
+    assert payload["provider_billing"]["by_provider"][0]["billed_cost"] == 7.0
+    assert payload["provider_billing"]["by_route"][0]["route_key"] == "grounded"
+    assert payload["provider_billing"]["trend"][0]["billed_cost"] == 9.87
+    assert payload["provider_billing"]["by_currency"][0]["currency"] == "USD"
 
 
 def test_gateway_dashboard_route_returns_extended_payload(monkeypatch) -> None:

@@ -1574,12 +1574,19 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - 问答热点词
 - Zero-hit 趋势与高频无命中问题
 - 点赞/点踩/标记趋势
-- Token 与估算成本统计
+- Token 与本地估算成本统计
+- Provider 账单导入成本统计
 
 其中：
 
 - `view=personal` 适合个人使用分析
 - `view=admin` 适合管理员看团队整体情况，需要管理员权限
+
+成本口径：
+
+- `summary.estimated_cost` 来自聊天消息 usage 与本地模型定价的估算。
+- `summary.provider_billed_cost_cents` 与 `provider_billing.*` 来自 `provider_billing_records`，用于展示供应商账单样本或外部结算系统回填成本。
+- 平台管理员可通过 `POST /api/v1/admin/costs/provider-billing-records` 导入账单记录；当前不自动拉取 OpenAI 或云厂商账单。
 
 ### 9. 知识库运维总览工作台
 

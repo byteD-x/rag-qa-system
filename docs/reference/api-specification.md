@@ -734,6 +734,29 @@ Query 参数：
 - `qa_quality`
 - `data_quality`
 
+`usage` 关键字段：
+
+- `summary.assistant_turns`
+- `summary.prompt_tokens`
+- `summary.completion_tokens`
+- `summary.estimated_cost`
+- `summary.provider_billing_records`
+- `summary.provider_billed_cost_cents`
+- `summary.provider_billed_cost`
+- `summary.provider_input_tokens`
+- `summary.provider_output_tokens`
+- `summary.cost_source_counts`
+- `provider_billing.by_currency`
+- `provider_billing.by_provider`
+- `provider_billing.by_route`
+- `provider_billing.trend`
+
+成本口径：
+
+- `estimated_cost` 是基于聊天消息 usage 与本地模型定价的估算成本。
+- `provider_billed_cost_cents` 与 `provider_billing.*` 聚合平台管理员导入的 provider billing 记录。
+- 当前接口不自动拉取供应商账单；生产对账应由外部结算任务或后台系统调用导入接口。
+
 `funnel` 关键字段：
 
 - `knowledge_bases_created`
@@ -874,12 +897,65 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 
 - `GET /api/v1/audit/events`
 - `GET /api/v1/kb/audit/events`
+- `POST /api/v1/admin/costs/provider-billing-records`
 - `GET /metrics`
 
 说明：
 
 - Gateway 审计接口聚合网关侧会话、反馈、重试和平台操作事件。
 - KB 审计接口记录知识库、上传、连接器、ingest 与治理相关事件。
+- Provider billing 导入接口仅允许 `platform_admin` 调用，成功或拒绝都会写入 `admin.cost.provider_billing.import` 审计事件。
+
+### `POST /api/v1/admin/costs/provider-billing-records`
+
+用途：
+
+- 导入供应商账单样本或外部结算系统回填记录。
+- 让 `GET /api/v1/analytics/dashboard` 同时展示本地估算成本与 provider billed cost。
+
+请求体：
+
+```json
+{
+  "records": [
+    {
+      "external_id": "bill-202606-openai-001",
+      "tenant_id": "tenant-a",
+      "user_id": "user-1",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "route_key": "grounded",
+      "prompt_key": "chat_grounded_answer",
+      "currency": "USD",
+      "billed_cost_cents": 987,
+      "input_tokens": 2200,
+      "output_tokens": 500,
+      "billed_at": "2026-06-07T10:00:00Z",
+      "metadata": {
+        "invoice": "inv-001"
+      }
+    }
+  ]
+}
+```
+
+字段说明：
+
+- `records` 最多 500 条。
+- `id` 可选；未传时由服务端生成 UUID。
+- `external_id` 可选；非空时按 `(provider, external_id)` 幂等 upsert。
+- `billed_cost_cents`、`input_tokens`、`output_tokens` 必须为非负整数。
+- `currency` 会统一转为大写，默认 `CNY`。
+- `user_id` 未传时默认归属导入管理员。
+
+响应示例：
+
+```json
+{
+  "imported": 1,
+  "record_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+}
+```
 
 ## 14. 背压与安全
 

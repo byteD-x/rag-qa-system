@@ -178,13 +178,106 @@ def _usage_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
                 params + (days,),
             )
             summary_row = cur.fetchone() or {}
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS provider_billing_records,
+                    COALESCE(SUM(billed_cost_cents), 0) AS provider_billed_cost_cents,
+                    COALESCE(SUM(input_tokens), 0) AS provider_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS provider_output_tokens
+                FROM provider_billing_records
+                WHERE {clause}
+                  AND billed_at >= NOW() - (%s || ' days')::interval
+                """,
+                params + (days,),
+            )
+            billing_summary_row = cur.fetchone() or {}
+            cur.execute(
+                f"""
+                SELECT
+                    provider,
+                    currency,
+                    COUNT(*) AS record_count,
+                    COALESCE(SUM(billed_cost_cents), 0) AS billed_cost_cents,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                    COALESCE(SUM(output_tokens), 0) AS output_tokens
+                FROM provider_billing_records
+                WHERE {clause}
+                  AND billed_at >= NOW() - (%s || ' days')::interval
+                GROUP BY provider, currency
+                ORDER BY billed_cost_cents DESC, provider ASC, currency ASC
+                LIMIT 20
+                """,
+                params + (days,),
+            )
+            billing_provider_rows = cur.fetchall()
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(NULLIF(route_key, ''), 'unknown') AS route_key,
+                    currency,
+                    COUNT(*) AS record_count,
+                    COALESCE(SUM(billed_cost_cents), 0) AS billed_cost_cents
+                FROM provider_billing_records
+                WHERE {clause}
+                  AND billed_at >= NOW() - (%s || ' days')::interval
+                GROUP BY route_key, currency
+                ORDER BY billed_cost_cents DESC, route_key ASC, currency ASC
+                LIMIT 20
+                """,
+                params + (days,),
+            )
+            billing_route_rows = cur.fetchall()
+            cur.execute(
+                f"""
+                SELECT
+                    DATE(billed_at) AS day,
+                    currency,
+                    COUNT(*) AS record_count,
+                    COALESCE(SUM(billed_cost_cents), 0) AS billed_cost_cents
+                FROM provider_billing_records
+                WHERE {clause}
+                  AND billed_at >= NOW() - (%s || ' days')::interval
+                GROUP BY DATE(billed_at), currency
+                ORDER BY day ASC, currency ASC
+                """,
+                params + (days,),
+            )
+            billing_trend_rows = cur.fetchall()
+            cur.execute(
+                f"""
+                SELECT
+                    currency,
+                    COUNT(*) AS record_count,
+                    COALESCE(SUM(billed_cost_cents), 0) AS billed_cost_cents
+                FROM provider_billing_records
+                WHERE {clause}
+                  AND billed_at >= NOW() - (%s || ' days')::interval
+                GROUP BY currency
+                ORDER BY billed_cost_cents DESC, currency ASC
+                """,
+                params + (days,),
+            )
+            billing_currency_rows = cur.fetchall()
+    assistant_turns = int(summary_row.get("assistant_turns") or 0)
+    provider_billing_records = int(billing_summary_row.get("provider_billing_records") or 0)
+    provider_billed_cost_cents = int(billing_summary_row.get("provider_billed_cost_cents") or 0)
     return {
         "currency": runtime_settings.llm_price_currency,
         "summary": {
-            "assistant_turns": int(summary_row.get("assistant_turns") or 0),
+            "assistant_turns": assistant_turns,
             "prompt_tokens": round(float(summary_row.get("prompt_tokens") or 0.0), 3),
             "completion_tokens": round(float(summary_row.get("completion_tokens") or 0.0), 3),
             "estimated_cost": round(float(summary_row.get("estimated_cost") or 0.0), 6),
+            "provider_billing_records": provider_billing_records,
+            "provider_billed_cost_cents": provider_billed_cost_cents,
+            "provider_billed_cost": round(provider_billed_cost_cents / 100.0, 2),
+            "provider_input_tokens": int(billing_summary_row.get("provider_input_tokens") or 0),
+            "provider_output_tokens": int(billing_summary_row.get("provider_output_tokens") or 0),
+            "cost_source_counts": {
+                "chat_estimated": assistant_turns,
+                "provider_billing": provider_billing_records,
+            },
         },
         "trend": [
             {
@@ -195,6 +288,49 @@ def _usage_stats(user: CurrentUser, *, view: str, days: int) -> dict[str, Any]:
             }
             for row in trend_rows
         ],
+        "provider_billing": {
+            "by_currency": [
+                {
+                    "currency": str(row.get("currency") or ""),
+                    "record_count": int(row.get("record_count") or 0),
+                    "billed_cost_cents": int(row.get("billed_cost_cents") or 0),
+                    "billed_cost": round(int(row.get("billed_cost_cents") or 0) / 100.0, 2),
+                }
+                for row in billing_currency_rows
+            ],
+            "by_provider": [
+                {
+                    "provider": str(row.get("provider") or ""),
+                    "currency": str(row.get("currency") or ""),
+                    "record_count": int(row.get("record_count") or 0),
+                    "billed_cost_cents": int(row.get("billed_cost_cents") or 0),
+                    "billed_cost": round(int(row.get("billed_cost_cents") or 0) / 100.0, 2),
+                    "input_tokens": int(row.get("input_tokens") or 0),
+                    "output_tokens": int(row.get("output_tokens") or 0),
+                }
+                for row in billing_provider_rows
+            ],
+            "by_route": [
+                {
+                    "route_key": str(row.get("route_key") or ""),
+                    "currency": str(row.get("currency") or ""),
+                    "record_count": int(row.get("record_count") or 0),
+                    "billed_cost_cents": int(row.get("billed_cost_cents") or 0),
+                    "billed_cost": round(int(row.get("billed_cost_cents") or 0) / 100.0, 2),
+                }
+                for row in billing_route_rows
+            ],
+            "trend": [
+                {
+                    "date": str(row.get("day") or ""),
+                    "currency": str(row.get("currency") or ""),
+                    "record_count": int(row.get("record_count") or 0),
+                    "billed_cost_cents": int(row.get("billed_cost_cents") or 0),
+                    "billed_cost": round(int(row.get("billed_cost_cents") or 0) / 100.0, 2),
+                }
+                for row in billing_trend_rows
+            ],
+        },
     }
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -96,6 +97,53 @@ class ClaimHandoffSessionRequest(BaseModel):
     @classmethod
     def normalize_skill_group(cls, value: str) -> str:
         return value.strip().lower().replace(" ", "_")
+
+
+class ProviderBillingRecordRequest(BaseModel):
+    id: str = Field(default="", max_length=64)
+    external_id: str = Field(default="", max_length=128)
+    tenant_id: str = Field(default="", max_length=128)
+    user_id: str = Field(default="", max_length=128)
+    provider: str = Field(min_length=1, max_length=64)
+    model: str = Field(default="", max_length=128)
+    route_key: str = Field(default="", max_length=128)
+    prompt_key: str = Field(default="", max_length=128)
+    currency: str = Field(default="CNY", max_length=16)
+    billed_cost_cents: int = Field(ge=0)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    billed_at: str = Field(default="", max_length=64)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator(
+        "id",
+        "external_id",
+        "tenant_id",
+        "user_id",
+        "provider",
+        "model",
+        "route_key",
+        "prompt_key",
+        "billed_at",
+    )
+    @classmethod
+    def normalize_billing_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return (value.strip().upper() or "CNY")[:16]
+
+    @field_validator("id")
+    @classmethod
+    def normalize_optional_record_id(cls, value: str) -> str:
+        normalized = value.strip()
+        return str(UUID(normalized)) if normalized else ""
+
+
+class ProviderBillingImportRequest(BaseModel):
+    records: list[ProviderBillingRecordRequest] = Field(min_length=1, max_length=500)
 
 
 class SubmitInterruptRequest(BaseModel):
