@@ -477,6 +477,39 @@ export function retryKBIngestJob(jobId: string) {
   return request.post(`/kb/ingest-jobs/${jobId}/retry`);
 }
 
+export interface RebuildKnowledgeDocumentTarget {
+  doc_id: string;
+}
+
+export interface RebuildKnowledgeDocumentPayload extends RebuildKnowledgeDocumentTarget {
+  dry_run?: boolean;
+  signature?: string;
+}
+
+export interface RebuildKnowledgeDocumentResponse {
+  doc_id?: string;
+  version?: string | number;
+  chunk_count?: number;
+  indexed_chunks?: number;
+  deleted_previous?: number;
+  dry_run?: boolean;
+  signature?: string;
+  [key: string]: unknown;
+}
+
+export function buildKnowledgeRebuildSignature(target: RebuildKnowledgeDocumentTarget) {
+  const canonical = JSON.stringify({ doc_id: String(target.doc_id || '').trim() });
+  let hash = 0;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash = ((hash << 5) - hash + canonical.charCodeAt(index)) | 0;
+  }
+  return `kb-rebuild:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+export function rebuildKnowledgeDocument(data: RebuildKnowledgeDocumentPayload) {
+  return request.post<RebuildKnowledgeDocumentResponse>('/knowledge_base/rebuild', data, { baseURL: '/api' });
+}
+
 export function queryKB(data: {
   base_id: string;
   question: string;

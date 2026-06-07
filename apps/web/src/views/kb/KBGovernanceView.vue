@@ -45,6 +45,39 @@
         <el-button :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('review_pending')">批量提交审核</el-button>
         <el-button type="success" plain :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('approved')">批量通过</el-button>
         <el-button type="danger" plain :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('rejected')">批量驳回</el-button>
+        <el-button
+          plain
+          :loading="rebuildDryRunLoading"
+          :disabled="!canRunRebuildDryRun"
+          data-testid="kb-rebuild-dry-run-button"
+          @click="runRebuildDryRun"
+        >
+          预览 rebuild
+        </el-button>
+        <el-button
+          type="warning"
+          plain
+          :loading="rebuildLoading"
+          :disabled="!canRunRebuild"
+          data-testid="kb-rebuild-button"
+          @click="runRebuild"
+        >
+          执行 rebuild
+        </el-button>
+      </div>
+      <div class="toolbar-meta">
+        <span v-if="selectedDocumentIds.length !== 1">rebuild 仅支持单文档选择。</span>
+        <span v-else-if="canRunRebuild">当前 payload 已通过 dry-run，可执行 rebuild。</span>
+        <span v-else>执行 rebuild 前需先预览当前 payload。</span>
+      </div>
+    </section>
+
+    <section v-if="lastRebuildResult" class="panel" data-testid="kb-rebuild-summary">
+      <div class="panel-head">
+        <strong>最近一次 rebuild 结果</strong>
+      </div>
+      <div class="toolbar-meta">
+        <span v-for="item in rebuildSummaryItems" :key="item.key">{{ item.label }} {{ item.value }}</span>
       </div>
     </section>
 
@@ -108,7 +141,11 @@
         <div v-if="!section.items.length" class="empty">当前筛选下没有待处理项。</div>
         <div v-else class="list">
           <article v-for="item in section.items" :key="item.document_id" class="list-item">
-            <el-checkbox :model-value="isSelected(item.document_id)" @change="toggleSelected(item.document_id, $event)" />
+            <el-checkbox
+              :model-value="isSelected(item.document_id)"
+              :data-testid="`select-document-${item.document_id}`"
+              @change="toggleSelected(item.document_id, $event)"
+            />
             <div class="item-body">
               <strong>{{ item.file_name }}</strong>
               <div class="toolbar-meta">
@@ -305,12 +342,14 @@ import { useRouter } from 'vue-router';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import {
   batchUpdateKBDocuments,
+  buildKnowledgeRebuildSignature,
   getKBDocument,
   getKBDocumentVisualAssets,
   getKBGovernance,
   getKBGovernanceBatchEventDetail,
   getKBGovernanceBatchEvents,
   getKBVisualAssetRegions,
+  rebuildKnowledgeDocument,
   updateKBDocument,
   type BatchUpdateKBDocumentsPayload,
   type BatchUpdateKBDocumentsResponse,
@@ -320,7 +359,9 @@ import {
   type KBGovernanceDocumentItem,
   type KBGovernanceResponse,
   type KBGovernanceVersionConflictItem,
-  type KBVisualAssetRegion
+  type KBVisualAssetRegion,
+  type RebuildKnowledgeDocumentPayload,
+  type RebuildKnowledgeDocumentResponse
 } from '@/api/kb';
 import { useAuthStore } from '@/store/auth';
 
@@ -344,6 +385,8 @@ const loading = ref(false);
 const bulkLoading = ref(false);
 const batchEventsLoading = ref(false);
 const batchEventDetailLoading = ref(false);
+const rebuildDryRunLoading = ref(false);
+const rebuildLoading = ref(false);
 const savingEdit = ref(false);
 const editingDocumentId = ref('');
 const editDrawerVisible = ref(false);
@@ -357,6 +400,8 @@ const selectedDocumentIds = ref<string[]>([]);
 const batchReviewerNote = ref('');
 const lastBatchRequest = ref<BatchUpdateKBDocumentsPayload | null>(null);
 const lastBatchResult = ref<BatchUpdateKBDocumentsResponse | null>(null);
+const lastDryRunSignature = ref('');
+const lastRebuildResult = ref<RebuildKnowledgeDocumentResponse | null>(null);
 const batchTimelineFilter = ref<BatchTimelineFilter>('all');
 const lowConfidenceExpandedDocumentIds = ref<string[]>([]);
 const loadingLowConfidenceDocuments = ref<Record<string, boolean>>({});
@@ -370,6 +415,21 @@ const documentForm = reactive({ owner_user_id: '', version_family_key: '', versi
 
 const canWrite = computed(() => authStore.hasPermission('kb.write'));
 const currentUserId = computed(() => String(authStore.user?.id || ''));
+const rebuildTarget = computed(() => selectedDocumentIds.value.length === 1 ? { doc_id: String(selectedDocumentIds.value[0] || '') } : null);
+const rebuildPayloadSignature = computed(() => rebuildTarget.value ? buildKnowledgeRebuildSignature(rebuildTarget.value) : '');
+const canRunRebuildDryRun = computed(() => canWrite.value && Boolean(rebuildTarget.value));
+const canRunRebuild = computed(() => canRunRebuildDryRun.value && Boolean(lastDryRunSignature.value) && lastDryRunSignature.value === rebuildPayloadSignature.value);
+const rebuildSummaryItems = computed(() => {
+  const result = lastRebuildResult.value;
+  if (!result) return [];
+  return [
+    { key: 'doc_id', label: 'doc_id', value: result.doc_id },
+    { key: 'version', label: 'version', value: result.version },
+    { key: 'chunk_count', label: 'chunk_count', value: result.chunk_count },
+    { key: 'indexed_chunks', label: 'indexed_chunks', value: result.indexed_chunks },
+    { key: 'deleted_previous', label: 'deleted_previous', value: result.deleted_previous }
+  ].filter((item) => item.value !== undefined && item.value !== null && String(item.value) !== '');
+});
 const hasDegradedSections = computed(() => (governance.value?.data_quality?.degraded_sections?.length ?? 0) > 0);
 const failedBatchItems = computed(() => (lastBatchResult.value?.items ?? []).filter((item) => !item.ok));
 const canRetryFailedBatch = computed(() => !!lastBatchRequest.value && failedBatchItems.value.length > 0 && canWrite.value);
@@ -476,6 +536,46 @@ const loadGovernance = async () => { loading.value = true; resetLowConfidenceReg
 const loadBatchEvents = async () => { batchEventsLoading.value = true; try { const response = await getKBGovernanceBatchEvents({ view: viewMode.value, limit: 8 }); const payload = ((response as any).data ?? response) as KBGovernanceBatchEventsResponse; batchEvents.value = Array.isArray(payload.items) ? payload.items : []; } catch { batchEvents.value = []; } finally { batchEventsLoading.value = false; } };
 const loadAllData = async () => { await Promise.all([loadGovernance(), loadBatchEvents()]); };
 const findQueueItem = (documentId: string) => [...(governance.value?.queues.pending_review ?? []), ...(governance.value?.queues.approved_ready ?? []), ...(governance.value?.queues.rejected_documents ?? []), ...(governance.value?.queues.expired_documents ?? []), ...(governance.value?.queues.visual_attention ?? []), ...(governance.value?.queues.missing_version_family ?? [])].find((item) => item.document_id === documentId) || null;
+const buildRebuildPayload = (dryRun: boolean): RebuildKnowledgeDocumentPayload | null => rebuildTarget.value ? { ...rebuildTarget.value, dry_run: dryRun, signature: rebuildPayloadSignature.value } : null;
+const runRebuildDryRun = async () => {
+  const payload = buildRebuildPayload(true);
+  if (!payload) {
+    ElMessage.warning('请选择一个文档后再预览 rebuild。');
+    return;
+  }
+  rebuildDryRunLoading.value = true;
+  try {
+    const response = await rebuildKnowledgeDocument(payload);
+    const result = ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse;
+    const signature = String(result.signature || rebuildPayloadSignature.value);
+    if (signature !== rebuildPayloadSignature.value) {
+      lastDryRunSignature.value = '';
+      ElMessage.warning('dry-run signature 与当前 payload 不一致，请刷新后重试。');
+      return;
+    }
+    lastDryRunSignature.value = signature;
+    lastRebuildResult.value = null;
+    ElMessage.success('rebuild dry-run 已通过。');
+  } finally {
+    rebuildDryRunLoading.value = false;
+  }
+};
+const runRebuild = async () => {
+  const payload = buildRebuildPayload(false);
+  if (!payload || !canRunRebuild.value) {
+    ElMessage.warning('请先对当前 rebuild payload 执行 dry-run。');
+    return;
+  }
+  rebuildLoading.value = true;
+  try {
+    const response = await rebuildKnowledgeDocument(payload);
+    lastRebuildResult.value = ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse;
+    ElMessage.success('文档 rebuild 已完成。');
+    await Promise.all([loadGovernance(), loadBatchEvents()]);
+  } finally {
+    rebuildLoading.value = false;
+  }
+};
 const executeBatchRequest = async (payload: BatchUpdateKBDocumentsPayload) => { const response = await batchUpdateKBDocuments(payload); const result = ((response as any).data ?? response) as BatchUpdateKBDocumentsResponse; lastBatchRequest.value = payload; lastBatchResult.value = result; const successCount = Number(result.summary?.succeeded ?? 0); const failedCount = Number(result.summary?.failed ?? 0); if (successCount > 0) ElMessage.success(`批量操作完成：成功 ${successCount} 项${failedCount ? `，失败 ${failedCount} 项` : ''}`); else ElMessage.error('批量操作失败，请查看失败项详情后重试。'); clearSelection(); await Promise.all([loadGovernance(), loadBatchEvents()]); };
 const runBulkAction = async (action: BulkAction) => { if (!selectedDocumentIds.value.length) return; if (action === 'rejected' && !batchReviewerNote.value.trim()) { ElMessage.warning('批量驳回前请填写统一备注。'); return; } bulkLoading.value = true; try { await executeBatchRequest(action === 'assign_to_me' ? { document_ids: selectedDocumentIds.value, patch: { owner_user_id: currentUserId.value || null } } : { document_ids: selectedDocumentIds.value, patch: { review_status: action, reviewer_note: batchReviewerNote.value.trim() } }); batchReviewerNote.value = ''; } finally { bulkLoading.value = false; } };
 const retryFailedBatchItems = async () => { if (!lastBatchRequest.value || !failedBatchItems.value.length) return; bulkLoading.value = true; try { await executeBatchRequest({ document_ids: failedBatchItems.value.map((item) => item.document_id), retry_of_task_id: lastBatchResult.value?.task_id, patch: { ...lastBatchRequest.value.patch } }); } finally { bulkLoading.value = false; } };
