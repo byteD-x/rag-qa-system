@@ -1512,6 +1512,10 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 - `list_scope_documents`
 - `search_corpus`
 - `calculator`
+- `backup_cleanup_dry_run`
+- `data_controls_dry_run`
+
+其中 `backup_cleanup_dry_run` 与 `data_controls_dry_run` 是维护类系统工具，只用于预览备份清理和数据治理影响面。它们固定返回 `dry_run=true`、`apply=false`，只输出数量、容量、scope 和脱敏后的文件名摘要，不执行删除、导出或状态修改。
 
 ### 6. 人工接管队列
 
@@ -1539,7 +1543,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 
 系统现在内置了完整的 AI Agent 开发所需能力：
 
-- **工具注册中心**：装饰器注册 + MCP 协议兼容 + 结果缓存 + 执行统计
+- **工具注册中心**：装饰器注册 + MCP 协议兼容 + 结果缓存 + 执行统计，支持只读维护 dry-run 工具并对路径/目标引用做脱敏摘要
 - **任务拆解引擎**：自动评估复杂度（1-5级），复杂问题拆为 DAG 子任务并行执行
 - **反思闭环**：输出自检（完整性/准确性/引用三维评分） + 失败根因分析 + 策略记忆
 - **三层记忆**：短期（会话窗口）+ 长期（三元组提取+Qdrant检索）+ 工作记忆（Scratchpad）

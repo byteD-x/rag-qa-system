@@ -320,6 +320,10 @@ SSE 流式回答，事件顺序：
 - `list_scope_documents`
 - `search_corpus`
 - `calculator`
+- `backup_cleanup_dry_run`
+- `data_controls_dry_run`
+
+维护类系统工具 `backup_cleanup_dry_run` 与 `data_controls_dry_run` 只允许 dry-run 预览：服务端固定返回 `dry_run=true`、`apply=false`，输出数量、容量、scope 和脱敏摘要，不返回完整路径、原始 targets 或删除候选清单。
 
 ## 6. 知识库与文档管理
 

@@ -318,11 +318,28 @@ class TestToolRegistry:
         ensure_business_tools_registered()
         ensure_business_tools_registered()
 
-        expected = {"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"}
+        expected = {
+            "backup_cleanup_dry_run",
+            "data_controls_dry_run",
+            "kb_scope_summary",
+            "workflow_trace_summary",
+            "tool_registry_stats",
+        }
         assert expected.issubset(set(tr.tool_names))
         system_names = [tool.name for tool in tr.list_by_category("system")]
         for name in expected:
             assert system_names.count(name) == 1
+        backup_schema = tr.get("backup_cleanup_dry_run").parameters
+        assert backup_schema["additionalProperties"] is False
+        assert "apply" not in backup_schema["properties"]
+        assert "delete_candidates" not in backup_schema["properties"]
+        data_controls_schema = tr.get("data_controls_dry_run").parameters
+        assert data_controls_schema["additionalProperties"] is False
+        assert data_controls_schema["properties"]["scopes"]["items"]["enum"] == [
+            "memory",
+            "usage",
+            "export_rag",
+        ]
 
         scope_result = await tr.execute(
             "kb_scope_summary",
@@ -350,6 +367,64 @@ class TestToolRegistry:
         assert trace_result.success
         assert trace_result.data["trace_completeness"] >= 0.8
         assert trace_result.data["tool_success_rate"] == 1.0
+
+        backup_result = await tr.execute(
+            "backup_cleanup_dry_run",
+            {
+                "retention_days": 7,
+                "max_candidates": 2,
+                "reason": "review E:/secret/project/backups before cleanup",
+                "candidate_paths": [
+                    "E:/secret/project/backups/a.zip",
+                    {"path": "/srv/private/backups/b.zip", "size_bytes": 2048},
+                    {"path": "/srv/private/backups/c.zip", "size_bytes": 1024},
+                ],
+            },
+        )
+        assert backup_result.success
+        assert backup_result.data["dry_run"] is True
+        assert backup_result.data["apply"] is False
+        assert backup_result.data["candidate_count"] == 3
+        assert backup_result.data["preview_items"] == [
+            {"label": "a.zip"},
+            {"label": "b.zip", "size_bytes": 2048},
+        ]
+        assert backup_result.data["reason_present"] is True
+        assert "reason" not in backup_result.data
+        assert "E:/secret" not in str(backup_result.data)
+        assert "/srv/private" not in str(backup_result.data)
+
+        data_controls_result = await tr.execute(
+            "data_controls_dry_run",
+            {
+                "scopes": ["memory", "usage", "dangerous"],
+                "reason": "inspect /srv/private/export.csv only",
+                "target_refs": [
+                    "tenant-a/private/session-1",
+                    {"path": "/srv/private/export.csv", "id": "export-1"},
+                ],
+            },
+        )
+        assert data_controls_result.success
+        assert data_controls_result.data["dry_run"] is True
+        assert data_controls_result.data["apply"] is False
+        assert data_controls_result.data["scopes"] == ["memory", "usage"]
+        assert data_controls_result.data["rejected_scopes"] == ["dangerous"]
+        assert data_controls_result.data["target_count"] == 2
+        assert data_controls_result.data["reason_present"] is True
+        assert "reason" not in data_controls_result.data
+        assert "target_refs" not in data_controls_result.data
+        assert "/srv/private" not in str(data_controls_result.data)
+
+        forbidden_payload = await tr.execute(
+            "backup_cleanup_dry_run",
+            {
+                "apply": True,
+                "delete_candidates": ["E:/secret/project/backups/a.zip"],
+            },
+        )
+        assert not forbidden_payload.success
+        assert "TypeError" in forbidden_payload.error
 
         tr._tools.clear()
         tr._category_index.clear()
@@ -709,16 +784,27 @@ class TestIntegration:
         assert tools == []
         assert "kb_scope_summary" not in tr.tool_names
 
-        extend_with_enabled_business_tools(tools, {"kb_scope_summary", "tool_registry_stats"})
+        extend_with_enabled_business_tools(
+            tools,
+            {"backup_cleanup_dry_run", "data_controls_dry_run", "kb_scope_summary", "tool_registry_stats"},
+        )
 
-        assert [tool.name for tool in tools] == ["kb_scope_summary", "tool_registry_stats"]
+        assert [tool.name for tool in tools] == [
+            "kb_scope_summary",
+            "tool_registry_stats",
+            "backup_cleanup_dry_run",
+            "data_controls_dry_run",
+        ]
         assert "workflow_trace_summary" in tr.tool_names
 
         tr.set_enabled("kb_scope_summary", False)
         tools = []
-        extend_with_enabled_business_tools(tools, {"kb_scope_summary", "tool_registry_stats"})
+        extend_with_enabled_business_tools(
+            tools,
+            {"kb_scope_summary", "tool_registry_stats", "backup_cleanup_dry_run"},
+        )
 
-        assert [tool.name for tool in tools] == ["tool_registry_stats"]
+        assert [tool.name for tool in tools] == ["tool_registry_stats", "backup_cleanup_dry_run"]
 
         tr._tools.clear()
         tr._category_index.clear()
