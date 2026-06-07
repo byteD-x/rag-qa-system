@@ -100,8 +100,29 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/knowledge-base/src/app/kb_api_support.py": [
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
     ],
+    "apps/services/knowledge-base/src/app/kb_connector_scheduler.py": [
+        "tests/test_backend_infra.py::test_connector_scheduler_manager_runs_only_when_active",
+    ],
+    "apps/services/knowledge-base/src/app/kb_connector_sync.py": [
+        "tests/test_kb_local_sync.py",
+        "tests/test_kb_notion_sync.py",
+        "tests/test_platform_and_connector_extensions.py::test_execute_url_sync_dry_run_builds_text_candidates",
+        "tests/test_platform_and_connector_extensions.py::test_execute_sql_sync_dry_run_converts_rows_to_documents",
+    ],
+    "apps/services/knowledge-base/src/app/kb_local_sync.py": [
+        "tests/test_kb_local_sync.py",
+    ],
+    "apps/services/knowledge-base/src/app/kb_notion_sync.py": [
+        "tests/test_kb_notion_sync.py",
+    ],
     "apps/services/knowledge-base/src/app/kb_support.py": [
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
+    ],
+    "apps/services/knowledge-base/src/app/kb_sql_sync.py": [
+        "tests/test_platform_and_connector_extensions.py::test_execute_sql_sync_dry_run_converts_rows_to_documents",
+    ],
+    "apps/services/knowledge-base/src/app/kb_url_sync.py": [
+        "tests/test_platform_and_connector_extensions.py::test_execute_url_sync_dry_run_builds_text_candidates",
     ],
     "apps/services/knowledge-base/src/app/vector_store.py": [
         "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",

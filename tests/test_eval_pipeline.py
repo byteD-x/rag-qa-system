@@ -687,6 +687,31 @@ def test_fast_test_selector_routes_qdrant_readiness_modules_to_focused_tests() -
     assert "tests/test_shared_stack.py" not in targets
 
 
+def test_fast_test_selector_routes_kb_connector_modules_to_focused_tests() -> None:
+    selector = _load_script_module("fast_test_selector_kb_connectors_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/knowledge-base/src/app/kb_local_sync.py",
+            "apps/services/knowledge-base/src/app/kb_notion_sync.py",
+            "apps/services/knowledge-base/src/app/kb_url_sync.py",
+            "apps/services/knowledge-base/src/app/kb_sql_sync.py",
+            "apps/services/knowledge-base/src/app/kb_connector_sync.py",
+            "apps/services/knowledge-base/src/app/kb_connector_scheduler.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_kb_local_sync.py",
+        "tests/test_kb_notion_sync.py",
+        "tests/test_platform_and_connector_extensions.py::test_execute_url_sync_dry_run_builds_text_candidates",
+        "tests/test_platform_and_connector_extensions.py::test_execute_sql_sync_dry_run_converts_rows_to_documents",
+        "tests/test_backend_infra.py::test_connector_scheduler_manager_runs_only_when_active",
+    ]
+    assert "tests/test_ai_platform_capabilities.py" not in targets
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
     selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
 
