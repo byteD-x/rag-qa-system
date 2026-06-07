@@ -68,3 +68,36 @@ def test_api_route_index_document_matches_current_sources() -> None:
     generated = module.generate_for_repo(repo_root=REPO_ROOT)
 
     assert ROUTE_INDEX_PATH.read_text(encoding="utf-8") == generated
+
+
+def test_route_index_cli_writes_output_and_stdout(tmp_path: Path, capsys) -> None:
+    module = _load_route_index_module()
+    source_dir = tmp_path / "app"
+    source_dir.mkdir()
+    source = source_dir / "sample_routes.py"
+    source.write_text(
+        "\n".join(
+            [
+                "from fastapi import APIRouter",
+                "router = APIRouter()",
+                "",
+                '@router.post("/api/v1/items")',
+                "def create_item():",
+                "    return {}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "docs" / "routes.md"
+
+    assert module.main(["--repo-root", str(tmp_path), str(source_dir), "--output", str(output)]) == 0
+    written = output.read_text(encoding="utf-8")
+    assert "`/api/v1/items`" in written
+    assert "`create_item`" in written
+    assert "`app/sample_routes.py:4`" in written
+
+    assert module.main(["--repo-root", str(tmp_path), str(source)]) == 0
+    stdout = capsys.readouterr().out
+    assert "# API 路由清单" in stdout
+    assert "`/api/v1/items`" in stdout
