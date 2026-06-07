@@ -678,6 +678,74 @@ def test_fast_test_selector_routes_optimization_modules_to_owned_suites() -> Non
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_platform_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_platform_modules_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/instruction_merger.py",
+            "apps/services/api-gateway/src/app/scene_templates.py",
+            "apps/services/api-gateway/src/app/hallucination_detector.py",
+            "apps/services/api-gateway/src/app/pii_detector.py",
+            "apps/services/api-gateway/src/app/instruction_hotreload.py",
+            "apps/services/api-gateway/src/app/instruction_evaluator.py",
+            "apps/services/api-gateway/src/app/ttft_optimizer.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_platform_ecosystem.py::TestInstructionMerger",
+        "tests/test_platform_ecosystem.py::TestSceneTemplates",
+        "tests/test_platform_ecosystem.py::TestHallucinationDetector",
+        "tests/test_platform_ecosystem_phase2.py::TestPIIDetector",
+        "tests/test_platform_ecosystem_phase2.py::TestInstructionHotReloader",
+        "tests/test_platform_ecosystem_phase2.py::TestInstructionABEvaluator",
+        "tests/test_platform_ecosystem_phase2.py::TestTTFTTracker",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_memory_enhancement_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_memory_enhancement_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/memory_importance.py",
+            "apps/services/api-gateway/src/app/user_profile.py",
+            "apps/services/api-gateway/src/app/memory_injection.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_memory_enhancement.py::TestMemoryImportanceScorer",
+        "tests/test_memory_enhancement.py::TestForgettingCurve",
+        "tests/test_memory_enhancement.py::TestUserProfile",
+        "tests/test_memory_enhancement.py::TestMemoryInjector",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_gateway_support_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_gateway_support_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/request_coalescer.py",
+            "apps/services/api-gateway/src/app/gateway_pricing.py",
+            "apps/services/api-gateway/src/app/gateway_handoff.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_inference_optimization.py::TestRequestCoalescer",
+        "tests/test_gateway_pricing.py",
+        "tests/test_backend_infra.py::test_local_handoff_queue_claims_highest_priority_matching_skill_group",
+        "tests/test_backend_infra.py::test_local_handoff_queue_does_not_claim_same_session_twice",
+        "tests/test_backend_infra.py::test_claim_next_handoff_route_returns_claim_result_and_audit",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_qdrant_readiness_modules_to_focused_tests() -> None:
     selector = _load_script_module("fast_test_selector_qdrant_readiness_test", "scripts/quality/select_fast_tests.py")
 

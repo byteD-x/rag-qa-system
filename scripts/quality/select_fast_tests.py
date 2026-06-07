@@ -85,18 +85,57 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/gateway_graph.py": [
         "tests/test_langgraph_runtime.py",
     ],
+    "apps/services/api-gateway/src/app/gateway_handoff.py": [
+        "tests/test_backend_infra.py::test_local_handoff_queue_claims_highest_priority_matching_skill_group",
+        "tests/test_backend_infra.py::test_local_handoff_queue_does_not_claim_same_session_twice",
+        "tests/test_backend_infra.py::test_claim_next_handoff_route_returns_claim_result_and_audit",
+    ],
+    "apps/services/api-gateway/src/app/gateway_pricing.py": [
+        "tests/test_gateway_pricing.py",
+    ],
+    "apps/services/api-gateway/src/app/hallucination_detector.py": [
+        "tests/test_platform_ecosystem.py::TestHallucinationDetector",
+    ],
+    "apps/services/api-gateway/src/app/instruction_evaluator.py": [
+        "tests/test_platform_ecosystem_phase2.py::TestInstructionABEvaluator",
+    ],
+    "apps/services/api-gateway/src/app/instruction_hotreload.py": [
+        "tests/test_platform_ecosystem_phase2.py::TestInstructionHotReloader",
+    ],
+    "apps/services/api-gateway/src/app/instruction_merger.py": [
+        "tests/test_platform_ecosystem.py::TestInstructionMerger",
+    ],
     "apps/services/api-gateway/src/app/memory_extractor.py": [
         "tests/test_agent_capabilities.py::TestMemoryExtractor",
         "tests/test_agent_capabilities.py::TestIntegration::test_memory_store_upsert_and_search",
         "tests/test_memory_enhancement.py",
     ],
+    "apps/services/api-gateway/src/app/memory_importance.py": [
+        "tests/test_memory_enhancement.py::TestMemoryImportanceScorer",
+        "tests/test_memory_enhancement.py::TestForgettingCurve",
+    ],
+    "apps/services/api-gateway/src/app/memory_injection.py": [
+        "tests/test_memory_enhancement.py::TestMemoryInjector",
+    ],
     "apps/services/api-gateway/src/app/model_health.py": [
         "tests/test_inference_optimization.py::TestModelHealth",
         "tests/test_inference_optimization.py::TestInferenceIntegration::test_model_health_informs_routing",
     ],
+    "apps/services/api-gateway/src/app/pii_detector.py": [
+        "tests/test_platform_ecosystem_phase2.py::TestPIIDetector",
+    ],
+    "apps/services/api-gateway/src/app/request_coalescer.py": [
+        "tests/test_inference_optimization.py::TestRequestCoalescer",
+    ],
+    "apps/services/api-gateway/src/app/scene_templates.py": [
+        "tests/test_platform_ecosystem.py::TestSceneTemplates",
+    ],
     "apps/services/api-gateway/src/app/task_decomposer.py": [
         "tests/test_agent_capabilities.py::TestTaskDecomposer",
         "tests/test_agent_capabilities.py::TestIntegration::test_decomposition_result_feeds_agent",
+    ],
+    "apps/services/api-gateway/src/app/ttft_optimizer.py": [
+        "tests/test_platform_ecosystem_phase2.py::TestTTFTTracker",
     ],
     "apps/services/api-gateway/src/app/semantic_cache.py": [
         "tests/test_inference_optimization.py::TestSemanticCache",
@@ -115,6 +154,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     ],
     "apps/services/api-gateway/src/app/tool_sandbox.py": [
         "tests/test_platform_ecosystem_phase2.py",
+    ],
+    "apps/services/api-gateway/src/app/user_profile.py": [
+        "tests/test_memory_enhancement.py::TestUserProfile",
     ],
     "apps/services/knowledge-base/src/app/kb_api_support.py": [
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
