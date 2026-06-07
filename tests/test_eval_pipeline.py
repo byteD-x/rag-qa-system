@@ -883,6 +883,56 @@ def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path
     assert wall_clock_summary["elapsed_seconds"] == 5.5
 
 
+def test_pytest_group_runner_console_summary_prints_slowest_groups(tmp_path: Path, capsys) -> None:
+    runner = _load_script_module("pytest_group_runner_console_summary_test", "scripts/quality/run_pytest_groups.py")
+    results = [
+        runner.GroupResult(
+            group=runner.TestGroup(name="tests/test_fast.py", args=["tests/test_fast.py"]),
+            exit_code=0,
+            elapsed_seconds=0.5,
+            timed_out=False,
+            stdout_path=tmp_path / "fast.out.log",
+            stderr_path=tmp_path / "fast.err.log",
+        ),
+        runner.GroupResult(
+            group=runner.TestGroup(name="tests/test_slow.py", args=["tests/test_slow.py"]),
+            exit_code=0,
+            elapsed_seconds=8.0,
+            timed_out=False,
+            stdout_path=tmp_path / "slow.out.log",
+            stderr_path=tmp_path / "slow.err.log",
+        ),
+        runner.GroupResult(
+            group=runner.TestGroup(name="tests/test_timeout.py", args=["tests/test_timeout.py"]),
+            exit_code=124,
+            elapsed_seconds=9.0,
+            timed_out=True,
+            stdout_path=tmp_path / "timeout.out.log",
+            stderr_path=tmp_path / "timeout.err.log",
+        ),
+        runner.GroupResult(
+            group=runner.TestGroup(name="tests/test_medium.py", args=["tests/test_medium.py"]),
+            exit_code=3,
+            elapsed_seconds=3.0,
+            timed_out=False,
+            stdout_path=tmp_path / "medium.out.log",
+            stderr_path=tmp_path / "medium.err.log",
+        ),
+    ]
+
+    runner._print_summary(results, elapsed_seconds=12.5)
+
+    output = capsys.readouterr().out
+    assert "summary groups=4 failed=2 elapsed=12.5s" in output
+    assert "failure tests/test_timeout.py: timeout" in output
+    assert "failure tests/test_medium.py: exit_code=3" in output
+    assert "slowest tests/test_timeout.py: elapsed=9.0s status=timeout" in output
+    assert "slowest tests/test_slow.py: elapsed=8.0s status=passed" in output
+    assert "slowest tests/test_medium.py: elapsed=3.0s status=exit_code=3" in output
+    assert "tests/test_fast.py: elapsed=0.5s" not in output
+    assert "timeout.out.log" in output
+
+
 def test_pytest_group_runner_parallel_batches_stop_after_failure(monkeypatch, tmp_path: Path) -> None:
     runner = _load_script_module("pytest_group_runner_parallel_test", "scripts/quality/run_pytest_groups.py")
     groups = [

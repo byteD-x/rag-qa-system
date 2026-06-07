@@ -2045,7 +2045,7 @@ python scripts/quality/run_pytest_groups.py --timeout-seconds 900 --heartbeat-se
 docker compose config --quiet
 ```
 
-`run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
+`run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，结束时会在控制台列出最慢 3 个分组，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
 默认串行执行以保持稳定的 fail-fast 语义；本地需要缩短整套回归时间时，可显式加 `--max-workers 2` 或更高并发度，让多个测试文件分批并行执行。如果怀疑测试进程卡住但没有产生日志，可加 `--idle-timeout-seconds 180 --tail-lines-on-failure 40` 快速失败并打印最近日志。`scripts/quality/ci-check.ps1` 同步支持 `-PytestMaxWorkers`、`-PytestIdleTimeoutSeconds` 和 `-PytestTailLinesOnFailure` 透传到该执行器。
 
 变更较小时可以先用快速测试选择器生成目标，再交给分组 runner：

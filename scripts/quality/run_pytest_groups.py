@@ -386,6 +386,13 @@ def _print_summary(results: list[GroupResult], *, elapsed_seconds: float | None 
             f"logs={item.stdout_path} {item.stderr_path}",
             flush=True,
         )
+    for item in sorted(results, key=lambda result: result.elapsed_seconds, reverse=True)[:3]:
+        status = "timeout" if item.timed_out else ("passed" if item.exit_code == 0 else f"exit_code={item.exit_code}")
+        print(
+            f"[pytest-group] slowest {item.group.name}: elapsed={item.elapsed_seconds:.1f}s "
+            f"status={status} logs={item.stdout_path} {item.stderr_path}",
+            flush=True,
+        )
 
 
 def build_summary(
