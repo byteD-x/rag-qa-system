@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import HTTPException
+from langchain_core.messages import AIMessage, ToolMessage
 
 from shared.grounded_answering import (
     COMMON_KNOWLEDGE_DISCLAIMER,
@@ -26,8 +28,12 @@ from .ai_client import load_llm_settings
 from .context_prioritizer import ContextPrioritizer
 from .context_window import ContextWindowManager, estimate_tokens
 from .gateway_config import SHORT_QUESTION_RE
-from .gateway_runtime import logger
+from .gateway_runtime import logger, runtime_settings
 from .langchain_client import create_llm_completion, create_llm_completion_stream
+
+
+FINAL_ANSWER_TOOL_NAMES = frozenset({"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"})
+FINAL_ANSWER_MAX_TOOL_CALLS = 3
 
 
 def _attach_route_trace(
@@ -45,6 +51,174 @@ def _attach_route_trace(
     payload = dict(completion)
     payload["llm_trace"] = llm_trace
     return payload
+
+
+def _final_answer_tools_enabled() -> bool:
+    return bool(getattr(runtime_settings, "final_answer_tools_enabled", False))
+
+
+def get_final_answer_llm_tools() -> list[dict[str, Any]]:
+    """Return the read-only ToolRegistry schemas exposed to final-answer models."""
+    from .business_tools import ensure_business_tools_registered
+    from .tool_registry import tool_registry
+
+    ensure_business_tools_registered()
+    return tool_registry.get_llm_tools(enabled_tools=set(FINAL_ANSWER_TOOL_NAMES), categories=["system"])
+
+
+async def _execute_final_answer_tool_calls(tool_calls: list[dict[str, Any]]) -> tuple[list[ToolMessage], dict[str, Any]]:
+    from .tool_registry import tool_registry
+
+    messages: list[ToolMessage] = []
+    events: list[dict[str, Any]] = []
+    allowed = set(FINAL_ANSWER_TOOL_NAMES)
+
+    for index, tool_call in enumerate(tool_calls, start=1):
+        tool_name = str(tool_call.get("name") or "").strip()
+        tool_call_id = str(tool_call.get("id") or f"call-{index}")
+        raw_args = tool_call.get("args")
+        args = raw_args if isinstance(raw_args, dict) else {}
+        payload: dict[str, Any]
+        event: dict[str, Any] = {"tool": tool_name or "unknown"}
+
+        if index > FINAL_ANSWER_MAX_TOOL_CALLS:
+            event["status"] = "skipped"
+            event["reason"] = "tool_call_budget_exceeded"
+            payload = {"success": False, "error": "tool call budget exceeded"}
+        elif tool_name not in allowed:
+            event["status"] = "rejected"
+            event["reason"] = "tool_not_allowed"
+            payload = {"success": False, "error": "tool is not allowed for final answer"}
+        else:
+            result = await tool_registry.execute(tool_name, args)
+            event.update(
+                {
+                    "status": "success" if result.success else "failed",
+                    "duration_ms": result.duration_ms,
+                    "from_cache": result.from_cache,
+                }
+            )
+            if result.success:
+                event["result_keys"] = sorted(str(key) for key in result.data.keys())[:12]
+                payload = {"success": True, "data": result.data}
+            else:
+                safe_error = _safe_tool_error(result.error)
+                event["error"] = safe_error
+                payload = {"success": False, "error": safe_error}
+
+        events.append(event)
+        messages.append(
+            ToolMessage(
+                content=json.dumps(payload, ensure_ascii=False),
+                tool_call_id=tool_call_id,
+                name=tool_name or "unknown",
+            )
+        )
+
+    executed = sum(1 for event in events if event.get("status") == "success")
+    return messages, {
+        "enabled": True,
+        "rounds": 1 if tool_calls else 0,
+        "requested": len(tool_calls),
+        "executed": executed,
+        "rejected": sum(1 for event in events if event.get("status") in {"rejected", "skipped"}),
+        "failed": sum(1 for event in events if event.get("status") == "failed"),
+        "events": events,
+    }
+
+
+def _safe_tool_error(error: str) -> str:
+    text = str(error or "").strip().replace("\n", " ")
+    return text[:160] if text else "tool execution failed"
+
+
+def _tool_trace_without_internal_fields(completion: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(completion)
+    payload.pop("_raw_message", None)
+    return payload
+
+
+def _attach_final_answer_tool_trace(
+    completion: dict[str, Any],
+    tool_trace: dict[str, Any],
+    first_completion: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _tool_trace_without_internal_fields(completion)
+    llm_trace = dict(payload.get("llm_trace") or {})
+    first_trace = dict(first_completion.get("llm_trace") or {})
+    if first_trace.get("llm_call_id"):
+        tool_trace = {**tool_trace, "pre_tool_llm_call_id": str(first_trace["llm_call_id"])}
+    llm_trace["final_answer_tools"] = tool_trace
+    payload["llm_trace"] = llm_trace
+    return payload
+
+
+async def _create_completion_with_optional_final_tools(
+    *,
+    settings: Any,
+    prompt: Any,
+    inputs: dict[str, Any],
+    prompt_key: str,
+    prompt_version: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    fallback_answer_text: str = "",
+) -> dict[str, Any]:
+    if not _final_answer_tools_enabled():
+        return await create_llm_completion(
+            settings=settings,
+            prompt=prompt,
+            inputs=inputs,
+            prompt_key=prompt_key,
+            prompt_version=prompt_version,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    tools = get_final_answer_llm_tools()
+    first_completion = await create_llm_completion(
+        settings=settings,
+        prompt=prompt,
+        inputs=inputs,
+        tools=tools,
+        include_raw_message=True,
+        prompt_key=prompt_key,
+        prompt_version=prompt_version,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    tool_calls = list(first_completion.get("tool_calls") or [])
+    if not tool_calls:
+        return _attach_final_answer_tool_trace(
+            first_completion,
+            {"enabled": True, "rounds": 0, "requested": 0, "executed": 0, "rejected": 0, "failed": 0, "events": []},
+            first_completion,
+        )
+
+    raw_message = first_completion.get("_raw_message")
+    if raw_message is None:
+        raw_message = AIMessage(content=str(first_completion.get("answer") or ""), tool_calls=tool_calls)
+    tool_messages, tool_trace = await _execute_final_answer_tool_calls(tool_calls)
+    final_completion = await create_llm_completion(
+        settings=settings,
+        prompt=prompt,
+        inputs=inputs,
+        extra_messages=[raw_message, *tool_messages],
+        prompt_key=prompt_key,
+        prompt_version=prompt_version,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    final_tool_calls = list(final_completion.get("tool_calls") or [])
+    if final_tool_calls:
+        tool_trace = {**tool_trace, "final_tool_calls_blocked": len(final_tool_calls)}
+        if not str(final_completion.get("answer") or "").strip() and fallback_answer_text:
+            final_completion = {**final_completion, "answer": fallback_answer_text}
+    return _attach_final_answer_tool_trace(final_completion, tool_trace, first_completion)
 
 
 def contextualize_question(question: str, history: list[dict[str, Any]]) -> str:
@@ -362,7 +536,7 @@ async def generate_grounded_answer(
     try:
         completion, route, route_attempts = await execute_with_model_route_fallback(
             route_plan,
-            call=lambda candidate_settings, candidate_route: create_llm_completion(
+            call=lambda candidate_settings, candidate_route: _create_completion_with_optional_final_tools(
                 settings=candidate_settings,
                 prompt=prompt,
                 inputs=inputs,
@@ -371,6 +545,7 @@ async def generate_grounded_answer(
                 model=candidate_route["model"],
                 temperature=candidate_route["temperature"],
                 max_tokens=candidate_route["max_tokens"],
+                fallback_answer_text=fallback_answer(question, evidence, answer_mode),
             ),
         )
         _log_route_fallback(prompt_definition.key, route_attempts)

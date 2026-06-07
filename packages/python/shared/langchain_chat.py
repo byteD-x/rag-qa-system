@@ -52,6 +52,25 @@ def _usage_payload(message: AIMessage | AIMessageChunk) -> dict[str, Any]:
     }
 
 
+def _normalize_tool_calls(message: AIMessage | AIMessageChunk) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for index, raw_call in enumerate(list(getattr(message, "tool_calls", []) or []), start=1):
+        if not isinstance(raw_call, dict):
+            continue
+        name = str(raw_call.get("name") or "").strip()
+        if not name:
+            continue
+        args = raw_call.get("args")
+        calls.append(
+            {
+                "id": str(raw_call.get("id") or f"call-{index}"),
+                "name": name,
+                "args": args if isinstance(args, dict) else {},
+            }
+        )
+    return calls
+
+
 def extract_message_text(message: AIMessage | AIMessageChunk) -> str:
     content = getattr(message, "content", "")
     if isinstance(content, str):
@@ -115,6 +134,9 @@ async def invoke_prompt_chain(
     settings: LLMSettings,
     prompt: ChatPromptTemplate,
     inputs: dict[str, Any],
+    tools: list[Any] | None = None,
+    extra_messages: list[BaseMessage] | None = None,
+    include_raw_message: bool = False,
     prompt_key: str | None = None,
     prompt_version: str | None = None,
     route_key: str | None = None,
@@ -132,8 +154,15 @@ async def invoke_prompt_chain(
             max_tokens=max_tokens,
             streaming=False,
         )
-        chain = prompt | chat_model
-        result = await chain.ainvoke(inputs)
+        if tools:
+            chat_model = chat_model.bind_tools(tools)
+        if tools or extra_messages:
+            messages = list(prompt.format_messages(**inputs))
+            messages.extend(list(extra_messages or []))
+            result = await chat_model.ainvoke(messages)
+        else:
+            chain = prompt | chat_model
+            result = await chain.ainvoke(inputs)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -141,19 +170,21 @@ async def invoke_prompt_chain(
         ) from exc
 
     answer = extract_message_text(result)
-    if not answer:
+    tool_calls = _normalize_tool_calls(result)
+    if not answer and not tool_calls:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Upstream LLM service returned an empty answer",
         )
     response_metadata = dict(getattr(result, "response_metadata", {}) or {})
-    return {
+    payload = {
         "answer": answer,
         "reasoning": "",
         "model": str(response_metadata.get("model_name") or model or settings.model),
         "provider": settings.provider,
         "finish_reason": str(response_metadata.get("finish_reason") or ""),
         "usage": _usage_payload(result),
+        "tool_calls": tool_calls,
         "llm_trace": build_llm_trace(
             settings=settings,
             prompt_key=prompt_key,
@@ -165,6 +196,9 @@ async def invoke_prompt_chain(
             started_at=started_at,
         ),
     }
+    if include_raw_message:
+        payload["_raw_message"] = result
+    return payload
 
 
 async def stream_prompt_chain(

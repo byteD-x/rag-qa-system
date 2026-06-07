@@ -1678,6 +1678,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `GATEWAY_CHAT_MAX_IN_FLIGHT_GLOBAL`
 - `GATEWAY_CHAT_MAX_IN_FLIGHT_PER_USER`
 - `GATEWAY_AGENT_RUNTIME`
+- `GATEWAY_FINAL_ANSWER_TOOLS_ENABLED`
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED`
 - `GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD`
 - `GATEWAY_ANSWER_VERIFIER_ENABLED`
@@ -1687,6 +1688,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 
 说明：
 - `GATEWAY_AGENT_RUNTIME=simple` 保持现有 Agent 工具检索链路；设为 `enhanced` 时启用任务拆解/反思增强运行时，失败会自动回退 simple。
+- `GATEWAY_FINAL_ANSWER_TOOLS_ENABLED=false` 默认关闭最终回答阶段模型工具调用；开启后仅在非流式 grounded 回答中暴露只读 `system` 白名单工具（如知识库范围摘要、工作流 trace 摘要、工具注册统计），最多执行一轮受控 ToolRegistry 调用，并只记录脱敏工具 trace。
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭 LLM 深度幻觉检测，避免额外成本；开启后会在规则检测后追加生成后门禁元数据。
 - `GATEWAY_ANSWER_VERIFIER_ENABLED=false` 默认关闭答案校验门禁；开启后根据规则/LLM 幻觉检测结果执行 `GATEWAY_ANSWER_VERIFIER_ACTION`，支持 `annotate`（仅标记）、`fallback`（降级为保守证据回答）和 `refuse`（拒答并清空引用）。
 
