@@ -90,6 +90,14 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_backend_infra.py::test_local_handoff_queue_does_not_claim_same_session_twice",
         "tests/test_backend_infra.py::test_claim_next_handoff_route_returns_claim_result_and_audit",
     ],
+    "apps/services/api-gateway/src/app/gateway_mcp_adapter.py": [
+        "tests/test_mcp_adapter.py",
+    ],
+    "apps/services/api-gateway/src/app/gateway_mcp_routes.py": [
+        "tests/test_backend_infra.py::test_gateway_mcp_route_lists_readonly_tools_and_writes_audit",
+        "tests/test_backend_infra.py::test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments",
+        "tests/test_backend_infra.py::test_gateway_mcp_route_requires_chat_permission",
+    ],
     "apps/services/api-gateway/src/app/gateway_pricing.py": [
         "tests/test_gateway_pricing.py",
     ],
@@ -155,6 +163,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/tool_sandbox.py": [
         "tests/test_platform_ecosystem_phase2.py",
     ],
+    "apps/services/api-gateway/src/app/tool_workflow.py": [
+        "tests/test_tool_workflow.py",
+        "tests/test_backend_infra.py::test_gateway_tool_workflow_route_passes_workflow_mode",
+    ],
     "apps/services/api-gateway/src/app/user_profile.py": [
         "tests/test_memory_enhancement.py::TestUserProfile",
     ],
@@ -216,6 +228,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     ],
     "scripts/dev/preflight.ps1": [
         "tests/test_eval_pipeline.py",
+    ],
+    ".dockerignore": [
+        "tests/test_container_assets.py",
     ],
 }
 

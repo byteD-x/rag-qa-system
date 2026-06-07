@@ -746,6 +746,36 @@ def test_fast_test_selector_routes_gateway_support_modules_to_owned_suites() -> 
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_tool_workflow_and_mcp_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_tool_mcp_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/tool_workflow.py",
+            "apps/services/api-gateway/src/app/gateway_mcp_adapter.py",
+            "apps/services/api-gateway/src/app/gateway_mcp_routes.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_tool_workflow.py",
+        "tests/test_backend_infra.py::test_gateway_tool_workflow_route_passes_workflow_mode",
+        "tests/test_mcp_adapter.py",
+        "tests/test_backend_infra.py::test_gateway_mcp_route_lists_readonly_tools_and_writes_audit",
+        "tests/test_backend_infra.py::test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments",
+        "tests/test_backend_infra.py::test_gateway_mcp_route_requires_chat_permission",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_dockerignore_to_container_asset_tests() -> None:
+    selector = _load_script_module("fast_test_selector_dockerignore_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets([".dockerignore"])
+
+    assert targets == ["tests/test_container_assets.py"]
+
+
 def test_fast_test_selector_routes_qdrant_readiness_modules_to_focused_tests() -> None:
     selector = _load_script_module("fast_test_selector_qdrant_readiness_test", "scripts/quality/select_fast_tests.py")
 
