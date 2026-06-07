@@ -25,6 +25,7 @@ from .gateway_chat_routes import router as gateway_chat_router
 from .gateway_config import load_gateway_runtime_settings
 from .gateway_graph import ensure_gateway_graph_schema
 from .gateway_idempotency import IdempotencyState
+from .gateway_mcp_routes import router as gateway_mcp_router
 from .gateway_pricing import estimate_usage_cost
 from .gateway_runtime import gateway_db, logger, runtime_settings
 from .gateway_schemas import ChatScopePayload
@@ -152,6 +153,7 @@ app.include_router(gateway_chat_router)
 app.include_router(gateway_chat_graph_router)
 app.include_router(gateway_admin_router)
 app.include_router(gateway_platform_router)
+app.include_router(gateway_mcp_router)
 app.include_router(gateway_analytics_router)
 
 

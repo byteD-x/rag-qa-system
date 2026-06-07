@@ -1522,6 +1522,8 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 
 Gateway 还提供 `POST /api/v1/agents/tool-workflow` 作为受控工具工作流入口。默认 `workflow_mode=direct`，只执行只读业务工具白名单；显式传入 `workflow_mode=plan_reflect_repair` 时，会返回单工具规划、失败反思与一次受控修复元数据。目前修复仅覆盖 `data_controls_dry_run` 的空 `scopes` dry-run 场景，不开放 shell、文件写入、任意 HTTP、动态插件或非 dry-run 写操作，也不影响聊天和微信快回复链路。
 
+`POST /api/v1/mcp` 提供本机只读 MCP JSON-RPC adapter，用于 `initialize`、`tools/list` 和 `tools/call`。该入口只暴露 `kb_scope_summary`、`workflow_trace_summary`、`tool_registry_stats` 三个摘要工具，复用受控 Tool Workflow 的 `direct` 执行路径，不暴露维护 dry-run、`prompt_preview`、配置审计、shell、文件写入、任意 HTTP 或动态插件能力。
+
 ### 6. 人工接管队列
 
 Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运营人员按租户与技能组认领待处理会话。

@@ -745,6 +745,54 @@ LangGraph 编排版知识库问答接口。
 - 该入口不会绕过 `requires_confirmation`，需要确认的工具不会被自动修复执行。
 - 该入口不开放 shell、文件写入、任意 HTTP、动态插件或非 dry-run 写操作，也不暴露 `prompt_preview`、配置审计明细、密钥、连接串或原始目标列表。
 
+### MCP JSON-RPC Adapter
+
+- `POST /api/v1/mcp`
+
+权限：
+- 需要 `chat.use`
+
+支持的 JSON-RPC methods：
+- `initialize`
+- `tools/list`
+- `tools/call`
+
+`initialize` 请求示例：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "init-1",
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05"
+  }
+}
+```
+
+`tools/list` 响应只返回本机只读摘要工具：
+- `kb_scope_summary`
+- `workflow_trace_summary`
+- `tool_registry_stats`
+
+`tools/call` 请求示例：
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "call-1",
+  "method": "tools/call",
+  "params": {
+    "name": "tool_registry_stats",
+    "arguments": {}
+  }
+}
+```
+
+说明：
+- 该端点是本机只读 JSON-RPC adapter，不是动态插件市场，也不负责注册远程 MCP server。
+- 成功响应使用 `result`，协议级或参数错误使用 JSON-RPC `error`；HTTP `200` 只表示 adapter 已处理请求。
+- `tools/call` 只接受单个工具名和对象类型 `arguments`，内部复用 Tool Workflow 的 `direct` 模式执行。
+- 不暴露 `backup_cleanup_dry_run`、`data_controls_dry_run`、`prompt_preview`、配置审计明细、连接串、密钥、原始目标列表、shell、文件写入、任意 HTTP 或动态插件能力。
+
 ## 12. 运营分析看板
 
 项目只保留这一份看板 API 说明，不再拆出单独文档。

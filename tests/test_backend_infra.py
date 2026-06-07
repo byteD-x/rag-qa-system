@@ -244,6 +244,8 @@ def _load_gateway_main(monkeypatch):
         "app.db",
         "app.gateway_chat_routes",
         "app.gateway_chat_service",
+        "app.gateway_mcp_adapter",
+        "app.gateway_mcp_routes",
         "app.gateway_platform_routes",
         "app.gateway_schemas",
         "app.gateway_workflows",
@@ -3395,6 +3397,107 @@ def test_gateway_tool_workflow_route_rejects_blank_tool_name(monkeypatch) -> Non
     )
 
     assert response.status_code == 422
+
+
+def test_gateway_mcp_route_lists_readonly_tools_and_writes_audit(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_mcp_routes = importlib.import_module("app.gateway_mcp_routes")
+    audit_events: list[dict[str, object]] = []
+    monkeypatch.setattr(gateway_mcp_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(kwargs))
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/mcp",
+        headers=_auth_headers(user),
+        json={"jsonrpc": "2.0", "id": "list-1", "method": "tools/list"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["jsonrpc"] == "2.0"
+    assert payload["id"] == "list-1"
+    names = {tool["name"] for tool in payload["result"]["tools"]}
+    assert names == {"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"}
+    assert "data_controls_dry_run" not in names
+    assert "prompt_preview" not in str(payload)
+    assert audit_events
+    assert audit_events[0]["action"] == "mcp.request"
+    assert audit_events[0]["outcome"] == "success"
+    assert audit_events[0]["resource_type"] == "mcp_adapter"
+    assert audit_events[0]["resource_id"] == "tools/list"
+
+
+def test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_mcp_routes = importlib.import_module("app.gateway_mcp_routes")
+    monkeypatch.setattr(gateway_mcp_routes, "write_gateway_audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(gateway_main.app)
+    success = client.post(
+        "/api/v1/mcp",
+        headers=_auth_headers(user),
+        json={
+            "jsonrpc": "2.0",
+            "id": "call-1",
+            "method": "tools/call",
+            "params": {"name": "tool_registry_stats", "arguments": {}},
+        },
+    )
+    assert success.status_code == 200
+    success_payload = success.json()
+    assert success_payload["result"]["isError"] is False
+    assert "structuredContent" in success_payload["result"]
+    assert "prompt_preview" not in str(success_payload)
+
+    invalid = client.post(
+        "/api/v1/mcp",
+        headers=_auth_headers(user),
+        json={
+            "jsonrpc": "2.0",
+            "id": "bad-args",
+            "method": "tools/call",
+            "params": {"name": "tool_registry_stats", "arguments": []},
+        },
+    )
+    assert invalid.status_code == 200
+    invalid_payload = invalid.json()
+    assert invalid_payload["error"]["code"] == -32602
+    assert invalid_payload["error"]["data"]["reason"] == "arguments must be an object"
+
+
+def test_gateway_mcp_route_requires_chat_permission(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_audit_support = importlib.import_module("app.gateway_audit_support")
+    monkeypatch.setattr(gateway_audit_support, "write_gateway_audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="audit-1",
+        email="audit@local",
+        role="audit_viewer",
+        permissions=auth_module.permissions_for_role("audit_viewer"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/mcp",
+        headers=_auth_headers(user),
+        json={"jsonrpc": "2.0", "id": "list-1", "method": "tools/list"},
+    )
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["code"] == "permission_denied"
 
 
 def test_kb_analytics_dashboard_route_requires_kb_read_permission(monkeypatch) -> None:
