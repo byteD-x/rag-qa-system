@@ -27,6 +27,27 @@ def test_counter_reuses_registered_metric_with_total_suffix() -> None:
     assert f'{metric_name}{{result="ok"}} 1.0' in text
 
 
+def test_histogram_and_gauge_reuse_registered_metrics() -> None:
+    pytest.importorskip("prometheus_client")
+    from shared import metrics
+
+    histogram_name = f"rag_test_shared_histogram_{uuid.uuid4().hex}"
+    first_histogram = metrics.Histogram(histogram_name, "Shared histogram wrapper test.")
+    second_histogram = metrics.Histogram(histogram_name, "Shared histogram wrapper test.")
+
+    gauge_name = f"rag_test_shared_gauge_{uuid.uuid4().hex}"
+    first_gauge = metrics.Gauge(gauge_name, "Shared gauge wrapper test.", labelnames=("state",))
+    second_gauge = metrics.Gauge(gauge_name, "Shared gauge wrapper test.", labelnames=("state",))
+
+    assert second_histogram is first_histogram
+    assert second_gauge is first_gauge
+    first_histogram.observe(3.0)
+    first_gauge.labels(state="ready").set(2.0)
+    text = metrics.generate_latest().decode("utf-8")
+    assert f"{histogram_name}_count 1.0" in text
+    assert f'{gauge_name}{{state="ready"}} 2.0' in text
+
+
 def test_metrics_fallback_noops_without_prometheus_client(monkeypatch) -> None:
     module_name = f"_shared_metrics_no_prometheus_{uuid.uuid4().hex}"
     original_import = builtins.__import__
