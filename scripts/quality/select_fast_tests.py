@@ -177,6 +177,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/knowledge-base/src/app/kb_api_support.py": [
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
     ],
+    "apps/services/knowledge-base/src/app/kb_system_routes.py": [
+        "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
+    ],
     "apps/services/knowledge-base/src/app/kb_connector_scheduler.py": [
         "tests/test_backend_infra.py::test_connector_scheduler_manager_runs_only_when_active",
     ],
@@ -212,6 +215,7 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "packages/python/shared/metrics.py": [
         "tests/test_shared_metrics.py",
         "tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics",
+        "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
     ],
     "packages/python/shared/qdrant_store.py": [
         "tests/test_backend_infra.py::test_qdrant_runtime_config_uses_safe_defaults",

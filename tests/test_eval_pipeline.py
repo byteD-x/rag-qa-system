@@ -788,8 +788,21 @@ def test_fast_test_selector_routes_shared_metrics_to_owned_suites() -> None:
     assert targets == [
         "tests/test_shared_metrics.py",
         "tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics",
+        "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
     ]
     assert "tests/test_shared_stack.py" not in targets
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_kb_system_routes_to_metrics_smoke() -> None:
+    selector = _load_script_module("fast_test_selector_kb_system_routes_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/knowledge-base/src/app/kb_system_routes.py"])
+
+    assert targets == [
+        "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
+    ]
+    assert "tests/test_ai_platform_capabilities.py" not in targets
     assert "tests/test_backend_infra.py" not in targets
 
 

@@ -3610,6 +3610,23 @@ def test_kb_governance_route_requires_kb_manage_permission(monkeypatch) -> None:
     assert payload["code"] == "permission_denied"
 
 
+def test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_system_routes = importlib.import_module("app.kb_system_routes")
+    refresh_calls: list[bool] = []
+
+    monkeypatch.setattr(kb_system_routes, "refresh_metrics_snapshot", lambda: refresh_calls.append(True))
+    monkeypatch.setattr(kb_system_routes, "generate_latest", lambda: b"rag_kb_upload_requests_total 1.0\n")
+
+    client = TestClient(kb_main.app)
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert refresh_calls == [True]
+    assert "rag_kb_upload_requests_total 1.0" in response.text
+    assert response.headers["content-type"].startswith("text/plain")
+
+
 def test_auth_permissions_are_derived_from_role_aliases() -> None:
     admin_permissions = auth_module.permissions_for_role("admin")
     member_permissions = auth_module.permissions_for_role("member")

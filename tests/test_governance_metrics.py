@@ -68,3 +68,17 @@ def test_governance_metrics_singleton_can_reset_after_use(monkeypatch) -> None:
     assert metrics.get_status()["events"]["prompt_rollback"]["success"] == 1
     metrics.reset()
     assert metrics.get_status()["events"]["prompt_rollback"]["total"] == 0
+
+
+def test_governance_metrics_export_uses_sanitized_failure_reason(monkeypatch) -> None:
+    governance_metrics = _load_governance_metrics(monkeypatch)
+    shared_metrics = importlib.import_module("shared.metrics")
+    metrics = governance_metrics.RuntimeGovernanceMetrics()
+    raw_reason = "provider timeout opaque-marker-raw-detail-123 raw prompt text"
+
+    metrics.record_tool_workflow(success=False, duration_ms=1.0, failure_reason=raw_reason)
+
+    text = shared_metrics.generate_latest().decode("utf-8")
+    assert 'rag_gateway_governance_failure_reasons_total{event="tool_workflow",reason="unknown"}' in text
+    assert "opaque-marker-raw-detail-123" not in text
+    assert "raw_prompt_text" not in text
