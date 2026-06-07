@@ -34,12 +34,27 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/api_key_manager.py": [
         "tests/test_platform_ecosystem_phase2.py::TestAPIKeyManager",
     ],
+    "apps/services/api-gateway/src/app/complexity_classifier.py": [
+        "tests/test_inference_optimization.py::TestComplexityClassifier",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_complexity_drives_cache_decision",
+    ],
+    "apps/services/api-gateway/src/app/context_compressor.py": [
+        "tests/test_context_optimization.py::TestExtractiveCompressor",
+    ],
+    "apps/services/api-gateway/src/app/context_prioritizer.py": [
+        "tests/test_context_optimization.py::TestContextPrioritizer",
+        "tests/test_context_optimization.py::TestQuestionFeatures",
+    ],
     "apps/services/api-gateway/src/app/context_window.py": [
         "tests/test_context_optimization.py::TestEstimateTokens",
         "tests/test_context_optimization.py::TestContextWindowManager",
     ],
     "apps/services/api-gateway/src/app/cost_attribution.py": [
         "tests/test_cost_management.py::TestCostAttribution",
+    ],
+    "apps/services/api-gateway/src/app/cost_budget.py": [
+        "tests/test_agent_orchestration.py::TestCostEstimation",
+        "tests/test_agent_orchestration.py::TestCostBudgetController",
     ],
     "apps/services/api-gateway/src/app/gateway_admin_routes.py": [
         "tests/test_backend_infra.py",
@@ -74,6 +89,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_agent_capabilities.py::TestMemoryExtractor",
         "tests/test_agent_capabilities.py::TestIntegration::test_memory_store_upsert_and_search",
         "tests/test_memory_enhancement.py",
+    ],
+    "apps/services/api-gateway/src/app/model_health.py": [
+        "tests/test_inference_optimization.py::TestModelHealth",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_model_health_informs_routing",
     ],
     "apps/services/api-gateway/src/app/task_decomposer.py": [
         "tests/test_agent_capabilities.py::TestTaskDecomposer",
@@ -123,6 +142,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     ],
     "apps/services/knowledge-base/src/app/kb_url_sync.py": [
         "tests/test_platform_and_connector_extensions.py::test_execute_url_sync_dry_run_builds_text_candidates",
+    ],
+    "apps/services/knowledge-base/src/app/kb_version_assist.py": [
+        "tests/test_visual_stack.py::test_build_version_assist_marks_high_confidence_continuous_version_for_auto_apply",
+        "tests/test_visual_stack.py::test_build_version_assist_respects_manual_version_metadata",
     ],
     "apps/services/knowledge-base/src/app/vector_store.py": [
         "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",

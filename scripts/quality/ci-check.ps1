@@ -9,6 +9,7 @@ param(
     [switch]$SkipPytest,
     [switch]$IncludeDockerBuild,
     [int]$PytestTimeoutSeconds = 900,
+    [int]$PytestHeartbeatSeconds = 30,
     [int]$PytestMaxWorkers = 1,
     [int]$PytestIdleTimeoutSeconds = 0,
     [int]$PytestTailLinesOnFailure = 20,
@@ -97,6 +98,9 @@ function Invoke-RepoToolWithTimeout {
         while (-not $process.HasExited) {
             $waitMs = [Math]::Max([Math]::Min($HeartbeatSeconds, 30), 1) * 1000
             $process.WaitForExit($waitMs) | Out-Null
+            if ($process.HasExited) {
+                break
+            }
             $elapsed = [int]((Get-Date) - $started).TotalSeconds
             $stdoutBytes = if (Test-Path $stdoutPath) { (Get-Item $stdoutPath).Length } else { 0 }
             $stderrBytes = if (Test-Path $stderrPath) { (Get-Item $stderrPath).Length } else { 0 }
@@ -195,6 +199,8 @@ if (-not $SkipPytest) {
             "scripts/quality/run_pytest_groups.py",
             "--timeout-seconds",
             "$PytestTimeoutSeconds",
+            "--heartbeat-seconds",
+            "$PytestHeartbeatSeconds",
             "--max-workers",
             "$PytestMaxWorkers",
             "--idle-timeout-seconds",
@@ -202,7 +208,7 @@ if (-not $SkipPytest) {
             "--tail-lines-on-failure",
             "$PytestTailLinesOnFailure"
         ) + $effectivePytestTargets
-        Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds
+        Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds -HeartbeatSeconds $PytestHeartbeatSeconds
     }
 }
 

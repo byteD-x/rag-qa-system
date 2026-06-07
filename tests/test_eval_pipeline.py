@@ -644,9 +644,14 @@ def test_fast_test_selector_routes_optimization_modules_to_owned_suites() -> Non
         [
             "apps/services/api-gateway/src/app/agent_error_recovery.py",
             "apps/services/api-gateway/src/app/context_window.py",
+            "apps/services/api-gateway/src/app/context_compressor.py",
+            "apps/services/api-gateway/src/app/context_prioritizer.py",
             "apps/services/api-gateway/src/app/semantic_cache.py",
             "apps/services/api-gateway/src/app/api_key_manager.py",
             "apps/services/api-gateway/src/app/cost_attribution.py",
+            "apps/services/api-gateway/src/app/cost_budget.py",
+            "apps/services/api-gateway/src/app/model_health.py",
+            "apps/services/api-gateway/src/app/complexity_classifier.py",
         ]
     )
 
@@ -656,10 +661,19 @@ def test_fast_test_selector_routes_optimization_modules_to_owned_suites() -> Non
         "tests/test_agent_metacognition.py::TestErrorRecoveryEngine",
         "tests/test_context_optimization.py::TestEstimateTokens",
         "tests/test_context_optimization.py::TestContextWindowManager",
+        "tests/test_context_optimization.py::TestExtractiveCompressor",
+        "tests/test_context_optimization.py::TestContextPrioritizer",
+        "tests/test_context_optimization.py::TestQuestionFeatures",
         "tests/test_inference_optimization.py::TestSemanticCache",
         "tests/test_inference_optimization.py::TestInferenceIntegration::test_cache_invalidate_on_document_update",
         "tests/test_platform_ecosystem_phase2.py::TestAPIKeyManager",
         "tests/test_cost_management.py::TestCostAttribution",
+        "tests/test_agent_orchestration.py::TestCostEstimation",
+        "tests/test_agent_orchestration.py::TestCostBudgetController",
+        "tests/test_inference_optimization.py::TestModelHealth",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_model_health_informs_routing",
+        "tests/test_inference_optimization.py::TestComplexityClassifier",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_complexity_drives_cache_decision",
     ]
     assert "tests/test_backend_infra.py" not in targets
 
@@ -712,6 +726,19 @@ def test_fast_test_selector_routes_kb_connector_modules_to_focused_tests() -> No
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_kb_version_assist_to_visual_stack_tests() -> None:
+    selector = _load_script_module("fast_test_selector_kb_version_assist_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/knowledge-base/src/app/kb_version_assist.py"])
+
+    assert targets == [
+        "tests/test_visual_stack.py::test_build_version_assist_marks_high_confidence_continuous_version_for_auto_apply",
+        "tests/test_visual_stack.py::test_build_version_assist_respects_manual_version_metadata",
+    ]
+    assert "tests/test_ai_platform_capabilities.py" not in targets
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
     selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
 
@@ -724,6 +751,15 @@ def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() 
     )
 
     assert targets == ["tests/test_eval_pipeline.py"]
+
+
+def test_quality_ci_check_forwards_pytest_heartbeat_seconds() -> None:
+    script = (REPO_ROOT / "scripts/quality/ci-check.ps1").read_text(encoding="utf-8")
+
+    assert "[int]$PytestHeartbeatSeconds = 30" in script
+    assert '"--heartbeat-seconds",' in script
+    assert '            "$PytestHeartbeatSeconds",' in script
+    assert "-HeartbeatSeconds $PytestHeartbeatSeconds" in script
 
 
 def test_pytest_group_runner_prunes_covered_nodeids_before_building_groups() -> None:
