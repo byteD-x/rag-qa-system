@@ -780,6 +780,19 @@ def test_fast_test_selector_routes_governance_metrics_to_owned_suites() -> None:
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_shared_metrics_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_shared_metrics_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["packages/python/shared/metrics.py"])
+
+    assert targets == [
+        "tests/test_shared_metrics.py",
+        "tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics",
+    ]
+    assert "tests/test_shared_stack.py" not in targets
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_dockerignore_to_container_asset_tests() -> None:
     selector = _load_script_module("fast_test_selector_dockerignore_test", "scripts/quality/select_fast_tests.py")
 

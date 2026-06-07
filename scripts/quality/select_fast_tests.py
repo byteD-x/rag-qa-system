@@ -209,6 +209,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
     ],
+    "packages/python/shared/metrics.py": [
+        "tests/test_shared_metrics.py",
+        "tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics",
+    ],
     "packages/python/shared/qdrant_store.py": [
         "tests/test_backend_infra.py::test_qdrant_runtime_config_uses_safe_defaults",
         "tests/test_backend_infra.py::test_qdrant_runtime_config_masks_sensitive_endpoint_and_key",
