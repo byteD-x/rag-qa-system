@@ -43,7 +43,7 @@ JSON 输出包含：
 - `metrics.eval_suite`：在线评测 job 的 accuracy、correctness、faithfulness、p95 latency
 - `metrics.regression_gate` / `metrics.agent_smoke_regression_gate`：门禁状态与失败原因
 - `metrics.multipart_resume`：分片上传恢复是否通过
-- `metrics.pytest_groups`：pytest 分组状态、完成组数、并发度、失败/超时组数和最慢组日志路径
+- `metrics.pytest_groups`：pytest 分组状态、完成组数、未执行组数/名称、并发度、失败/超时组数和最慢组日志路径
 
 ## 推荐顺序
 

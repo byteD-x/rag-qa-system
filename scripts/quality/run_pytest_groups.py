@@ -330,10 +330,17 @@ def main(argv: list[str] | None = None) -> int:
         tail_lines_on_failure=max(0, int(args.tail_lines_on_failure)),
     )
     elapsed = time.monotonic() - started
-    _print_summary(results, elapsed_seconds=elapsed)
+    scheduled_group_names = [group.name for group in groups]
+    _print_summary(
+        results,
+        scheduled_groups=len(groups),
+        scheduled_group_names=scheduled_group_names,
+        elapsed_seconds=elapsed,
+    )
     write_summary(
         results,
         scheduled_groups=len(groups),
+        scheduled_group_names=scheduled_group_names,
         output_path=args.summary_output,
         max_workers=max_workers,
         elapsed_seconds=elapsed,
@@ -371,14 +378,27 @@ def _start_process(
         raise
 
 
-def _print_summary(results: list[GroupResult], *, elapsed_seconds: float | None = None) -> None:
+def _print_summary(
+    results: list[GroupResult],
+    *,
+    scheduled_groups: int | None = None,
+    scheduled_group_names: list[str] | None = None,
+    elapsed_seconds: float | None = None,
+) -> None:
     total = sum(item.elapsed_seconds for item in results) if elapsed_seconds is None else elapsed_seconds
     failed = [item for item in results if item.exit_code != 0]
+    scheduled_count = len(results) if scheduled_groups is None else max(0, int(scheduled_groups))
+    skipped_count = max(0, scheduled_count - len(results))
+    skipped_group_names = _skipped_group_names(results, scheduled_group_names or [])
     print(
         f"[pytest-group] summary groups={len(results)} failed={len(failed)} "
-        f"elapsed={total:.1f}s",
+        f"scheduled={scheduled_count} skipped={skipped_count} elapsed={total:.1f}s",
         flush=True,
     )
+    if skipped_group_names:
+        preview = skipped_group_names[:5]
+        suffix = "" if len(preview) == len(skipped_group_names) else f" ... (+{len(skipped_group_names) - len(preview)} more)"
+        print(f"[pytest-group] skipped groups: {', '.join(preview)}{suffix}", flush=True)
     for item in failed:
         status = "timeout" if item.timed_out else f"exit_code={item.exit_code}"
         print(
@@ -399,11 +419,14 @@ def build_summary(
     results: list[GroupResult],
     *,
     scheduled_groups: int,
+    scheduled_group_names: list[str] | None = None,
     max_workers: int = 1,
     elapsed_seconds: float | None = None,
 ) -> dict[str, object]:
     failed = [item for item in results if item.exit_code != 0]
     timed_out = [item for item in results if item.timed_out]
+    skipped_groups = max(0, int(scheduled_groups) - len(results))
+    skipped_group_names = _skipped_group_names(results, scheduled_group_names or [])
     total_elapsed = sum(item.elapsed_seconds for item in results) if elapsed_seconds is None else elapsed_seconds
     result_items = [_result_to_dict(item) for item in results]
     slowest = sorted(result_items, key=lambda item: float(item["elapsed_seconds"]), reverse=True)[:5]
@@ -418,6 +441,8 @@ def build_summary(
         "status": status,
         "scheduled_groups": scheduled_groups,
         "completed_groups": len(results),
+        "skipped_groups": skipped_groups,
+        "skipped_group_names": skipped_group_names,
         "max_workers": max(1, int(max_workers)),
         "failed_groups": len(failed),
         "timed_out_groups": len(timed_out),
@@ -431,6 +456,7 @@ def write_summary(
     results: list[GroupResult],
     *,
     scheduled_groups: int,
+    scheduled_group_names: list[str] | None = None,
     output_path: Path,
     max_workers: int = 1,
     elapsed_seconds: float | None = None,
@@ -439,11 +465,23 @@ def write_summary(
     summary = build_summary(
         results,
         scheduled_groups=scheduled_groups,
+        scheduled_group_names=scheduled_group_names,
         max_workers=max_workers,
         elapsed_seconds=elapsed_seconds,
     )
     output_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[pytest-group] summary_json={output_path}", flush=True)
+
+
+def _skipped_group_names(results: list[GroupResult], scheduled_group_names: list[str]) -> list[str]:
+    remaining_completed = [item.group.name for item in results]
+    skipped: list[str] = []
+    for name in scheduled_group_names:
+        if name in remaining_completed:
+            remaining_completed.remove(name)
+            continue
+        skipped.append(name)
+    return skipped
 
 
 def _result_to_dict(result: GroupResult) -> dict[str, object]:

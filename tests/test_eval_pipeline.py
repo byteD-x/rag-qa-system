@@ -974,11 +974,19 @@ def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path
         idle_seconds=3.5,
     )
 
-    summary = runner.build_summary([passed, timeout], scheduled_groups=3, max_workers=4)
+    scheduled_group_names = ["tests/test_fast.py", "tests/test_slow.py", "tests/test_later.py"]
+    summary = runner.build_summary(
+        [passed, timeout],
+        scheduled_groups=3,
+        scheduled_group_names=scheduled_group_names,
+        max_workers=4,
+    )
 
     assert summary["status"] == "failed"
     assert summary["scheduled_groups"] == 3
     assert summary["completed_groups"] == 2
+    assert summary["skipped_groups"] == 1
+    assert summary["skipped_group_names"] == ["tests/test_later.py"]
     assert summary["max_workers"] == 4
     assert summary["failed_groups"] == 1
     assert summary["timed_out_groups"] == 1
@@ -1037,10 +1045,22 @@ def test_pytest_group_runner_console_summary_prints_slowest_groups(tmp_path: Pat
         ),
     ]
 
-    runner._print_summary(results, elapsed_seconds=12.5)
+    runner._print_summary(
+        results,
+        scheduled_groups=5,
+        scheduled_group_names=[
+            "tests/test_fast.py",
+            "tests/test_slow.py",
+            "tests/test_timeout.py",
+            "tests/test_medium.py",
+            "tests/test_later.py",
+        ],
+        elapsed_seconds=12.5,
+    )
 
     output = capsys.readouterr().out
-    assert "summary groups=4 failed=2 elapsed=12.5s" in output
+    assert "summary groups=4 failed=2 scheduled=5 skipped=1 elapsed=12.5s" in output
+    assert "skipped groups: tests/test_later.py" in output
     assert "failure tests/test_timeout.py: timeout" in output
     assert "failure tests/test_medium.py: exit_code=3" in output
     assert "slowest tests/test_timeout.py: elapsed=9.0s status=timeout" in output
@@ -1121,6 +1141,8 @@ def test_pytest_group_runner_writes_summary_on_first_failure(monkeypatch, tmp_pa
     assert payload["status"] == "failed"
     assert payload["scheduled_groups"] == 2
     assert payload["completed_groups"] == 1
+    assert payload["skipped_groups"] == 1
+    assert payload["skipped_group_names"] == ["tests/test_second.py"]
     assert payload["results"][0]["group"] == "tests/test_first.py"
 
 

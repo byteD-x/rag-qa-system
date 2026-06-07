@@ -179,6 +179,8 @@ def _summarize_pytest_groups(payload: dict[str, Any]) -> dict[str, Any]:
         "status": str(payload.get("status") or "unknown"),
         "scheduled_groups": _int(payload.get("scheduled_groups")),
         "completed_groups": _int(payload.get("completed_groups")),
+        "skipped_groups": _int(payload.get("skipped_groups")),
+        "skipped_group_names": list(payload.get("skipped_group_names") or [])[:10],
         "max_workers": _int(payload.get("max_workers") or 1),
         "failed_groups": _int(payload.get("failed_groups")),
         "timed_out_groups": _int(payload.get("timed_out_groups")),
@@ -388,6 +390,7 @@ def render_markdown_report(report: dict[str, Any]) -> str:
                 f"- Status: `{pytest_groups.get('status') or 'unknown'}`",
                 f"- Scheduled groups: `{_int(pytest_groups.get('scheduled_groups'))}`",
                 f"- Completed groups: `{_int(pytest_groups.get('completed_groups'))}`",
+                f"- Skipped groups: `{_int(pytest_groups.get('skipped_groups'))}`",
                 f"- Max workers: `{_int(pytest_groups.get('max_workers') or 1)}`",
                 f"- Failed groups: `{_int(pytest_groups.get('failed_groups'))}`",
                 f"- Timed out groups: `{_int(pytest_groups.get('timed_out_groups'))}`",
@@ -395,6 +398,10 @@ def render_markdown_report(report: dict[str, Any]) -> str:
                 "",
             ]
         )
+        skipped_group_names = list(pytest_groups.get("skipped_group_names") or [])
+        if skipped_group_names:
+            preview = ", ".join(f"`{item}`" for item in skipped_group_names[:10])
+            lines.extend([f"- Skipped group names: {preview}", ""])
         slowest = list(pytest_groups.get("slowest_groups") or [])
         if slowest:
             lines.extend(

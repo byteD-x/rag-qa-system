@@ -110,6 +110,8 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
             "status": "passed",
             "scheduled_groups": 2,
             "completed_groups": 2,
+            "skipped_groups": 0,
+            "skipped_group_names": [],
             "max_workers": 2,
             "failed_groups": 0,
             "timed_out_groups": 0,
@@ -136,6 +138,7 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
     assert report["metrics"]["eval_suite"]["jobs"][0]["p95_latency_ms"] == 42.0
     assert report["metrics"]["pytest_groups"]["status"] == "passed"
     assert report["metrics"]["pytest_groups"]["completed_groups"] == 2
+    assert report["metrics"]["pytest_groups"]["skipped_groups"] == 0
     assert report["metrics"]["pytest_groups"]["max_workers"] == 2
     assert "# RAG Daily Report" in markdown
     assert "## Report Inventory" in markdown
@@ -198,6 +201,8 @@ def test_rag_daily_report_marks_incomplete_pytest_groups_as_failed(tmp_path: Pat
             "status": "incomplete",
             "scheduled_groups": 3,
             "completed_groups": 2,
+            "skipped_groups": 1,
+            "skipped_group_names": ["tests/test_missing.py"],
             "failed_groups": 0,
             "timed_out_groups": 0,
             "elapsed_seconds": 12.3,
@@ -212,6 +217,10 @@ def test_rag_daily_report_marks_incomplete_pytest_groups_as_failed(tmp_path: Pat
     assert report["missing_required_reports"] == []
     assert "pytest-groups-summary.json: status incomplete" in report["failures"]
     assert "## Pytest Groups" in markdown
+    assert report["metrics"]["pytest_groups"]["skipped_groups"] == 1
+    assert report["metrics"]["pytest_groups"]["skipped_group_names"] == ["tests/test_missing.py"]
+    assert "Skipped groups: `1`" in markdown
+    assert "`tests/test_missing.py`" in markdown
     assert "pytest-groups-summary.json: status incomplete" in markdown
 
 
