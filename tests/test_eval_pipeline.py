@@ -586,6 +586,65 @@ def test_fast_test_selector_keeps_direct_test_file_changes() -> None:
     assert targets == ["tests/test_backend_infra.py"]
 
 
+def test_fast_test_selector_routes_agent_tooling_to_focused_tests() -> None:
+    selector = _load_script_module("fast_test_selector_agent_tooling_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/business_tools.py",
+            "apps/services/api-gateway/src/app/tool_registry.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
+        "tests/test_agent_capabilities.py::TestToolRegistry",
+        "tests/test_agent_capabilities.py::TestIntegration::test_tool_registry_compatible_with_agent",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_prunes_nodeids_covered_by_class_target() -> None:
+    selector = _load_script_module("fast_test_selector_class_prune_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.normalize_targets(
+        [
+            "tests/test_agent_capabilities.py::TestToolRegistry",
+            "tests/test_agent_capabilities.py::TestToolRegistry::test_business_tools_register_idempotently",
+        ]
+    )
+
+    assert targets == ["tests/test_agent_capabilities.py::TestToolRegistry"]
+
+
+def test_fast_test_selector_routes_agent_runtime_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_agent_runtime_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/agent_orchestrator.py",
+            "apps/services/api-gateway/src/app/agent_metacognition.py",
+            "apps/services/api-gateway/src/app/task_decomposer.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_agent_orchestration.py",
+        "tests/test_agent_metacognition.py",
+        "tests/test_agent_capabilities.py::TestTaskDecomposer",
+        "tests/test_agent_capabilities.py::TestIntegration::test_decomposition_result_feeds_agent",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
+def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
+    selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["scripts/quality/ci-check.ps1"])
+
+    assert targets == ["tests/test_eval_pipeline.py"]
+
+
 def test_pytest_group_runner_prunes_covered_nodeids_before_building_groups() -> None:
     runner = _load_script_module("pytest_group_runner_prune_targets_test", "scripts/quality/run_pytest_groups.py")
 

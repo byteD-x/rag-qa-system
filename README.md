@@ -2055,7 +2055,7 @@ $targets = python scripts/quality/select_fast_tests.py --staged --fallback tests
 python scripts/quality/run_pytest_groups.py --timeout-seconds 300 --idle-timeout-seconds 120 --heartbeat-seconds 20 $targets
 ```
 
-`select_fast_tests.py` 会按变更文件映射到相关 pytest 目标，并剪掉已被整文件或目录覆盖的 nodeid，避免同一轮 pytest 重复收集。
+`select_fast_tests.py` 会按变更文件映射到相关 pytest 目标，并剪掉已被整文件、目录或类级 nodeid 覆盖的子 nodeid，避免同一轮 pytest 重复收集；Agent 工具链和质量脚本会优先映射到专属小型回归，减少小改动退回慢速大组的概率。
 
 LangGraph 运行时的最小回归验证：
 

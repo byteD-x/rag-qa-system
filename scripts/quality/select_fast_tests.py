@@ -9,6 +9,23 @@ from pathlib import Path, PurePosixPath
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _EXACT_TARGETS: dict[str, list[str]] = {
+    "apps/services/api-gateway/src/app/agent_guardrails.py": [
+        "tests/test_platform_ecosystem_phase2.py",
+    ],
+    "apps/services/api-gateway/src/app/agent_metacognition.py": [
+        "tests/test_agent_metacognition.py",
+    ],
+    "apps/services/api-gateway/src/app/agent_orchestrator.py": [
+        "tests/test_agent_orchestration.py",
+    ],
+    "apps/services/api-gateway/src/app/agent_reflection.py": [
+        "tests/test_agent_capabilities.py::TestAgentReflection",
+        "tests/test_agent_capabilities.py::TestIntegration::test_reflection_result_can_trigger_retry",
+    ],
+    "apps/services/api-gateway/src/app/business_tools.py": [
+        "tests/test_agent_capabilities.py::TestToolRegistry::test_business_tools_register_idempotently",
+        "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
+    ],
     "apps/services/api-gateway/src/app/gateway_admin_routes.py": [
         "tests/test_backend_infra.py",
         "tests/test_backend_infra.py::test_import_provider_billing_route_imports_records_and_audits",
@@ -38,10 +55,36 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/gateway_graph.py": [
         "tests/test_langgraph_runtime.py",
     ],
+    "apps/services/api-gateway/src/app/memory_extractor.py": [
+        "tests/test_agent_capabilities.py::TestMemoryExtractor",
+        "tests/test_agent_capabilities.py::TestIntegration::test_memory_store_upsert_and_search",
+        "tests/test_memory_enhancement.py",
+    ],
+    "apps/services/api-gateway/src/app/task_decomposer.py": [
+        "tests/test_agent_capabilities.py::TestTaskDecomposer",
+        "tests/test_agent_capabilities.py::TestIntegration::test_decomposition_result_feeds_agent",
+    ],
+    "apps/services/api-gateway/src/app/tool_discovery.py": [
+        "tests/test_platform_ecosystem_phase2.py",
+    ],
+    "apps/services/api-gateway/src/app/tool_pipeline.py": [
+        "tests/test_platform_ecosystem_phase2.py",
+    ],
+    "apps/services/api-gateway/src/app/tool_registry.py": [
+        "tests/test_agent_capabilities.py::TestToolRegistry",
+        "tests/test_agent_capabilities.py::TestIntegration::test_tool_registry_compatible_with_agent",
+        "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
+    ],
+    "apps/services/api-gateway/src/app/tool_sandbox.py": [
+        "tests/test_platform_ecosystem_phase2.py",
+    ],
     "scripts/quality/run_pytest_groups.py": [
         "tests/test_eval_pipeline.py",
     ],
     "scripts/quality/select_fast_tests.py": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "scripts/quality/ci-check.ps1": [
         "tests/test_eval_pipeline.py",
     ],
     "scripts/observability/rag-daily-report.py": [
@@ -169,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _covers(covering_target: str, candidate_target: str) -> bool:
     if "::" in covering_target:
-        return False
+        return _covers_nodeid(covering_target, candidate_target)
     covering_path = _target_path(covering_target)
     candidate_path = _target_path(candidate_target)
     if covering_path == candidate_path:
@@ -177,6 +220,16 @@ def _covers(covering_target: str, candidate_target: str) -> bool:
     if not _is_directory_target(covering_target):
         return False
     return candidate_path.startswith(f"{covering_path.rstrip('/')}/")
+
+
+def _covers_nodeid(covering_target: str, candidate_target: str) -> bool:
+    if "::" not in candidate_target:
+        return False
+    if candidate_target == covering_target:
+        return False
+    if candidate_target.startswith(f"{covering_target}::"):
+        return True
+    return candidate_target.startswith(f"{covering_target}[")
 
 
 def _target_path(target: str) -> str:
