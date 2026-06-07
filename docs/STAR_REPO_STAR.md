@@ -47,12 +47,13 @@
 - `POST /api/v1/agents/tool-workflow` 默认 `direct`，显式 `plan_reflect_repair` 才返回规划、反思和一次受控修复。
 - 受控修复仅覆盖 `data_controls_dry_run` 空 `scopes` 的 dry-run 场景。
 - `POST /api/v1/mcp` 只支持 `initialize`、`tools/list`、`tools/call`，只暴露 3 个摘要工具。
+- Tool Workflow 执行结果写入运行时治理指标，聚合成功/失败、耗时和短失败原因，并通过 `/api/v1/system/metrics-summary` 与 `/metrics` 暴露。
 
 **Result**：
 - 工具能力能被 HTTP 与 MCP 客户端复用，但不暴露 `prompt_preview`、配置审计明细、shell、文件写入、任意 HTTP 或动态插件。
-- 测试覆盖只读工具列表、blocked 工具拒绝、参数类型检查、权限校验和 audit 事件。
+- 测试覆盖只读工具列表、blocked 工具拒绝、参数类型检查、权限校验、audit 事件和 Prometheus 治理指标导出。
 
-**证据**：`apps/services/api-gateway/src/app/tool_workflow.py`、`apps/services/api-gateway/src/app/gateway_mcp_adapter.py`、`apps/services/api-gateway/src/app/gateway_mcp_routes.py`、`tests/test_tool_workflow.py`、`tests/test_mcp_adapter.py`、`tests/test_backend_infra.py::test_gateway_mcp_route_lists_readonly_tools_and_writes_audit`
+**证据**：`apps/services/api-gateway/src/app/tool_workflow.py`、`apps/services/api-gateway/src/app/governance_metrics.py`、`apps/services/api-gateway/src/app/gateway_mcp_adapter.py`、`apps/services/api-gateway/src/app/gateway_mcp_routes.py`、`tests/test_tool_workflow.py`、`tests/test_governance_metrics.py`、`tests/test_mcp_adapter.py`、`tests/test_backend_infra.py::test_gateway_mcp_route_lists_readonly_tools_and_writes_audit`
 
 ## STAR 4：Semantic Cache 的安全命中边界
 
@@ -67,9 +68,9 @@
 
 **Result**：
 - 同一范围内的重复问题可以跳过 LLM 生成；语义命中需要显式开关和阈值控制。
-- 本地测试覆盖精确命中、语义命中、scope 隔离、缓存元数据和命中后跳过生成。
+- 本地测试覆盖精确命中、语义命中、scope 隔离、缓存元数据、`metrics-summary` 摘要和命中后跳过生成。
 
-**证据**：`apps/services/api-gateway/src/app/semantic_cache.py`、`apps/services/api-gateway/src/app/gateway_chat_service.py`、`tests/test_inference_optimization.py::TestSemanticCache`、`tests/test_chat_workflow_resume_and_budget.py::test_handle_chat_message_uses_semantic_cache_hit_without_generation`
+**证据**：`apps/services/api-gateway/src/app/semantic_cache.py`、`apps/services/api-gateway/src/app/gateway_chat_service.py`、`apps/services/api-gateway/src/app/gateway_system_routes.py`、`tests/test_inference_optimization.py::TestSemanticCache`、`tests/test_inference_optimization.py::test_gateway_metrics_summary_includes_response_cache`、`tests/test_chat_workflow_resume_and_budget.py::test_handle_chat_message_uses_semantic_cache_hit_without_generation`
 
 ## STAR 5：容器构建边界从“大仓库上下文”收敛为服务级资产
 

@@ -52,6 +52,7 @@
 ### 8. 评测与可观测
 - 多维度评估（Accuracy/Faithfulness/Citation/Recall@K），并补充 deterministic retrieval fixture
 - 全链路Trace ID追踪
+- 运行时治理指标：Tool Workflow / Prompt rollback 聚合计数、成功率、耗时和短失败原因，通过 `metrics-summary` 与 Prometheus 指标族暴露
 - Token级成本估算 + 本地 embedding / 证据数量上限等成本控制
 
 ### 9. AI Agent 自主决策体系
