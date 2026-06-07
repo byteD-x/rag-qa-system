@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Request
 
 from shared.auth import CurrentUser
 
 from .gateway_audit_support import require_permission, write_gateway_audit_event
 from .gateway_runtime import CHAT_PERMISSION
+from .governance_metrics import get_governance_metrics
 from .gateway_platform_store import (
     create_agent_profile,
     create_prompt_template,
@@ -35,15 +38,23 @@ router = APIRouter()
 
 @router.post("/api/v1/agents/tool-workflow")
 async def post_tool_workflow(payload: ToolWorkflowRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    started_at = time.perf_counter()
     require_permission(request, user, CHAT_PERMISSION, action="agent.tool_workflow.run", resource_type="tool_workflow")
     result = await run_tool_workflow(
         tool_name=payload.tool_name,
         payload=payload.payload,
         workflow_mode=payload.workflow_mode,
     )
+    success = bool(result.get("success"))
+    failure_reason = "" if success else _tool_workflow_failure_reason(result)
+    get_governance_metrics().record_tool_workflow(
+        success=success,
+        duration_ms=(time.perf_counter() - started_at) * 1000,
+        failure_reason=failure_reason,
+    )
     write_gateway_audit_event(
         action="agent.tool_workflow.run",
-        outcome="success" if bool(result.get("success")) else "failed",
+        outcome="success" if success else "failed",
         request=request,
         user=user,
         resource_type="tool_workflow",
@@ -52,6 +63,19 @@ async def post_tool_workflow(payload: ToolWorkflowRequest, request: Request, use
         details={"repair_count": (result.get("metadata") or {}).get("repair_count", 0)},
     )
     return result
+
+
+def _tool_workflow_failure_reason(result: dict[str, object]) -> str:
+    if str(result.get("workflow_mode") or "").strip() not in {"direct", "plan_reflect_repair"}:
+        return "bad_workflow"
+    error = str(result.get("error") or "").lower()
+    if "not allowed" in error:
+        return "tool_not_allowed"
+    if "confirmation" in error:
+        return "confirmation_required"
+    if "not found" in error:
+        return "tool_not_found"
+    return "tool_workflow_failed"
 
 
 @router.get("/api/v1/platform/prompt-templates")

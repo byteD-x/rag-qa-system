@@ -3319,6 +3319,9 @@ def test_gateway_dashboard_route_requires_chat_permission(monkeypatch) -> None:
 def test_gateway_tool_workflow_route_passes_workflow_mode(monkeypatch) -> None:
     gateway_main = _load_gateway_main(monkeypatch)
     gateway_platform_routes = importlib.import_module("app.gateway_platform_routes")
+    governance_metrics = importlib.import_module("app.governance_metrics")
+    gateway_system_routes = importlib.import_module("app.gateway_system_routes")
+    governance_metrics.get_governance_metrics().reset()
     audit_events: list[dict[str, object]] = []
     monkeypatch.setattr(gateway_platform_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(kwargs))
     user = auth_module.AuthUser(
@@ -3355,6 +3358,48 @@ def test_gateway_tool_workflow_route_passes_workflow_mode(monkeypatch) -> None:
     assert audit_events[0]["resource_id"] == "data_controls_dry_run"
     assert audit_events[0]["scope"] == "plan_reflect_repair"
     assert audit_events[0]["details"] == {"repair_count": 1}
+    metrics = gateway_system_routes.get_metrics_summary()["governance_metrics"]["events"]["tool_workflow"]
+    assert metrics["total"] == 1
+    assert metrics["success"] == 1
+    assert metrics["failure"] == 0
+    assert metrics["last_duration_ms"] >= 0
+    metrics_response = client.get("/metrics")
+    assert metrics_response.status_code == 200
+    assert "rag_gateway_governance_events_total" in metrics_response.text
+
+
+def test_gateway_tool_workflow_route_records_failure_metrics(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_platform_routes = importlib.import_module("app.gateway_platform_routes")
+    governance_metrics = importlib.import_module("app.governance_metrics")
+    gateway_system_routes = importlib.import_module("app.gateway_system_routes")
+    governance_metrics.get_governance_metrics().reset()
+    monkeypatch.setattr(gateway_platform_routes, "write_gateway_audit_event", lambda **_kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/agents/tool-workflow",
+        headers=_auth_headers(user),
+        json={
+            "tool_name": "unknown_tool",
+            "workflow_mode": "plan_reflect_repair",
+            "payload": {},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is False
+    metrics = gateway_system_routes.get_metrics_summary()["governance_metrics"]["events"]["tool_workflow"]
+    assert metrics["total"] == 1
+    assert metrics["success"] == 0
+    assert metrics["failure"] == 1
+    assert metrics["failure_reasons"] == {"tool_not_allowed": 1}
 
 
 def test_gateway_tool_workflow_route_requires_chat_permission(monkeypatch) -> None:

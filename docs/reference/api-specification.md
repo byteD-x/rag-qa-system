@@ -73,8 +73,9 @@ Authorization: Bearer <ACCESS_TOKEN>
 ### `GET /api/v1/system/metrics-summary`
 
 - Gateway JSON 指标摘要，适合前端、CI 或本地排障脚本直接读取
-- 当前包含 `response_cache_summary`
+- 当前包含 `response_cache_summary` 与 `governance_metrics`
 - `response_cache_summary` 描述回答级缓存运行时状态，字段包括 `enabled`、`ttl_seconds`、`size`、`max_entries`、`hits`、`misses`、`writes`、`expired`、`clears`、`hit_rate`、`semantic_enabled`、`semantic_threshold`、`semantic_hits`、`semantic_misses` 与 `semantic_skipped`。L2 相似问法语义命中默认关闭，默认阈值为 `0.92`
+- `governance_metrics.events` 只包含 `prompt_rollback` 与 `tool_workflow` 的聚合计数、成功率、总/平均/最近耗时和短失败原因计数，不包含 prompt、payload、工具输出或异常全文。
 
 ## 3. 认证
 

@@ -10,6 +10,7 @@ from shared.metrics import CONTENT_TYPE_LATEST, generate_latest
 
 from .ai_client import load_llm_settings
 from .gateway_runtime import gateway_db, runtime_settings
+from .governance_metrics import get_governance_metrics
 from .semantic_cache import semantic_cache
 
 
@@ -54,6 +55,7 @@ async def readyz() -> dict[str, Any]:
 
 def get_metrics_summary() -> dict[str, Any]:
     return {
+        "governance_metrics": get_governance_metrics().get_status(),
         "response_cache_summary": semantic_cache.stats(),
     }
 

@@ -357,6 +357,7 @@ class TestSemanticCache:
 def test_gateway_metrics_summary_includes_response_cache(monkeypatch) -> None:
     _import_gateway("app.gateway_system_routes", monkeypatch)
     from app import gateway_system_routes
+    from app.governance_metrics import get_governance_metrics
 
     monkeypatch.setattr(
         gateway_system_routes.semantic_cache,
@@ -372,6 +373,8 @@ def test_gateway_metrics_summary_includes_response_cache(monkeypatch) -> None:
             "clears": 0,
         },
     )
+    get_governance_metrics().reset()
+    get_governance_metrics().record_tool_workflow(success=False, duration_ms=2.0, failure_reason="tool_not_found")
 
     payload = gateway_system_routes.get_metrics_summary()
 
@@ -379,6 +382,8 @@ def test_gateway_metrics_summary_includes_response_cache(monkeypatch) -> None:
     assert payload["response_cache_summary"]["size"] == 2
     assert payload["response_cache_summary"]["hits"] == 3
     assert payload["response_cache_summary"]["misses"] == 1
+    assert payload["governance_metrics"]["events"]["tool_workflow"]["failure"] == 1
+    assert payload["governance_metrics"]["events"]["tool_workflow"]["failure_reasons"] == {"tool_not_found": 1}
 
 
 # ============================================================================

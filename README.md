@@ -514,7 +514,7 @@ make down
 - Gateway `healthz`: `http://localhost:8080/healthz`
 - Gateway `readyz`: `http://localhost:8080/readyz`
 - Gateway `metrics`: `http://localhost:8080/metrics`
-- Gateway JSON metrics summary: `http://localhost:8080/api/v1/system/metrics-summary`（包含 `response_cache_summary`）
+- Gateway JSON metrics summary: `http://localhost:8080/api/v1/system/metrics-summary`（包含 `response_cache_summary`、`governance_metrics`）
 - KB Service `healthz`: `http://localhost:8300/healthz`
 - KB Service `readyz`: `http://localhost:8300/readyz`
 - KB Service `metrics`: `http://localhost:8300/metrics`

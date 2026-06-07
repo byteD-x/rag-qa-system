@@ -768,6 +768,18 @@ def test_fast_test_selector_routes_tool_workflow_and_mcp_modules_to_owned_suites
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_governance_metrics_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_governance_metrics_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/api-gateway/src/app/governance_metrics.py"])
+
+    assert targets == [
+        "tests/test_governance_metrics.py",
+        "tests/test_inference_optimization.py::test_gateway_metrics_summary_includes_response_cache",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_dockerignore_to_container_asset_tests() -> None:
     selector = _load_script_module("fast_test_selector_dockerignore_test", "scripts/quality/select_fast_tests.py")
 

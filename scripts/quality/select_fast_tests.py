@@ -90,6 +90,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_backend_infra.py::test_local_handoff_queue_does_not_claim_same_session_twice",
         "tests/test_backend_infra.py::test_claim_next_handoff_route_returns_claim_result_and_audit",
     ],
+    "apps/services/api-gateway/src/app/governance_metrics.py": [
+        "tests/test_governance_metrics.py",
+        "tests/test_inference_optimization.py::test_gateway_metrics_summary_includes_response_cache",
+    ],
     "apps/services/api-gateway/src/app/gateway_mcp_adapter.py": [
         "tests/test_mcp_adapter.py",
     ],
