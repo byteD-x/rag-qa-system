@@ -968,6 +968,7 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 
 - 为知识治理工作台提供低置信 OCR 区域、待处理切片、批处理事件等聚合读模型。
 - 支持个人视角与管理员视角。
+- 前端治理页的单文档 rebuild 动作固定调用 `POST /api/knowledge_base/rebuild`，执行前必须先 dry-run 并校验 payload signature；该入口只传已选文档 ID 与签名，不开放文件上传、目录扫描、任意路径读取或手工 `source_path`。
 
 相关事件端点：
 

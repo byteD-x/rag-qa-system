@@ -76,5 +76,5 @@ git ls-files tests/test_*.py
 | 运行时治理指标 | `apps/services/api-gateway/src/app/governance_metrics.py`、`gateway_system_routes.py` | `tests/test_governance_metrics.py`、`tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics` |
 | Semantic Cache 命中边界 | `apps/services/api-gateway/src/app/semantic_cache.py` | `tests/test_inference_optimization.py::TestSemanticCache` |
 | Trace 与反馈快照 | `packages/python/shared/tracing.py`、`apps/services/api-gateway/src/app/gateway_sessions.py` | `tests/test_api_error_payloads.py`、`tests/test_backend_infra.py::test_upsert_chat_message_feedback_snapshots_llm_metadata` |
-| 知识库治理与运维聚合 | `apps/services/knowledge-base/src/app/kb_analytics_routes.py`、`docs/reference/kb-governance-workbench.md` | `tests/test_backend_infra.py::test_kb_governance_payload_aggregates_enterprise_queues` |
+| 知识库治理与运维聚合 | `apps/services/knowledge-base/src/app/kb_analytics_routes.py`、`apps/web/src/views/kb/KBGovernanceView.vue`、`docs/reference/kb-governance-workbench.md` | `tests/test_backend_infra.py::test_kb_governance_payload_aggregates_enterprise_queues`、`apps/web/src/views/kb/KBGovernanceView.test.ts` |
 | Docker 构建上下文 | `.dockerignore`、服务级 Dockerfile | `tests/test_container_assets.py` |

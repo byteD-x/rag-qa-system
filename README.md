@@ -1341,6 +1341,8 @@ curl -X POST http://localhost:8300/api/v1/kb/connectors \
 - 可以查看文档的 chunk 明细
 - 可以手工修正文案、禁用低质量噪音 chunk
 - 可以手工拆分/合并切片并重建该文档索引
+- `/workspace/kb/governance` 已开放单文档受控 rebuild 操作：必须先对当前文档 payload 执行 dry-run，且本地签名与当前 payload 一致后才会调用固定 `POST /api/knowledge_base/rebuild`
+- rebuild 入口只消费已选中的文档 ID，不提供文件上传、目录扫描、任意路径读取或手工输入 `source_path`
 - 可以通过 `POST /api/v1/kb/retrieve/debug` 只看召回和 rerank 结果，不触发 LLM
 
 这对运营或知识管理员的意义是：能更快定位“为什么没召回”“为什么召回错了”“哪些切片应该被人工修正”。

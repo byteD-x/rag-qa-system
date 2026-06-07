@@ -57,6 +57,12 @@
 
 其中 `low_confidence_region_count` 表示当前文档中低于治理阈值的截图区域数量；其余 `low_confidence_*` 字段用于把治理项直接深链到文档页里的具体截图区域。
 
+## Controlled rebuild
+
+治理页已接入单文档受控 rebuild 动作。页面只允许在已选择 1 个文档时预览或执行 rebuild；预览会按当前 payload 生成签名并调用固定 `POST /api/knowledge_base/rebuild`，只有 `lastDryRunSignature` 与当前 payload signature 一致时才允许执行正式 rebuild。
+
+正式 rebuild 成功后，页面只展示摘要字段，例如 `doc_id`、`version`、`chunk_count`、`indexed_chunks`、`deleted_previous`。该入口不新增文件上传、目录扫描、任意路径读取或手工输入 `source_path` 能力，也不会把治理页扩展为通用文件重建工具。
+
 ## Notes
 
 - 治理接口要求 `kb.manage` 权限。
