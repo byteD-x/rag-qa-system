@@ -4,6 +4,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = REPO_ROOT / "scripts/generate_api_route_index.py"
@@ -101,3 +103,14 @@ def test_route_index_cli_writes_output_and_stdout(tmp_path: Path, capsys) -> Non
     stdout = capsys.readouterr().out
     assert "# API 路由清单" in stdout
     assert "`/api/v1/items`" in stdout
+
+
+def test_route_index_cli_rejects_missing_explicit_source(tmp_path: Path) -> None:
+    module = _load_route_index_module()
+    output = tmp_path / "routes.md"
+
+    with pytest.raises(SystemExit) as exc:
+        module.main(["--repo-root", str(tmp_path), "missing_routes.py", "--output", str(output)])
+
+    assert exc.value.code == 2
+    assert not output.exists()

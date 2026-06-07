@@ -127,7 +127,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     repo_root = Path(args.repo_root)
     source_paths = _expand_sources([Path(item) for item in args.sources], repo_root=repo_root)
-    if not source_paths:
+    if args.sources and not source_paths:
+        parser.error("No source files matched the provided paths.")
+    if not args.sources:
         source_paths = list(_default_python_sources(repo_root))
     markdown = build_markdown(collect_routes(source_paths, repo_root=repo_root), _relative_sources(source_paths, repo_root))
 
