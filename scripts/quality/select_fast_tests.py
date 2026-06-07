@@ -12,6 +12,11 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/agent_guardrails.py": [
         "tests/test_platform_ecosystem_phase2.py",
     ],
+    "apps/services/api-gateway/src/app/agent_error_recovery.py": [
+        "tests/test_agent_metacognition.py::TestErrorClassifier",
+        "tests/test_agent_metacognition.py::TestRecoveryAction",
+        "tests/test_agent_metacognition.py::TestErrorRecoveryEngine",
+    ],
     "apps/services/api-gateway/src/app/agent_metacognition.py": [
         "tests/test_agent_metacognition.py",
     ],
@@ -25,6 +30,16 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/business_tools.py": [
         "tests/test_agent_capabilities.py::TestToolRegistry::test_business_tools_register_idempotently",
         "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
+    ],
+    "apps/services/api-gateway/src/app/api_key_manager.py": [
+        "tests/test_platform_ecosystem_phase2.py::TestAPIKeyManager",
+    ],
+    "apps/services/api-gateway/src/app/context_window.py": [
+        "tests/test_context_optimization.py::TestEstimateTokens",
+        "tests/test_context_optimization.py::TestContextWindowManager",
+    ],
+    "apps/services/api-gateway/src/app/cost_attribution.py": [
+        "tests/test_cost_management.py::TestCostAttribution",
     ],
     "apps/services/api-gateway/src/app/gateway_admin_routes.py": [
         "tests/test_backend_infra.py",
@@ -63,6 +78,10 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/task_decomposer.py": [
         "tests/test_agent_capabilities.py::TestTaskDecomposer",
         "tests/test_agent_capabilities.py::TestIntegration::test_decomposition_result_feeds_agent",
+    ],
+    "apps/services/api-gateway/src/app/semantic_cache.py": [
+        "tests/test_inference_optimization.py::TestSemanticCache",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_cache_invalidate_on_document_update",
     ],
     "apps/services/api-gateway/src/app/tool_discovery.py": [
         "tests/test_platform_ecosystem_phase2.py",

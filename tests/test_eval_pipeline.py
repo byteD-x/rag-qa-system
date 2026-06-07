@@ -637,6 +637,33 @@ def test_fast_test_selector_routes_agent_runtime_modules_to_owned_suites() -> No
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_optimization_modules_to_owned_suites() -> None:
+    selector = _load_script_module("fast_test_selector_optimization_modules_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "apps/services/api-gateway/src/app/agent_error_recovery.py",
+            "apps/services/api-gateway/src/app/context_window.py",
+            "apps/services/api-gateway/src/app/semantic_cache.py",
+            "apps/services/api-gateway/src/app/api_key_manager.py",
+            "apps/services/api-gateway/src/app/cost_attribution.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_agent_metacognition.py::TestErrorClassifier",
+        "tests/test_agent_metacognition.py::TestRecoveryAction",
+        "tests/test_agent_metacognition.py::TestErrorRecoveryEngine",
+        "tests/test_context_optimization.py::TestEstimateTokens",
+        "tests/test_context_optimization.py::TestContextWindowManager",
+        "tests/test_inference_optimization.py::TestSemanticCache",
+        "tests/test_inference_optimization.py::TestInferenceIntegration::test_cache_invalidate_on_document_update",
+        "tests/test_platform_ecosystem_phase2.py::TestAPIKeyManager",
+        "tests/test_cost_management.py::TestCostAttribution",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
     selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
 
