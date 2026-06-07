@@ -544,6 +544,61 @@ def test_pytest_group_runner_discovers_test_files(tmp_path: Path) -> None:
     assert groups[0].args == [str(tests_dir / "test_alpha.py")]
 
 
+def test_fast_test_selector_prunes_nodeids_covered_by_file_target() -> None:
+    selector = _load_script_module("fast_test_selector_file_prune_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/api-gateway/src/app/gateway_admin_routes.py"])
+
+    assert targets == ["tests/test_backend_infra.py"]
+
+
+def test_fast_test_selector_keeps_focused_targets_when_not_covered() -> None:
+    selector = _load_script_module("fast_test_selector_focused_targets_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/api-gateway/src/app/gateway_provider_billing.py"])
+
+    assert targets == [
+        "tests/test_backend_infra.py::test_provider_billing_import_request_normalizes_records",
+        "tests/test_backend_infra.py::test_import_provider_billing_route_imports_records_and_audits",
+        "tests/test_backend_infra.py::test_gateway_usage_stats_includes_provider_billing",
+    ]
+
+
+def test_fast_test_selector_prunes_paths_covered_by_directory_target() -> None:
+    selector = _load_script_module("fast_test_selector_directory_prune_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.normalize_targets(
+        [
+            "tests",
+            "tests/test_backend_infra.py",
+            "tests/test_backend_infra.py::test_gateway_usage_stats_includes_provider_billing",
+        ]
+    )
+
+    assert targets == ["tests"]
+
+
+def test_fast_test_selector_keeps_direct_test_file_changes() -> None:
+    selector = _load_script_module("fast_test_selector_direct_test_file_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["tests/test_backend_infra.py"])
+
+    assert targets == ["tests/test_backend_infra.py"]
+
+
+def test_pytest_group_runner_prunes_covered_nodeids_before_building_groups() -> None:
+    runner = _load_script_module("pytest_group_runner_prune_targets_test", "scripts/quality/run_pytest_groups.py")
+
+    groups = runner.build_groups(
+        [
+            "tests/test_backend_infra.py",
+            "tests/test_backend_infra.py::test_gateway_usage_stats_includes_provider_billing",
+        ]
+    )
+
+    assert [group.args for group in groups] == [["tests/test_backend_infra.py"]]
+
+
 def test_pytest_group_runner_timeout_is_actionable(monkeypatch, tmp_path: Path) -> None:
     runner = _load_script_module("pytest_group_runner_timeout_test", "scripts/quality/run_pytest_groups.py")
 

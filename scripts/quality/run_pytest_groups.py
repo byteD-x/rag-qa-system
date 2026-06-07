@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from select_fast_tests import normalize_targets
+except ModuleNotFoundError:  # pragma: no cover - used when imported as scripts.quality.*
+    from scripts.quality.select_fast_tests import normalize_targets
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_DIR = REPO_ROOT / "logs" / "quality"
@@ -84,6 +89,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_groups(paths: list[str]) -> list[TestGroup]:
     if not paths:
         paths = ["tests"]
+    paths = normalize_targets(paths)
 
     groups: list[TestGroup] = []
     for raw_path in paths:

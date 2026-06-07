@@ -1863,6 +1863,7 @@ python scripts/dev/reindex-qdrant.py
 - `scripts/dev/smoke-eval.ps1`
 - `scripts/dev/smoke_eval.py`
 - `scripts/observability/rag-daily-report.py`
+- `scripts/quality/select_fast_tests.py`
 - `scripts/quality/run_pytest_groups.py`
 
 ## 项目结构
@@ -2042,6 +2043,15 @@ docker compose config --quiet
 
 `run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
 默认串行执行以保持稳定的 fail-fast 语义；本地需要缩短整套回归时间时，可显式加 `--max-workers 2` 或更高并发度，让多个测试文件分批并行执行。如果怀疑测试进程卡住但没有产生日志，可加 `--idle-timeout-seconds 180 --tail-lines-on-failure 40` 快速失败并打印最近日志。`scripts/quality/ci-check.ps1` 同步支持 `-PytestMaxWorkers`、`-PytestIdleTimeoutSeconds` 和 `-PytestTailLinesOnFailure` 透传到该执行器。
+
+变更较小时可以先用快速测试选择器生成目标，再交给分组 runner：
+
+```powershell
+$targets = python scripts/quality/select_fast_tests.py --staged --fallback tests
+python scripts/quality/run_pytest_groups.py --timeout-seconds 300 --idle-timeout-seconds 120 --heartbeat-seconds 20 $targets
+```
+
+`select_fast_tests.py` 会按变更文件映射到相关 pytest 目标，并剪掉已被整文件或目录覆盖的 nodeid，避免同一轮 pytest 重复收集。
 
 LangGraph 运行时的最小回归验证：
 
