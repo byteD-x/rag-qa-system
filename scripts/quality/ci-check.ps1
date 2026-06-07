@@ -14,6 +14,8 @@ param(
     [int]$PytestIdleTimeoutSeconds = 0,
     [int]$PytestTailLinesOnFailure = 20,
     [int]$PytestTotalTimeoutSeconds = 3600,
+    [string[]]$PytestArg = @(),
+    [string]$PytestSummaryOutput = "",
     [string[]]$PytestTargets = @("tests")
 )
 
@@ -62,6 +64,40 @@ function Invoke-RepoTool {
     Invoke-ExternalCommand -Command $Command -Arguments $Arguments -WorkingDirectory $WorkingDirectory
 }
 
+function Write-NewLogContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][ref]$Offset
+    )
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        if ($Offset.Value -gt $stream.Length) {
+            $Offset.Value = 0
+        }
+        $stream.Seek([int64]$Offset.Value, [System.IO.SeekOrigin]::Begin) | Out-Null
+        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8, $true, 4096, $true)
+        try {
+            $content = $reader.ReadToEnd()
+            $Offset.Value = $stream.Position
+        }
+        finally {
+            $reader.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+
+    if ($content) {
+        Write-Host $content.TrimEnd()
+    }
+}
+
 function Invoke-RepoToolWithTimeout {
     param(
         [Parameter(Mandatory = $true)][string]$Command,
@@ -78,26 +114,27 @@ function Invoke-RepoToolWithTimeout {
     $stdoutPath = Join-Path $logDir "$safeName-$timestamp.out.log"
     $stderrPath = Join-Path $logDir "$safeName-$timestamp.err.log"
 
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo.FileName = $Command
-    $process.StartInfo.Arguments = Convert-ToProcessArgumentLine -Arguments $Arguments
-    $process.StartInfo.WorkingDirectory = $WorkingDirectory
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.CreateNoWindow = $true
-
     $started = Get-Date
+    $stdoutOffset = 0L
+    $stderrOffset = 0L
+    $argumentLine = Convert-ToProcessArgumentLine -Arguments $Arguments
+    $process = $null
     try {
-        if (-not $process.Start()) {
-            throw "Failed to start command: $Command $($Arguments -join ' ')"
-        }
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $process = Start-Process `
+            -FilePath $Command `
+            -ArgumentList $argumentLine `
+            -WorkingDirectory $WorkingDirectory `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -NoNewWindow `
+            -PassThru
+        $null = $process.Handle
 
         while (-not $process.HasExited) {
             $waitMs = [Math]::Max([Math]::Min($HeartbeatSeconds, 30), 1) * 1000
             $process.WaitForExit($waitMs) | Out-Null
+            Write-NewLogContent -Path $stdoutPath -Offset ([ref]$stdoutOffset)
+            Write-NewLogContent -Path $stderrPath -Offset ([ref]$stderrOffset)
             if ($process.HasExited) {
                 break
             }
@@ -107,18 +144,16 @@ function Invoke-RepoToolWithTimeout {
             Write-Info "Still running after ${elapsed}s: $Command $($Arguments -join ' ') stdout_bytes=$stdoutBytes stderr_bytes=$stderrBytes"
             if ($elapsed -ge $TimeoutSeconds) {
                 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                Write-NewLogContent -Path $stdoutPath -Offset ([ref]$stdoutOffset)
+                Write-NewLogContent -Path $stderrPath -Offset ([ref]$stderrOffset)
                 throw "Command timed out after ${TimeoutSeconds}s: $Command $($Arguments -join ' '). Logs: $stdoutPath $stderrPath"
             }
         }
         $process.WaitForExit()
+        $process.Refresh()
         $exitCode = $process.ExitCode
-        $stdout = $stdoutTask.GetAwaiter().GetResult()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        [System.IO.File]::WriteAllText($stdoutPath, $stdout, (New-Object System.Text.UTF8Encoding($false)))
-        [System.IO.File]::WriteAllText($stderrPath, $stderr, (New-Object System.Text.UTF8Encoding($false)))
-
-        if ($stdout) { Write-Host $stdout.TrimEnd() }
-        if ($stderr) { Write-Host $stderr.TrimEnd() }
+        Write-NewLogContent -Path $stdoutPath -Offset ([ref]$stdoutOffset)
+        Write-NewLogContent -Path $stderrPath -Offset ([ref]$stderrOffset)
 
         if ($null -eq $exitCode) {
             throw ("Command exited but exit code was not available: {0} {1}. Logs: {2} {3}" -f $Command, ($Arguments -join ' '), $stdoutPath, $stderrPath)
@@ -195,7 +230,7 @@ if (-not $SkipDockerConfig) {
 
 if (-not $SkipPytest) {
     Invoke-Check "Pytest" {
-        $args = @($python.BaseArguments) + @(
+        $runnerArgs = @(
             "scripts/quality/run_pytest_groups.py",
             "--timeout-seconds",
             "$PytestTimeoutSeconds",
@@ -207,7 +242,14 @@ if (-not $SkipPytest) {
             "$PytestIdleTimeoutSeconds",
             "--tail-lines-on-failure",
             "$PytestTailLinesOnFailure"
-        ) + $effectivePytestTargets
+        )
+        if ($PytestSummaryOutput -and $PytestSummaryOutput.Trim()) {
+            $runnerArgs += @("--summary-output", $PytestSummaryOutput)
+        }
+        foreach ($item in @($PytestArg | Where-Object { $_ -and $_.Trim() })) {
+            $runnerArgs += @("--pytest-arg=$item")
+        }
+        $args = @($python.BaseArguments) + $runnerArgs + $effectivePytestTargets
         Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds -HeartbeatSeconds $PytestHeartbeatSeconds
     }
 }

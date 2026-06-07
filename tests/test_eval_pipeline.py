@@ -821,13 +821,36 @@ def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() 
     assert targets == ["tests/test_eval_pipeline.py"]
 
 
-def test_quality_ci_check_forwards_pytest_heartbeat_seconds() -> None:
+def test_quality_ci_check_streams_and_forwards_pytest_runner_options() -> None:
     script = (REPO_ROOT / "scripts/quality/ci-check.ps1").read_text(encoding="utf-8")
 
     assert "[int]$PytestHeartbeatSeconds = 30" in script
+    assert "[string[]]$PytestArg = @()" in script
+    assert '[string]$PytestSummaryOutput = ""' in script
+    assert "Start-Process" in script
+    assert "$process.Handle" in script
+    assert "Write-NewLogContent" in script
     assert '"--heartbeat-seconds",' in script
+    assert '"--summary-output"' in script
+    assert '"--pytest-arg=$item"' in script
     assert '            "$PytestHeartbeatSeconds",' in script
     assert "-HeartbeatSeconds $PytestHeartbeatSeconds" in script
+
+
+def test_preflight_forwards_pytest_runner_options() -> None:
+    script = (REPO_ROOT / "scripts/dev/preflight.ps1").read_text(encoding="utf-8")
+    makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "[int]$PytestHeartbeatSeconds = 30" in script
+    assert "[int]$PytestMaxWorkers = 1" in script
+    assert "[string[]]$PytestArg = @()" in script
+    assert '[string]$PytestSummaryOutput = ""' in script
+    assert "$effectivePytestTargets" in script
+    assert '"--heartbeat-seconds",' in script
+    assert '"--summary-output"' in script
+    assert '"--pytest-arg=$item"' in script
+    assert "PREFLIGHT_ARGS ?=" in makefile
+    assert "scripts/dev/preflight.ps1 $(PREFLIGHT_ARGS)" in makefile
 
 
 def test_pytest_group_runner_prunes_covered_nodeids_before_building_groups() -> None:

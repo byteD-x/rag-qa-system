@@ -1,5 +1,6 @@
 POWERSHELL ?= powershell
 PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
+PREFLIGHT_ARGS ?=
 
 .PHONY: help preflight init up down logs logs-follow export-logs ci test build encoding smoke-eval
 
@@ -19,7 +20,7 @@ help:
 	@echo   make smoke-eval   - 运行本地 smoke 上传和 agent 评测
 
 preflight:
-	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/preflight.ps1
+	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/preflight.ps1 $(PREFLIGHT_ARGS)
 
 init:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/init.ps1
