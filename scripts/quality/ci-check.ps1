@@ -12,7 +12,8 @@ param(
     [int]$PytestMaxWorkers = 1,
     [int]$PytestIdleTimeoutSeconds = 0,
     [int]$PytestTailLinesOnFailure = 20,
-    [int]$PytestTotalTimeoutSeconds = 3600
+    [int]$PytestTotalTimeoutSeconds = 3600,
+    [string[]]$PytestTargets = @("tests")
 )
 
 Set-StrictMode -Version Latest
@@ -22,6 +23,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-RepoRoot
 $python = Get-PythonCommandSpec
+$effectivePytestTargets = @($PytestTargets | Where-Object { $_ -and $_.Trim() })
+if ($effectivePytestTargets.Count -eq 0) {
+    $effectivePytestTargets = @("tests")
+}
 $failures = New-Object System.Collections.Generic.List[string]
 $totalChecks = 0
 function Invoke-Check {
@@ -72,17 +77,23 @@ function Invoke-RepoToolWithTimeout {
     $stdoutPath = Join-Path $logDir "$safeName-$timestamp.out.log"
     $stderrPath = Join-Path $logDir "$safeName-$timestamp.err.log"
 
-    $process = Start-Process `
-        -FilePath $Command `
-        -ArgumentList $Arguments `
-        -WorkingDirectory $WorkingDirectory `
-        -NoNewWindow `
-        -PassThru `
-        -RedirectStandardOutput $stdoutPath `
-        -RedirectStandardError $stderrPath
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $Command
+    $process.StartInfo.Arguments = Convert-ToProcessArgumentLine -Arguments $Arguments
+    $process.StartInfo.WorkingDirectory = $WorkingDirectory
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.CreateNoWindow = $true
 
     $started = Get-Date
     try {
+        if (-not $process.Start()) {
+            throw "Failed to start command: $Command $($Arguments -join ' ')"
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+
         while (-not $process.HasExited) {
             $waitMs = [Math]::Max([Math]::Min($HeartbeatSeconds, 30), 1) * 1000
             $process.WaitForExit($waitMs) | Out-Null
@@ -95,21 +106,49 @@ function Invoke-RepoToolWithTimeout {
                 throw "Command timed out after ${TimeoutSeconds}s: $Command $($Arguments -join ' '). Logs: $stdoutPath $stderrPath"
             }
         }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        [System.IO.File]::WriteAllText($stdoutPath, $stdout, (New-Object System.Text.UTF8Encoding($false)))
+        [System.IO.File]::WriteAllText($stderrPath, $stderr, (New-Object System.Text.UTF8Encoding($false)))
 
-        $stdout = if (Test-Path $stdoutPath) { Get-Content -Path $stdoutPath -Raw -ErrorAction SilentlyContinue } else { "" }
-        $stderr = if (Test-Path $stderrPath) { Get-Content -Path $stderrPath -Raw -ErrorAction SilentlyContinue } else { "" }
         if ($stdout) { Write-Host $stdout.TrimEnd() }
         if ($stderr) { Write-Host $stderr.TrimEnd() }
 
-        if ($process.ExitCode -ne 0) {
-            throw ("Command failed with exit code {0}: {1} {2}. Logs: {3} {4}" -f $process.ExitCode, $Command, ($Arguments -join ' '), $stdoutPath, $stderrPath)
+        if ($null -eq $exitCode) {
+            throw ("Command exited but exit code was not available: {0} {1}. Logs: {2} {3}" -f $Command, ($Arguments -join ' '), $stdoutPath, $stderrPath)
+        }
+        if ($exitCode -ne 0) {
+            throw ("Command failed with exit code {0}: {1} {2}. Logs: {3} {4}" -f $exitCode, $Command, ($Arguments -join ' '), $stdoutPath, $stderrPath)
         }
     }
     finally {
         if ($null -ne $process -and -not $process.HasExited) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         }
+        if ($null -ne $process) {
+            $process.Dispose()
+        }
     }
+}
+
+function Convert-ToProcessArgumentLine {
+    param([string[]]$Arguments = @())
+
+    $quoted = foreach ($item in $Arguments) {
+        $value = [string]$item
+        if (-not $value) {
+            '""'
+        }
+        elseif ($value -notmatch '[\s"]') {
+            $value
+        }
+        else {
+            '"' + (($value -replace '\\+$', '$0$0') -replace '"', '\"') + '"'
+        }
+    }
+    return ($quoted -join " ")
 }
 
 if (-not $SkipEncodingCheck) {
@@ -161,9 +200,8 @@ if (-not $SkipPytest) {
             "--idle-timeout-seconds",
             "$PytestIdleTimeoutSeconds",
             "--tail-lines-on-failure",
-            "$PytestTailLinesOnFailure",
-            "tests"
-        )
+            "$PytestTailLinesOnFailure"
+        ) + $effectivePytestTargets
         Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds
     }
 }
