@@ -3400,6 +3400,14 @@ def test_gateway_tool_workflow_route_records_failure_metrics(monkeypatch) -> Non
     assert metrics["success"] == 0
     assert metrics["failure"] == 1
     assert metrics["failure_reasons"] == {"tool_not_allowed": 1}
+    metrics_response = client.get("/metrics")
+    assert metrics_response.status_code == 200
+    metrics_text = metrics_response.text
+    failure_reason_metric = (
+        'rag_gateway_governance_failure_reasons_total{event="tool_workflow",reason="tool_not_allowed"}'
+    )
+    assert failure_reason_metric in metrics_text
+    assert "rag_gateway_governance_event_duration_ms_bucket" in metrics_text
 
 
 def test_gateway_tool_workflow_route_requires_chat_permission(monkeypatch) -> None:
