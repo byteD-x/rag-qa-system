@@ -210,6 +210,8 @@ make up
 - `api-gateway`
 - 前端开发服务
 
+容器构建使用服务级 Dockerfile：`apps/services/api-gateway/Dockerfile` 与 `apps/services/knowledge-base/Dockerfile`。仓库根目录的 `.dockerignore` 会排除本地 `.env`、虚拟环境、日志、数据目录、报告产物和本地 Agent 状态，只保留已提交的环境变量示例文件用于说明；当前容器边界覆盖 Gateway、KB Service、Worker、readiness 与 eval 脚本所需的 Web API 运行时，不包含桌面客户端或本机自动化能力。
+
 ### 5. 停止项目
 
 ```powershell

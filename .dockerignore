@@ -1,0 +1,60 @@
+# Git and local editor state
+.git
+.gitignore
+.pytest_cache
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python local environments and build output
+.venv
+venv
+ENV
+env
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+.coverage
+htmlcov
+
+# Frontend dependencies and build output
+node_modules
+apps/web/node_modules
+apps/web/dist
+apps/web/.vite
+apps/web/dist-ssr
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Local secrets; keep checked-in examples available for documentation
+.env
+.env.*
+!.env.example
+!.env.enterprise.example
+!.env.local.example
+!.env.production.example
+!.env.vercel.example
+*.pem
+*.key
+*.cert
+secrets
+
+# Runtime data, reports and local agent state
+data
+logs
+artifacts
+agent_runs
+.codex
+.trae
+.kiro
+
+# OS and temporary files
+.DS_Store
+Thumbs.db
+desktop.ini
+*.orig
+*.bak
