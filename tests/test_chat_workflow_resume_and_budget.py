@@ -552,6 +552,96 @@ def test_build_chat_response_payload_includes_hallucination_rules() -> None:
     assert hallucination["hallucination_score"] > 0.0
     assert hallucination["check_dimensions"]["citation_consistency"] < 1.0
     assert hallucination["items"][0]["type"] == "fake_citation"
+    assert hallucination["verifier"]["enabled"] is False
+    assert hallucination["verifier"]["status"] == "disabled"
+
+
+def test_answer_verifier_fallback_replaces_rule_hallucination(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(
+            hallucination_deep_check_enabled=False,
+            hallucination_auto_correct_threshold=0.5,
+            answer_verifier_enabled=True,
+            answer_verifier_action="fallback",
+            llm_price_tiers=[],
+            llm_input_price_per_1k_tokens=0.0,
+            llm_output_price_per_1k_tokens=0.0,
+            llm_price_currency="CNY",
+        ),
+    )
+    response_payload = {
+        "answer": "退款流程包括申请、审批、打款三步 [1]，另见不存在的证据 [2]。",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "citations": [{"unit_id": "unit-1", "quote": "退款流程包括申请、审批、打款三步。"}],
+        "evidence_path": [{"unit_id": "unit-1"}],
+        "hallucination": {
+            "source": "rules",
+            "hallucination_score": 0.8,
+            "passed": False,
+            "needs_correction": True,
+            "items": [{"type": "fake_citation"}],
+        },
+    }
+
+    result = gateway_chat_service._apply_answer_verifier_gate(
+        prepared={"payload": SimpleNamespace(question="退款流程是什么？")},
+        response_payload=response_payload,
+    )
+
+    verifier = result["hallucination"]["verifier"]
+    assert verifier["status"] == "needs_correction"
+    assert verifier["action"] == "fallback"
+    assert verifier["original_answer_replaced"] is True
+    assert result["answer_mode"] == "weak_grounded"
+    assert result["evidence_status"] == "partial"
+    assert result["refusal_reason"] == "answer_verifier_needs_correction"
+    assert "不存在的证据" not in result["answer"]
+    assert "现有证据不足以支持更强结论" in result["answer"]
+
+
+def test_answer_verifier_refuse_clears_citations(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(
+            hallucination_deep_check_enabled=False,
+            hallucination_auto_correct_threshold=0.5,
+            answer_verifier_enabled=True,
+            answer_verifier_action="refuse",
+        ),
+    )
+    response_payload = {
+        "answer": "Refunds require approval [2].",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "citations": [{"unit_id": "unit-1", "quote": "Refunds require approval."}],
+        "evidence_path": [{"unit_id": "unit-1"}],
+        "hallucination": {"hallucination_score": 0.8, "passed": False, "needs_correction": True},
+    }
+
+    result = gateway_chat_service._apply_answer_verifier_gate(
+        prepared={"payload": SimpleNamespace(question="How do refunds work?")},
+        response_payload=response_payload,
+    )
+
+    verifier = result["hallucination"]["verifier"]
+    assert verifier["action"] == "refuse"
+    assert verifier["original_answer_replaced"] is True
+    assert result["answer_mode"] == "refusal"
+    assert result["evidence_status"] == "insufficient"
+    assert result["grounding_score"] == 0.0
+    assert result["refusal_reason"] == "answer_verifier_needs_correction"
+    assert result["citations"] == []
+    assert result["evidence_path"] == []
 
 
 def test_hallucination_deep_gate_is_disabled_by_default(monkeypatch) -> None:
@@ -647,6 +737,78 @@ def test_hallucination_deep_gate_marks_needs_correction(monkeypatch) -> None:
     assert hallucination["gate"]["status"] == "needs_correction"
     assert hallucination["gate"]["action"] == "review_or_regenerate"
     assert hallucination["rule_check"]["source"] == "rules"
+
+
+def test_hallucination_deep_gate_verifier_fallback_replaces_answer(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+
+    class FakeSettings:
+        configured = True
+
+    class FakeDetector:
+        def __init__(self, **kwargs):
+            pass
+
+        async def detect(self, **kwargs):
+            return SimpleNamespace(
+                hallucination_score=0.82,
+                passed=False,
+                needs_correction=True,
+                check_dimensions={"citation_consistency": 1.0, "number_consistency": 1.0, "llm_overall": 0.18},
+                items=[
+                    SimpleNamespace(
+                        type="unsupported_claim",
+                        severity="high",
+                        description="answer includes an unsupported claim",
+                        location="sentence 1",
+                        evidence_ref="[1]",
+                        suggestion="fallback to cited evidence",
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        gateway_chat_service,
+        "runtime_settings",
+        SimpleNamespace(
+            hallucination_deep_check_enabled=True,
+            hallucination_auto_correct_threshold=0.5,
+            answer_verifier_enabled=True,
+            answer_verifier_action="fallback",
+        ),
+    )
+    monkeypatch.setattr(gateway_chat_service, "load_llm_settings", lambda: FakeSettings())
+    monkeypatch.setattr(gateway_chat_service, "HallucinationDetector", FakeDetector)
+    response_payload = {
+        "answer": "退款需要审批 [1]。经理可以跳过审批流程。",
+        "answer_mode": "grounded",
+        "evidence_status": "grounded",
+        "grounding_score": 0.9,
+        "refusal_reason": "",
+        "citations": [{"unit_id": "unit-1", "quote": "退款需要审批。"}],
+        "evidence_path": [{"unit_id": "unit-1"}],
+        "hallucination": {"hallucination_score": 0.0, "passed": True, "needs_correction": False},
+    }
+
+    result = asyncio.run(
+        gateway_chat_service._apply_hallucination_deep_gate(
+            prepared={"payload": SimpleNamespace(question="退款流程是什么？")},
+            response_payload=response_payload,
+        )
+    )
+
+    hallucination = result["hallucination"]
+    verifier = hallucination["verifier"]
+    assert hallucination["source"] == "rules+llm"
+    assert hallucination["gate"]["status"] == "needs_correction"
+    assert verifier["status"] == "needs_correction"
+    assert verifier["action"] == "fallback"
+    assert verifier["original_answer_replaced"] is True
+    assert result["answer_mode"] == "weak_grounded"
+    assert result["evidence_status"] == "partial"
+    assert result["refusal_reason"] == "answer_verifier_needs_correction"
+    assert "跳过审批流程" not in result["answer"]
+    assert "现有证据不足以支持更强结论" in result["answer"]
 
 
 def test_hallucination_deep_gate_skips_when_llm_is_not_configured(monkeypatch) -> None:

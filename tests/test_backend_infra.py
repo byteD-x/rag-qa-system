@@ -142,6 +142,23 @@ def _load_gateway_module(module_name: str):
     return importlib.reload(module)
 
 
+def test_gateway_runtime_settings_answer_verifier_env_defaults_and_invalid_action(monkeypatch) -> None:
+    monkeypatch.delenv("GATEWAY_ANSWER_VERIFIER_ENABLED", raising=False)
+    monkeypatch.delenv("GATEWAY_ANSWER_VERIFIER_ACTION", raising=False)
+    gateway_config = _load_gateway_module("app.gateway_config")
+
+    defaults = gateway_config.load_gateway_runtime_settings()
+    assert defaults.answer_verifier_enabled is False
+    assert defaults.answer_verifier_action == "fallback"
+
+    monkeypatch.setenv("GATEWAY_ANSWER_VERIFIER_ENABLED", "true")
+    monkeypatch.setenv("GATEWAY_ANSWER_VERIFIER_ACTION", "invalid")
+
+    settings = gateway_config.load_gateway_runtime_settings()
+    assert settings.answer_verifier_enabled is True
+    assert settings.answer_verifier_action == "fallback"
+
+
 def _load_kb_module(module_name: str):
     _prioritize_sys_path(KB_SRC)
 

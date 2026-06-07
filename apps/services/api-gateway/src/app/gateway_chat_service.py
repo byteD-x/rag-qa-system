@@ -10,6 +10,7 @@ import httpx
 from fastapi import HTTPException
 
 from shared.auth import CurrentUser
+from shared.grounded_answering import fallback_answer
 from shared.langchain_chat import build_chat_model
 from shared.prompt_safety import analyze_prompt_safety, apply_safety_response_policy
 from shared.tracing import current_trace_id, ensure_trace_id
@@ -880,6 +881,90 @@ def _build_generation_checkpoint(answer_payload: dict[str, Any], generation_ms: 
     }
 
 
+def _question_from_prepared(prepared: dict[str, Any]) -> str:
+    payload = prepared.get("payload")
+    if isinstance(payload, dict):
+        return str(payload.get("question") or "")
+    return str(getattr(payload, "question", "") or "")
+
+
+def _answer_verifier_action() -> str:
+    action = str(getattr(runtime_settings, "answer_verifier_action", "fallback") or "fallback").strip().lower()
+    return action if action in {"annotate", "fallback", "refuse"} else "fallback"
+
+
+def _apply_answer_verifier_gate(
+    *,
+    prepared: dict[str, Any],
+    response_payload: dict[str, Any],
+) -> dict[str, Any]:
+    hallucination = dict(response_payload.get("hallucination") or {})
+    enabled = bool(getattr(runtime_settings, "answer_verifier_enabled", False))
+    configured_action = _answer_verifier_action()
+    verifier = {
+        "enabled": enabled,
+        "status": "disabled",
+        "action": "allow",
+        "configured_action": configured_action,
+        "original_answer_replaced": False,
+    }
+    if not enabled:
+        hallucination["verifier"] = verifier
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    if (
+        bool(getattr(runtime_settings, "hallucination_deep_check_enabled", False))
+        and str(hallucination.get("source") or "rules") == "rules"
+        and "gate" not in hallucination
+    ):
+        verifier.update({"status": "pending_deep_gate", "action": "allow"})
+        hallucination["verifier"] = verifier
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    if not bool(hallucination.get("needs_correction")):
+        verifier.update({"status": "passed", "action": "allow"})
+        hallucination["verifier"] = verifier
+        response_payload["hallucination"] = hallucination
+        return response_payload
+
+    verifier.update({"status": "needs_correction", "reason": "answer_verifier_needs_correction"})
+    citations = list(response_payload.get("citations") or [])
+    question = _question_from_prepared(prepared)
+    if configured_action == "annotate":
+        verifier["action"] = "annotate"
+    elif configured_action == "refuse":
+        verifier.update({"action": "refuse", "original_answer_replaced": True})
+        response_payload["answer"] = fallback_answer(question, [], "refusal")
+        response_payload["answer_mode"] = "refusal"
+        response_payload["evidence_status"] = "insufficient"
+        response_payload["grounding_score"] = 0.0
+        response_payload["refusal_reason"] = "answer_verifier_needs_correction"
+        response_payload["citations"] = []
+        response_payload["evidence_path"] = []
+    elif str(response_payload.get("answer_mode") or "") in {"grounded", "weak_grounded"}:
+        verifier.update({"action": "fallback", "original_answer_replaced": True})
+        fallback_mode = "weak_grounded" if citations else "refusal"
+        response_payload["answer"] = fallback_answer(question, citations, fallback_mode)
+        response_payload["answer_mode"] = fallback_mode
+        response_payload["evidence_status"] = "partial" if citations else "insufficient"
+        response_payload["grounding_score"] = min(float(response_payload.get("grounding_score") or 0.0), 0.35)
+        response_payload["refusal_reason"] = "answer_verifier_needs_correction"
+    else:
+        verifier.update(
+            {
+                "status": "skipped",
+                "action": "allow",
+                "reason": "unsupported_answer_mode",
+            }
+        )
+
+    hallucination["verifier"] = verifier
+    response_payload["hallucination"] = hallucination
+    return response_payload
+
+
 def _semantic_cache_scope_ids(prepared: dict[str, Any]) -> list[str]:
     scope_snapshot = dict(prepared.get("scope_snapshot") or {})
     scope_ids: set[str] = set()
@@ -1505,7 +1590,7 @@ def build_chat_response_payload(
     hallucination = hallucination_report_to_dict(
         detect_hallucination_rules(final_answer, response_evidence)
     )
-    return {
+    response_payload = {
         "session_id": prepared["session_id"],
         "execution_mode": prepared["execution_mode"],
         "answer": final_answer,
@@ -1537,6 +1622,7 @@ def build_chat_response_payload(
         },
         "cost": cost_meta,
     }
+    return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
 
 async def _apply_hallucination_deep_gate(
@@ -1557,23 +1643,23 @@ async def _apply_hallucination_deep_gate(
     }
     if not enabled:
         response_payload["hallucination"] = hallucination
-        return response_payload
+        return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
     answer = str(response_payload.get("answer") or "").strip()
     if not answer:
         hallucination["gate"].update({"status": "skipped", "reason": "empty_answer"})
         response_payload["hallucination"] = hallucination
-        return response_payload
+        return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
     if str(response_payload.get("answer_mode") or "") == "refusal":
         hallucination["gate"].update({"status": "skipped", "reason": "refusal_answer"})
         response_payload["hallucination"] = hallucination
-        return response_payload
+        return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
     settings = load_llm_settings()
     if not settings.configured:
         hallucination["gate"].update({"status": "skipped", "reason": "llm_not_configured"})
         response_payload["hallucination"] = hallucination
-        return response_payload
+        return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
     try:
         detector = HallucinationDetector(
@@ -1600,7 +1686,7 @@ async def _apply_hallucination_deep_gate(
             }
         )
         response_payload["hallucination"] = hallucination
-        return response_payload
+        return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
     rule_check = dict(hallucination)
     deep_check = hallucination_report_to_dict(report)
@@ -1613,7 +1699,7 @@ async def _apply_hallucination_deep_gate(
         "threshold": threshold,
     }
     response_payload["hallucination"] = deep_check
-    return response_payload
+    return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
 
 def finalize_chat_message(

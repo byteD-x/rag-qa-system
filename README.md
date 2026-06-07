@@ -80,7 +80,7 @@
 - 支持评测基线、回归门禁和反馈闭环
 - **Agent 自主决策**：任务拆解（DAG 并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
 - **推理优化**：L1 精确 / L2 语义 / L3 Prompt 三层缓存、模型健康监控（自动熔断）、请求合并
-- **平台化**：五层分层指令引擎、6 大场景模板（企业 QA/技术支持/合规/培训/数据分析/代码审查）、RAG 幻觉检测、Python SDK
+- **平台化**：五层分层指令引擎、6 大场景模板（企业 QA/技术支持/合规/培训/数据分析/代码审查）、RAG 幻觉检测与可配置答案校验门禁、Python SDK
 
 ## 技术栈
 
@@ -1545,7 +1545,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - **三层记忆**：短期（会话窗口）+ 长期（三元组提取+Qdrant检索）+ 工作记忆（Scratchpad）
 - **五层指令体系**：L1系统→L2场景→L3 Agent→L4会话→L5调用级，优先级合并+冲突检测
 - **场景模板库**：6 大预制场景（企业QA/技术支持/合规审查/培训教练/数据分析/代码审查）
-- **RAG 幻觉检测**：引用一致性+数字一致性+LLM深度分析，自动标记可疑内容
+- **RAG 幻觉检测**：引用一致性+数字一致性+LLM深度分析，自动标记可疑内容；可选答案校验门禁可按 `annotate` / `fallback` / `refuse` 处理可疑回答
 - **Python SDK**：同步/异步双客户端，支持问答/流式/知识库管理/Agent模式
 
 详见 [AI_HIGHLIGHTS.md](AI_HIGHLIGHTS.md) 和 [AGENTS.md](AGENTS.md)。
@@ -1666,12 +1666,15 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `GATEWAY_AGENT_RUNTIME`
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED`
 - `GATEWAY_HALLUCINATION_AUTO_CORRECT_THRESHOLD`
+- `GATEWAY_ANSWER_VERIFIER_ENABLED`
+- `GATEWAY_ANSWER_VERIFIER_ACTION`
 - `KB_QUERY_MAX_IN_FLIGHT_GLOBAL`
 - `KB_QUERY_MAX_IN_FLIGHT_PER_USER`
 
 说明：
 - `GATEWAY_AGENT_RUNTIME=simple` 保持现有 Agent 工具检索链路；设为 `enhanced` 时启用任务拆解/反思增强运行时，失败会自动回退 simple。
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭 LLM 深度幻觉检测，避免额外成本；开启后会在规则检测后追加生成后门禁元数据。
+- `GATEWAY_ANSWER_VERIFIER_ENABLED=false` 默认关闭答案校验门禁；开启后根据规则/LLM 幻觉检测结果执行 `GATEWAY_ANSWER_VERIFIER_ACTION`，支持 `annotate`（仅标记）、`fallback`（降级为保守证据回答）和 `refuse`（拒答并清空引用）。
 
 ## 评测与回归
 
