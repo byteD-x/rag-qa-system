@@ -95,6 +95,22 @@ function Assert-CommandInstalled {
 }
 
 function Get-PythonCommandSpec {
+    $venvPython = Join-Path $script:RepoRoot ".venv\Scripts\python.exe"
+    if (Test-Path $venvPython) {
+        return [PSCustomObject]@{
+            Command       = $venvPython
+            BaseArguments = @()
+        }
+    }
+
+    $posixVenvPython = Join-Path $script:RepoRoot ".venv/bin/python"
+    if (Test-Path $posixVenvPython) {
+        return [PSCustomObject]@{
+            Command       = $posixVenvPython
+            BaseArguments = @()
+        }
+    }
+
     if (Test-CommandInstalled -Name "python") {
         return [PSCustomObject]@{
             Command       = "python"

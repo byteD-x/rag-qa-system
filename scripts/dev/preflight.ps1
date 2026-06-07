@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 
 try {
     $repoRoot = Get-RepoRoot
+    $python = Get-PythonCommandSpec
     Set-Location $repoRoot
 
     Write-Info "Repo root: $repoRoot"
@@ -15,7 +16,7 @@ try {
     Assert-EnvFile
 
     Write-Info "Checking text encodings..."
-    Invoke-ExternalCommand -Command "python" -Arguments @("scripts/quality/check-encoding.py")
+    Invoke-ExternalCommand -Command $python.Command -Arguments (@($python.BaseArguments) + @("scripts/quality/check-encoding.py"))
 
     Write-Info "Building frontend..."
     Invoke-ExternalCommand -Command "npm" -Arguments @("run", "build") -WorkingDirectory (Join-Path $repoRoot "apps/web")
@@ -24,10 +25,10 @@ try {
     Invoke-ExternalCommand -Command "npm" -Arguments @("run", "test:unit") -WorkingDirectory (Join-Path $repoRoot "apps/web")
 
     Write-Info "Compiling Python services..."
-    Invoke-ExternalCommand -Command "python" -Arguments @("-m", "compileall", "packages/python", "apps/services/api-gateway", "apps/services/knowledge-base")
+    Invoke-ExternalCommand -Command $python.Command -Arguments (@($python.BaseArguments) + @("-m", "compileall", "packages/python", "apps/services/api-gateway", "apps/services/knowledge-base"))
 
     Write-Info "Running backend test suite..."
-    Invoke-ExternalCommand -Command "python" -Arguments @("scripts/quality/run_pytest_groups.py", "tests")
+    Invoke-ExternalCommand -Command $python.Command -Arguments (@($python.BaseArguments) + @("scripts/quality/run_pytest_groups.py", "tests"))
 
     Write-Info "Validating compose config..."
     Invoke-ExternalCommand -Command "docker" -Arguments @("compose", "config", "--quiet")

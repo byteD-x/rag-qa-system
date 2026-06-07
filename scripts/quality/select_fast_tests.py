@@ -90,6 +90,12 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "scripts/observability/rag-daily-report.py": [
         "tests/test_observability_report.py",
     ],
+    "scripts/dev/common.ps1": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "scripts/dev/preflight.ps1": [
+        "tests/test_eval_pipeline.py",
+    ],
 }
 
 

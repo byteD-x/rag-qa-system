@@ -640,7 +640,13 @@ def test_fast_test_selector_routes_agent_runtime_modules_to_owned_suites() -> No
 def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() -> None:
     selector = _load_script_module("fast_test_selector_quality_powershell_test", "scripts/quality/select_fast_tests.py")
 
-    targets = selector.select_targets(["scripts/quality/ci-check.ps1"])
+    targets = selector.select_targets(
+        [
+            "scripts/quality/ci-check.ps1",
+            "scripts/dev/common.ps1",
+            "scripts/dev/preflight.ps1",
+        ]
+    )
 
     assert targets == ["tests/test_eval_pipeline.py"]
 
