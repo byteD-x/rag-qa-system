@@ -10,6 +10,8 @@ param(
     [switch]$IncludeDockerBuild,
     [int]$PytestTimeoutSeconds = 900,
     [int]$PytestMaxWorkers = 1,
+    [int]$PytestIdleTimeoutSeconds = 0,
+    [int]$PytestTailLinesOnFailure = 20,
     [int]$PytestTotalTimeoutSeconds = 3600
 )
 
@@ -85,7 +87,9 @@ function Invoke-RepoToolWithTimeout {
             $waitMs = [Math]::Max([Math]::Min($HeartbeatSeconds, 30), 1) * 1000
             $process.WaitForExit($waitMs) | Out-Null
             $elapsed = [int]((Get-Date) - $started).TotalSeconds
-            Write-Info "Still running after ${elapsed}s: $Command $($Arguments -join ' ')"
+            $stdoutBytes = if (Test-Path $stdoutPath) { (Get-Item $stdoutPath).Length } else { 0 }
+            $stderrBytes = if (Test-Path $stderrPath) { (Get-Item $stderrPath).Length } else { 0 }
+            Write-Info "Still running after ${elapsed}s: $Command $($Arguments -join ' ') stdout_bytes=$stdoutBytes stderr_bytes=$stderrBytes"
             if ($elapsed -ge $TimeoutSeconds) {
                 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
                 throw "Command timed out after ${TimeoutSeconds}s: $Command $($Arguments -join ' '). Logs: $stdoutPath $stderrPath"
@@ -154,6 +158,10 @@ if (-not $SkipPytest) {
             "$PytestTimeoutSeconds",
             "--max-workers",
             "$PytestMaxWorkers",
+            "--idle-timeout-seconds",
+            "$PytestIdleTimeoutSeconds",
+            "--tail-lines-on-failure",
+            "$PytestTailLinesOnFailure",
             "tests"
         )
         Invoke-RepoToolWithTimeout -Command $python.Command -Arguments $args -TimeoutSeconds $PytestTotalTimeoutSeconds

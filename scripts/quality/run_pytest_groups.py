@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,7 @@ DEFAULT_LOG_DIR = REPO_ROOT / "logs" / "quality"
 DEFAULT_SUMMARY_OUTPUT = DEFAULT_LOG_DIR / "pytest-groups-summary.json"
 DEFAULT_TIMEOUT_SECONDS = 900
 DEFAULT_HEARTBEAT_SECONDS = 30
+DEFAULT_TAIL_LINES_ON_FAILURE = 20
 DEFAULT_PYTEST_ARGS = ["-q", "-p", "pytest_asyncio.plugin"]
 
 
@@ -36,6 +38,10 @@ class GroupResult:
     timed_out: bool
     stdout_path: Path
     stderr_path: Path
+    timeout_reason: str = ""
+    stdout_bytes: int = 0
+    stderr_bytes: int = 0
+    idle_seconds: float = 0.0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -45,6 +51,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("paths", nargs="*", default=["tests"], help="Test paths or node ids to run.")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--heartbeat-seconds", type=int, default=DEFAULT_HEARTBEAT_SECONDS)
+    parser.add_argument(
+        "--idle-timeout-seconds",
+        type=int,
+        default=0,
+        help="Terminate a group when stdout/stderr logs do not grow for this many seconds. 0 disables it.",
+    )
+    parser.add_argument(
+        "--tail-lines-on-failure",
+        type=int,
+        default=DEFAULT_TAIL_LINES_ON_FAILURE,
+        help="Print the last N stdout/stderr log lines when a group fails or times out. 0 disables it.",
+    )
     parser.add_argument(
         "--max-workers",
         type=int,
@@ -87,6 +105,8 @@ def run_group(
     heartbeat_seconds: int,
     log_dir: Path,
     disable_plugin_autoload: bool = True,
+    idle_timeout_seconds: int = 0,
+    tail_lines_on_failure: int = DEFAULT_TAIL_LINES_ON_FAILURE,
 ) -> GroupResult:
     log_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"{int(time.time() * 1000)}-{_safe_name(group.name)}"
@@ -107,24 +127,42 @@ def run_group(
         disable_plugin_autoload=disable_plugin_autoload,
     )
     timed_out = False
+    timeout_reason = ""
     next_heartbeat_at = started + max(1, heartbeat_seconds)
+    stdout_bytes, stderr_bytes = _log_sizes(stdout_path, stderr_path)
+    last_output_bytes = stdout_bytes + stderr_bytes
+    last_output_at = started
 
     try:
         while True:
             exit_code = process.poll()
             now = time.monotonic()
             elapsed = now - started
+            stdout_bytes, stderr_bytes = _log_sizes(stdout_path, stderr_path)
+            output_bytes = stdout_bytes + stderr_bytes
+            if output_bytes != last_output_bytes:
+                last_output_bytes = output_bytes
+                last_output_at = now
+            idle_seconds = now - last_output_at
             if exit_code is not None:
                 break
             if elapsed >= timeout_seconds:
                 timed_out = True
+                timeout_reason = "hard_timeout"
+                terminate_process_tree(process)
+                exit_code = 124
+                break
+            if idle_timeout_seconds > 0 and idle_seconds >= idle_timeout_seconds:
+                timed_out = True
+                timeout_reason = "idle_timeout"
                 terminate_process_tree(process)
                 exit_code = 124
                 break
             if now >= next_heartbeat_at:
                 print(
                     f"[pytest-group] still running {group.name}: elapsed={elapsed:.1f}s "
-                    f"pid={process.pid}",
+                    f"pid={process.pid} stdout_bytes={stdout_bytes} stderr_bytes={stderr_bytes} "
+                    f"idle={idle_seconds:.1f}s",
                     flush=True,
                 )
                 next_heartbeat_at = now + max(1, heartbeat_seconds)
@@ -133,11 +171,14 @@ def run_group(
         stdout_handle.close()
         stderr_handle.close()
 
-    elapsed = time.monotonic() - started
+    finished = time.monotonic()
+    elapsed = finished - started
+    stdout_bytes, stderr_bytes = _log_sizes(stdout_path, stderr_path)
+    idle_seconds = finished - last_output_at
     if timed_out:
         print(
             f"[pytest-group] timeout {group.name}: elapsed={elapsed:.1f}s "
-            f"logs={stdout_path} {stderr_path}",
+            f"reason={timeout_reason or 'timeout'} logs={stdout_path} {stderr_path}",
             flush=True,
         )
     elif exit_code == 0:
@@ -148,6 +189,13 @@ def run_group(
             f"elapsed={elapsed:.1f}s logs={stdout_path} {stderr_path}",
             flush=True,
         )
+    if timed_out or exit_code != 0:
+        _print_log_tail(
+            group,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            line_count=max(0, int(tail_lines_on_failure)),
+        )
 
     return GroupResult(
         group=group,
@@ -156,6 +204,10 @@ def run_group(
         timed_out=timed_out,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        timeout_reason=timeout_reason,
+        stdout_bytes=stdout_bytes,
+        stderr_bytes=stderr_bytes,
+        idle_seconds=idle_seconds,
     )
 
 
@@ -169,6 +221,8 @@ def run_groups(
     log_dir: Path,
     disable_plugin_autoload: bool = True,
     max_workers: int = 1,
+    idle_timeout_seconds: int = 0,
+    tail_lines_on_failure: int = DEFAULT_TAIL_LINES_ON_FAILURE,
 ) -> list[GroupResult]:
     workers = max(1, int(max_workers))
     if workers == 1:
@@ -182,6 +236,8 @@ def run_groups(
                 heartbeat_seconds=heartbeat_seconds,
                 log_dir=log_dir,
                 disable_plugin_autoload=disable_plugin_autoload,
+                idle_timeout_seconds=idle_timeout_seconds,
+                tail_lines_on_failure=tail_lines_on_failure,
             )
             results.append(result)
             if result.exit_code != 0:
@@ -203,6 +259,8 @@ def run_groups(
                     heartbeat_seconds=heartbeat_seconds,
                     log_dir=log_dir,
                     disable_plugin_autoload=disable_plugin_autoload,
+                    idle_timeout_seconds=idle_timeout_seconds,
+                    tail_lines_on_failure=tail_lines_on_failure,
                 ): batch_start + offset
                 for offset, group in enumerate(batch)
             }
@@ -262,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=args.log_dir,
         disable_plugin_autoload=not args.enable_plugin_autoload,
         max_workers=max_workers,
+        idle_timeout_seconds=max(0, int(args.idle_timeout_seconds)),
+        tail_lines_on_failure=max(0, int(args.tail_lines_on_failure)),
     )
     elapsed = time.monotonic() - started
     _print_summary(results, elapsed_seconds=elapsed)
@@ -382,9 +442,52 @@ def _result_to_dict(result: GroupResult) -> dict[str, object]:
         "exit_code": result.exit_code,
         "elapsed_seconds": round(result.elapsed_seconds, 4),
         "timed_out": result.timed_out,
+        "timeout_reason": result.timeout_reason,
+        "stdout_bytes": result.stdout_bytes,
+        "stderr_bytes": result.stderr_bytes,
+        "idle_seconds": round(result.idle_seconds, 4),
         "stdout_log": str(result.stdout_path),
         "stderr_log": str(result.stderr_path),
     }
+
+
+def _log_sizes(stdout_path: Path, stderr_path: Path) -> tuple[int, int]:
+    return _file_size(stdout_path), _file_size(stderr_path)
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _print_log_tail(
+    group: TestGroup,
+    *,
+    stdout_path: Path,
+    stderr_path: Path,
+    line_count: int,
+) -> None:
+    if line_count <= 0:
+        return
+    for label, path in (("stdout", stdout_path), ("stderr", stderr_path)):
+        lines = _read_tail_lines(path, line_count)
+        if not lines:
+            continue
+        print(f"[pytest-group] {group.name} {label} tail ({len(lines)} lines):", flush=True)
+        for line in lines:
+            print(f"[pytest-group] {label}> {line}", flush=True)
+
+
+def _read_tail_lines(path: Path, line_count: int) -> list[str]:
+    if line_count <= 0:
+        return []
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            return list(deque((line.rstrip("\r\n") for line in handle), maxlen=line_count))
+    except OSError:
+        return []
 
 
 def _subprocess_env(*, disable_plugin_autoload: bool) -> dict[str, str]:

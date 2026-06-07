@@ -590,6 +590,136 @@ def test_pytest_group_runner_timeout_is_actionable(monkeypatch, tmp_path: Path) 
     assert result.stdout_path.parent == tmp_path
 
 
+def test_pytest_group_runner_heartbeat_reports_log_progress(monkeypatch, tmp_path: Path, capsys) -> None:
+    runner = _load_script_module("pytest_group_runner_heartbeat_test", "scripts/quality/run_pytest_groups.py")
+
+    class FakeProcess:
+        pid = 23456
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def poll(self):
+            self.calls += 1
+            return None if self.calls == 1 else 0
+
+    class FakeHandle:
+        def close(self) -> None:
+            return None
+
+    def fake_start_process(_command, *, stdout_path: Path, stderr_path: Path, disable_plugin_autoload: bool = True):
+        stdout_path.write_bytes(b"hello\n")
+        stderr_path.write_bytes(b"err\n")
+        return FakeProcess(), FakeHandle(), FakeHandle()
+
+    ticks = iter([0.0, 2.0, 2.1, 2.2])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "_start_process", fake_start_process)
+
+    result = runner.run_group(
+        runner.TestGroup(name="tests/test_progress.py", args=["tests/test_progress.py"]),
+        python="python",
+        pytest_args=["-q"],
+        timeout_seconds=10,
+        heartbeat_seconds=1,
+        log_dir=tmp_path,
+    )
+
+    output = capsys.readouterr().out
+    assert result.exit_code == 0
+    assert "stdout_bytes=6" in output
+    assert "stderr_bytes=4" in output
+    assert "idle=2.0s" in output
+
+
+def test_pytest_group_runner_idle_timeout_is_actionable(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_script_module("pytest_group_runner_idle_timeout_test", "scripts/quality/run_pytest_groups.py")
+
+    class FakeProcess:
+        pid = 34567
+
+        def poll(self):
+            return None
+
+    class FakeHandle:
+        def close(self) -> None:
+            return None
+
+    terminated: list[int] = []
+
+    def fake_start_process(_command, *, stdout_path: Path, stderr_path: Path, disable_plugin_autoload: bool = True):
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return FakeProcess(), FakeHandle(), FakeHandle()
+
+    ticks = iter([0.0, 6.0, 6.1])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "_start_process", fake_start_process)
+    monkeypatch.setattr(runner, "terminate_process_tree", lambda process: terminated.append(process.pid))
+
+    result = runner.run_group(
+        runner.TestGroup(name="tests/test_idle.py", args=["tests/test_idle.py"]),
+        python="python",
+        pytest_args=["-q"],
+        timeout_seconds=30,
+        heartbeat_seconds=1,
+        log_dir=tmp_path,
+        idle_timeout_seconds=5,
+    )
+
+    assert result.exit_code == 124
+    assert result.timed_out is True
+    assert result.timeout_reason == "idle_timeout"
+    assert result.idle_seconds == 6.1
+    assert terminated == [34567]
+
+
+def test_pytest_group_runner_failure_prints_limited_log_tail(monkeypatch, tmp_path: Path, capsys) -> None:
+    runner = _load_script_module("pytest_group_runner_tail_test", "scripts/quality/run_pytest_groups.py")
+
+    class FakeProcess:
+        pid = 45678
+
+        def poll(self):
+            return 2
+
+    class FakeHandle:
+        def close(self) -> None:
+            return None
+
+    def fake_start_process(_command, *, stdout_path: Path, stderr_path: Path, disable_plugin_autoload: bool = True):
+        stdout_path.write_text("out-1\nout-2\nout-3\n", encoding="utf-8")
+        stderr_path.write_text("err-1\nerr-2\nerr-3\n", encoding="utf-8")
+        return FakeProcess(), FakeHandle(), FakeHandle()
+
+    ticks = iter([0.0, 0.2, 0.3])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner, "_start_process", fake_start_process)
+
+    result = runner.run_group(
+        runner.TestGroup(name="tests/test_failure.py", args=["tests/test_failure.py"]),
+        python="python",
+        pytest_args=["-q"],
+        timeout_seconds=30,
+        heartbeat_seconds=1,
+        log_dir=tmp_path,
+        tail_lines_on_failure=2,
+    )
+
+    output = capsys.readouterr().out
+    assert result.exit_code == 2
+    assert "stdout tail (2 lines)" in output
+    assert "stderr tail (2 lines)" in output
+    assert "stdout> out-2" in output
+    assert "stdout> out-3" in output
+    assert "stdout> out-1" not in output
+    assert "stderr> err-2" in output
+    assert "stderr> err-3" in output
+    assert "stderr> err-1" not in output
+
+
 def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path) -> None:
     runner = _load_script_module("pytest_group_runner_summary_test", "scripts/quality/run_pytest_groups.py")
     passed = runner.GroupResult(
@@ -607,6 +737,10 @@ def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path
         timed_out=True,
         stdout_path=tmp_path / "slow.out.log",
         stderr_path=tmp_path / "slow.err.log",
+        timeout_reason="hard_timeout",
+        stdout_bytes=42,
+        stderr_bytes=9,
+        idle_seconds=3.5,
     )
 
     summary = runner.build_summary([passed, timeout], scheduled_groups=3, max_workers=4)
@@ -619,6 +753,10 @@ def test_pytest_group_runner_summary_records_failures_and_slowest(tmp_path: Path
     assert summary["timed_out_groups"] == 1
     assert summary["slowest_groups"][0]["group"] == "tests/test_slow.py"
     assert summary["results"][1]["status"] == "timeout"
+    assert summary["results"][1]["timeout_reason"] == "hard_timeout"
+    assert summary["results"][1]["stdout_bytes"] == 42
+    assert summary["results"][1]["stderr_bytes"] == 9
+    assert summary["results"][1]["idle_seconds"] == 3.5
     assert summary["results"][1]["stdout_log"].endswith("slow.out.log")
 
     wall_clock_summary = runner.build_summary(
@@ -711,13 +849,13 @@ def test_pytest_group_runner_main_records_parallel_worker_count(monkeypatch, tmp
         runner.TestGroup(name="tests/test_first.py", args=["tests/test_first.py"]),
         runner.TestGroup(name="tests/test_second.py", args=["tests/test_second.py"]),
     ]
-    observed_workers: list[int] = []
+    observed_kwargs: list[dict[str, object]] = []
 
     def fake_build_groups(_paths):
         return groups
 
     def fake_run_groups(_groups, **kwargs):
-        observed_workers.append(kwargs["max_workers"])
+        observed_kwargs.append(kwargs)
         return [
             runner.GroupResult(
                 group=group,
@@ -736,11 +874,25 @@ def test_pytest_group_runner_main_records_parallel_worker_count(monkeypatch, tmp
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
 
     summary_path = tmp_path / "pytest-summary.json"
-    exit_code = runner.main(["--max-workers", "3", "--summary-output", str(summary_path), "tests"])
+    exit_code = runner.main(
+        [
+            "--max-workers",
+            "3",
+            "--idle-timeout-seconds",
+            "12",
+            "--tail-lines-on-failure",
+            "7",
+            "--summary-output",
+            str(summary_path),
+            "tests",
+        ]
+    )
     payload = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert exit_code == 0
-    assert observed_workers == [3]
+    assert observed_kwargs[0]["max_workers"] == 3
+    assert observed_kwargs[0]["idle_timeout_seconds"] == 12
+    assert observed_kwargs[0]["tail_lines_on_failure"] == 7
     assert payload["status"] == "passed"
     assert payload["max_workers"] == 3
     assert payload["completed_groups"] == 2
