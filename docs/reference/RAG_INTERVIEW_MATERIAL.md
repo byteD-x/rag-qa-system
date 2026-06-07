@@ -4,7 +4,7 @@
 
 这份材料默认面向 **AI 应用 / RAG 后端工程师** 面试。讲述时建议把能力分成三类：
 
-- **已实现**：本地 embedding 抽象、Qdrant 向量召回、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、人工接管队列本地原子认领、Agent 任务拆解/反思/记忆/工具注册、回答级缓存体系（L1 精确，L2 可选语义命中，L3 Prompt Cache）、模型健康熔断、五层指令体系、场景模板、RAG 幻觉检测、反馈接口、运营分析看板和 Python SDK。
+- **已实现**：本地 embedding 抽象、Qdrant 向量召回、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、人工接管队列本地原子认领、Agent 任务拆解/反思/记忆/工具注册、回答级缓存体系（L1 精确，L2 可选语义命中，L3 Prompt Cache）、运行时治理指标、模型健康熔断、五层指令体系、场景模板、RAG 幻觉检测、反馈接口、运营分析看板和 Python SDK。
 - **已验证**：最小 deterministic fixture 可以跑通 retrieval ablation、embedding benchmark、local ingest benchmark，并产出 `recall@K`、`MRR`、`NDCG`、ingest throughput 报告；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项。
 - **可选增强 / 待优化**：外部 embedding provider、Cross-Encoder rerank、动态权重、Redis / 数据库锁生产级人工接管队列、真实业务压测指标、真实业务标注集与自动事实核查报告。没有报告支撑前，不把延迟、吞吐、命中率提升写成确定收益。
 
@@ -21,6 +21,7 @@
 | 低成本路线怎么落地 | 默认本地 embedding + Qdrant + PostgreSQL FTS + 结构信号 + weighted RRF + 启发式 rerank，外部模型只作为增强 | `packages/python/shared/embeddings.py`、`packages/python/shared/rerank.py` |
 | 怎么避免“感觉效果好” | 用 deterministic fixture 跑 retrieval ablation、embedding benchmark、local ingest benchmark，产出 recall@K、MRR、NDCG 和吞吐报告 | `scripts/evaluation/*`、`tests/fixtures/evals/*` |
 | 如何诚实表达效果 | 最小 fixture 只能证明链路可跑；真实延迟、QPS、成本、准确率和幻觉率必须由目标数据集与压测报告支撑 | `README.md`、`AI_HIGHLIGHTS.md` |
+| 如何排查工具治理 | `metrics-summary` 和 `rag_gateway_governance_*` 只展示 Tool Workflow / Prompt rollback 聚合状态、耗时和短失败原因，不暴露 prompt 或工具输出 | `governance_metrics.py`、`gateway_system_routes.py` |
 
 ## 第 1 部分：项目核心架构总览
 
@@ -732,7 +733,7 @@
 ### 7. 问题："你们如何评估 RAG 系统的效果？"
 
 - **考察点**：评估机制和效果衡量能力
-- **高质量回答**："仓库提供离线评测脚本和最小 fixture，可以跑 retrieval ablation、embedding benchmark、local ingest benchmark，并输出 recall@K、MRR、NDCG 和 ingest throughput。线上侧有反馈接口和分析看板，用于观察满意度、zero-hit、质量分布和成本趋势。真实业务准确率、幻觉率和延迟仍需要目标数据集与压测报告补充。"
+- **高质量回答**："仓库提供离线评测脚本和最小 fixture，可以跑 retrieval ablation、embedding benchmark、local ingest benchmark，并输出 recall@K、MRR、NDCG 和 ingest throughput。线上侧有反馈接口、分析看板和运行时治理指标，用于观察满意度、zero-hit、质量分布、成本趋势以及 Tool Workflow/Prompt rollback 的聚合状态。真实业务准确率、幻觉率和延迟仍需要目标数据集与压测报告补充。"
 - **下一层追问**："人工评估的具体流程是什么？"
 - **下一层回答**："人工评估主要由领域专家完成，他们会对随机抽取的查询结果和回答进行评分，包括检索相关性（1-5 分）、回答准确性（1-5 分）、幻觉情况（有无）等。评估结果会用于优化系统配置和算法。"
 - **支撑类型**：代码可支撑离线评测、反馈接口和分析看板；真实业务效果指标待数据集与报告支撑
@@ -796,7 +797,7 @@
 ### 15. 问题："如果让你重做一版，你会怎么优化？"
 
 - **考察点**：系统优化能力和前瞻性思维
-- **高质量回答**："如果重做一版，我会从以下几个方面优化：1）实现基于语义的文本切片，提高切片质量；2）引入更先进的重排序模型，减少检索噪声；3）实现更完善的评估机制，包括自动评估和用户反馈收集；4）优化成本控制，引入动态参数调整和更高效的模型；5）增强系统的可观测性，实现全面的监控和日志；6）实现基于用户反馈的检索优化，持续改进系统效果。"
+- **高质量回答**："如果重做一版，我会从以下几个方面优化：1）实现基于语义的文本切片，提高切片质量；2）引入更先进的重排序模型，减少检索噪声；3）实现更完善的评估机制，包括自动评估和用户反馈收集；4）优化成本控制，引入动态参数调整和更高效的模型；5）增强系统的可观测性，把现有 trace、metrics-summary 和治理指标继续扩展为生产级监控；6）实现基于用户反馈的检索优化，持续改进系统效果。"
 - **下一层追问**："为什么选择这些优化方向？"
 - **下一层回答**："这些优化方向都是基于当前系统的局限性和 RAG 技术的发展趋势确定的。基于语义的切片能提高检索和生成效果，先进的重排序模型能减少噪声，完善的评估机制能指导系统优化，成本控制能降低运营成本，可观测性能提高系统的可靠性，基于用户反馈的优化能持续改进系统效果。"
 - **支撑类型**：优化思路
@@ -915,7 +916,7 @@
 1. **基于语义的切片**：当前使用固定窗口切片
 2. **先进的重排序模型**：当前使用简单的重排序
 3. **动态参数调整**：当前使用固定参数
-4. **生产级 SLO 与容量规划**：当前有 trace、metrics 和分析看板，但没有生产 SLA 报告
+4. **生产级 SLO 与容量规划**：当前有 trace、metrics-summary、运行时治理指标和分析看板，但没有生产 SLA 报告
 5. **反馈自动优化**：当前有反馈接口和看板，尚未自动闭环到检索权重或模型策略
 6. **独立事实核查报告**：当前有幻觉检测入口，仍需要业务标注集和人工复核机制验证
 7. **多模态支持**：当前只支持文本

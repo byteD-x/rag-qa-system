@@ -8,7 +8,7 @@
 
 | 分类 | 当前口径 |
 |---|---|
-| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
+| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、运行时治理指标、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
 | 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
 | 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
 | 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取或财务级结算完成 |
@@ -239,6 +239,7 @@
 | 如何证明效果 | 最小 fixture 证明评测链路，真实业务数据再补压测和标注集 | `scripts/evaluation/*`、`tests/fixtures/evals/*` |
 | 如何控制幻觉 | grounded answer、引用、证据不足降级、安全测试；不宣称固定幻觉率 | `grounded_answering.py`、`test_safety_guardrails.py` |
 | 为什么要 LangGraph | 阶段边界、恢复、审计、节点级测试，而不是堆长链 | `retrieve.py`、`test_langgraph_runtime.py` |
+| 如何观测工具治理 | Tool Workflow / Prompt rollback 只记录聚合计数、成功率、耗时和短失败原因，JSON 摘要与 Prometheus 指标可排障 | `governance_metrics.py`、`gateway_system_routes.py` |
 
 ## STAR 6：从硬编码工具到可扩展 Agent 工具生态
 
@@ -254,12 +255,13 @@
 - MCP adapter 只暴露 `kb_scope_summary`、`workflow_trace_summary`、`tool_registry_stats` 三个摘要工具
 - 内置工具结果缓存（相同参数+TTL）、LRU 驱逐、执行统计（成功率/平均延迟）
 - `execute_parallel()` 支持无依赖工具并发执行
+- 运行时治理指标通过 `governance_metrics` 聚合 Tool Workflow / Prompt rollback 成功率、耗时和短失败原因，并通过 `metrics-summary` 与 `rag_gateway_governance_*` 暴露
 
 **Result**：
 
 - 新工具可通过注册中心独立扩展，无需在最终回答链路里新增任意执行入口
 - 工具执行支持超时、缓存和统计，最终回答阶段默认关闭工具调用并只允许一轮受控只读摘要工具调用
-- 测试覆盖注册/执行/缓存/统计、最终回答工具准入、Tool Workflow 和只读 MCP adapter
+- 测试覆盖注册/执行/缓存/统计、最终回答工具准入、Tool Workflow、运行时治理指标和只读 MCP adapter
 
 **技术难点**：需要同时兼容 OpenAI function-calling 和 LangChain StructuredTool 两种格式。
 
@@ -325,7 +327,7 @@
 - 修复并完善检索调试工作台，统一前后端 `/kb/retrieve/debug` 契约，展示文档标题、章节、引用原文、信号分数、证据路径和 retrieval stats，使 RAG 召回过程可演示、可追问、可定位。
 - 补齐 RAG 离线评测闭环，新增 deterministic retrieval fixture 和 local ingest fixture，打通 retrieval ablation、embedding benchmark、local ingest benchmark 与 CI smoke，输出 recall@K、MRR、NDCG 和 ingest throughput 报告。
 - 建立面试材料的指标诚实边界，将未压测的延迟、吞吐、命中率提升、幻觉率下降标为待验证，避免把最小 fixture 的验证结果包装成真实业务收益。
-- 设计可扩展 Agent 工具注册中心，支持装饰器注册、OpenAI/LangChain schema 生成、结果缓存、执行统计与只读 MCP adapter，新增工具可在注册中心内独立扩展。
+- 设计可扩展 Agent 工具注册中心，支持装饰器注册、OpenAI/LangChain schema 生成、结果缓存、执行统计、运行时治理指标与只读 MCP adapter，新增工具可在注册中心内独立扩展。
 - 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
 - 构建回答级缓存体系（L1 精确/L2 可选语义命中/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
@@ -363,5 +365,5 @@ cd apps\web; npm run test:unit; npm run build
 ## 简历资料维护口径
 
 - 本文作为 RAG-QA 的技术难题与解决方案入口，配套亮点文档为 `AI_HIGHLIGHTS.md`。
-- 可直接引用的难题包括检索调试可解释性、低成本混合检索、离线评测回归、grounded answer 和 LangGraph 可恢复运行时。
+- 可直接引用的难题包括检索调试可解释性、低成本混合检索、离线评测回归、grounded answer、LangGraph 可恢复运行时和受控工具治理观测。
 - 未经真实业务标注集、压测或成本报告验证的数字，不写成确定收益，只保留为“待补材料”。
