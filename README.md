@@ -1592,6 +1592,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 
 - `summary.estimated_cost` 来自聊天消息 usage 与本地模型定价的估算。
 - `summary.provider_billed_cost_cents` 与 `provider_billing.*` 来自 `provider_billing_records`，用于展示供应商账单样本或外部结算系统回填成本。
+- `usage_reconciliation` 是当前文档中的诊断对账口径：在同一看板里并列展示本地估算成本与导入的 provider billed cost，辅助核对 token 与账单样本差异。
 - 平台管理员可通过 `POST /api/v1/admin/costs/provider-billing-records` 导入账单记录；当前不自动拉取 OpenAI 或云厂商账单。
 
 ### 9. 知识库运维总览工作台

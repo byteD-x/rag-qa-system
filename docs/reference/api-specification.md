@@ -760,6 +760,7 @@ Query 参数：
 
 - `estimated_cost` 是基于聊天消息 usage 与本地模型定价的估算成本。
 - `provider_billed_cost_cents` 与 `provider_billing.*` 聚合平台管理员导入的 provider billing 记录。
+- `usage_reconciliation` 指这组 usage 诊断对账口径，不是额外响应字段；它用 `summary.cost_source_counts` 标出本地估算轮次与 provider billing 记录数，并通过 `provider_billing.by_currency`、`by_provider`、`by_route`、`trend` 展示导入账单的聚合结果。
 - 当前接口不自动拉取供应商账单；生产对账应由外部结算任务或后台系统调用导入接口。
 
 `funnel` 关键字段：
@@ -952,6 +953,7 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 - `billed_cost_cents`、`input_tokens`、`output_tokens` 必须为非负整数。
 - `currency` 会统一转为大写，默认 `CNY`。
 - `user_id` 未传时默认归属导入管理员。
+- 导入记录按 `provider`、`external_id`、`route_key`、`currency`、`billed_at` 等字段参与看板聚合；`usage_reconciliation` 只用于运营诊断，不声明自动供应商账单拉取或财务级结算完成。
 
 响应示例：
 

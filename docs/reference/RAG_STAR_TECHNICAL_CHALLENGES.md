@@ -8,10 +8,10 @@
 
 | 分类 | 当前口径 |
 |---|---|
-| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、三层语义缓存、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK** |
+| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、三层语义缓存、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
 | 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
 | 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
-| 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省 |
+| 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取或财务级结算完成 |
 
 ## STAR 1：把 RAG 演示链路从“能跑”打磨成“能解释”
 
@@ -310,6 +310,7 @@
 - 三层缓存已具备精确/语义/Prompt Cache 分层与统计能力；真实命中率需要以目标业务数据和压测报告确认
 - 模型故障<3次连续失败自动摘除，恢复后自动重新上线
 - 简单问候类问题可路由到经济模型；综合成本收益不写固定百分比，需以部署环境报告为准
+- `usage_reconciliation` 可在运营看板里并列展示本地估算成本与导入 provider billing 记录，用作诊断对账；自动账单拉取、完整租户结算和真实节省比例仍保持待验证边界。
 
 **技术难点**：语义缓存的误命中风险（相似但不同的问题返回相同答案）和缓存失效时机。
 
