@@ -67,7 +67,13 @@
 
 `POST /api/knowledge_base/batch-dry-run` 提供多文档分块预览摘要。请求体只接收 `documents` 数组，每个元素使用内联 `content`，可选 `doc_id` / `document_id` 与 `file_name`；服务端最多接收 20 篇、合计 300000 字符。响应只返回文档数、总字符数、section/chunk 计数、字符范围和脱敏后的叶子文件名，不返回原文、chunk text、embedding 或完整路径。
 
-该入口只用于预览分块规模和治理操作前的安全检查，不读取 `source_path`，不扫描目录，不上传文件，不写入数据库或向量库，也不触发批量 rebuild。
+该入口只用于预览分块规模和治理操作前的安全检查，不读取 `source_file` / `source_path`，不扫描目录，不上传文件，不写入数据库或向量库，也不触发批量 rebuild。
+
+## Batch ingest API
+
+`POST /api/knowledge_base/batch-ingest` 提供受控的 Web API 批量写入口。请求体只接收 `documents` 数组，每个元素必须提供 `base_id` 与内联 `content`，可选 `doc_id` / `document_id`、`file_name` 与 `category`；服务端会按顺序创建文档、写入 section/chunk，并触发现有向量索引。
+
+该入口不同于 batch dry-run：它会写入数据库和向量库，但仍不读取 `source_file` / `source_path`，不扫描目录，不上传文件，不批量 rebuild/delete，也不接入桌面设置页。响应只返回聚合计数、服务端生成的文档 ID 和脱敏文件名，不返回正文、chunk text、embedding 或完整路径。
 
 ## Notes
 

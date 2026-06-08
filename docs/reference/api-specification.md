@@ -457,8 +457,36 @@ SSE 流式回答，事件顺序：
 
 - `documents` 必须是非空数组，最多 20 篇。
 - 所有 `documents[].content` 合计最多 300000 字符。
-- 每个文档只接收内联 `content`；`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
+- 每个文档只接收内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
 - 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
+
+### `POST /api/knowledge_base/batch-ingest`
+
+批量写入接口，仅用于把请求体内联多文档文本写入指定知识库并索引 section/chunk。该接口不会读取 `source_file` / `source_path` 指向的本机文件，不扫描目录，不上传文件，不执行批量 rebuild/delete，也不接入桌面设置页。
+
+请求关键字段：
+
+```json
+{
+  "documents": [
+    {
+      "base_id": "00000000-0000-0000-0000-000000000000",
+      "doc_id": "doc-local-1",
+      "file_name": "expense-policy.txt",
+      "content": "inline document text..."
+    }
+  ]
+}
+```
+
+规则：
+
+- 要求 `kb.write` 权限，并按 `base_id` 校验知识库访问范围。
+- `documents` 必须是非空数组，最多 20 篇；所有 `documents[].content` 合计最多 300000 字符。
+- 每个文档必须提供 `base_id` 和内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
+- 服务端生成真实 `document_id`，客户端传入的 `doc_id` / `document_id` 仅作为脱敏后的输入标识回显。
+- 全部成功返回 HTTP 200；非法 payload 返回 HTTP 400；向量运行时不可用返回 HTTP 409；任一文档业务失败返回 HTTP 400 的聚合摘要。
+- 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、脱敏文件名和服务端生成的文档 ID；不会返回正文、chunk text、embedding 或完整路径。
 
 ### 视觉资产
 

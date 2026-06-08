@@ -19,6 +19,7 @@ FORBIDDEN_DOCUMENT_FIELDS = {
     "embedding",
     "embeddings",
     "path",
+    "source_file",
     "source_path",
     "storage_path",
 }

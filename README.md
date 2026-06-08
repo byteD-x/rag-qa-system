@@ -1344,6 +1344,7 @@ curl -X POST http://localhost:8300/api/v1/kb/connectors \
 - `/workspace/kb/governance` 已开放单文档受控 rebuild 操作：必须先对当前文档 payload 执行 dry-run，且本地签名与当前 payload 一致后才会调用固定 `POST /api/knowledge_base/rebuild`
 - rebuild 入口只消费已选中的文档 ID，不提供文件上传、目录扫描、任意路径读取或手工输入 `source_path`
 - `POST /api/knowledge_base/batch-dry-run` 仅对请求体内联 `documents[].content` 做多文档分块预览摘要，返回文档数、字符数、section/chunk 计数和脱敏文件名；不会读取本机路径、上传文件、写入向量库或触发批量 rebuild
+- `POST /api/knowledge_base/batch-ingest` 仅批量写入请求体内联 `documents[].content`，按顺序创建文档并索引 section/chunk；不会读取本机路径、上传文件、执行批量 rebuild/delete 或接入桌面设置页
 - 可以通过 `POST /api/v1/kb/retrieve/debug` 只看召回和 rerank 结果，不触发 LLM
 
 这对运营或知识管理员的意义是：能更快定位“为什么没召回”“为什么召回错了”“哪些切片应该被人工修正”。

@@ -319,6 +319,8 @@ def _load_kb_module(module_name: str):
         "app.main",
         "app.kb_batch_dry_run",
         "app.kb_batch_dry_run_routes",
+        "app.kb_batch_ingest",
+        "app.kb_batch_ingest_routes",
         "app.kb_query_routes",
         "app.kb_query_helpers",
         "app.parsing",
@@ -4321,6 +4323,205 @@ def test_gateway_knowledge_batch_dry_run_uses_exact_proxy(monkeypatch) -> None:
             "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
             "service_path": "/api/knowledge_base/batch-dry-run",
             "request_path": "/api/knowledge_base/batch-dry-run",
+        }
+    ]
+    assert blocked.status_code == 404
+
+
+def test_knowledge_batch_ingest_route_writes_inline_documents_without_raw_content(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_batch_ingest = importlib.import_module("app.kb_batch_ingest")
+    kb_batch_ingest_routes = importlib.import_module("app.kb_batch_ingest_routes")
+    executed: list[tuple[str, object]] = []
+
+    class _Cursor:
+        def execute(self, query, params=None):
+            executed.append((str(query), params))
+
+        def executemany(self, query, params_seq):
+            executed.append((str(query), list(params_seq)))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def commit(self):
+            executed.append(("COMMIT", None))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_batch_ingest_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_batch_ingest, "ensure_vector_store", lambda: {"collection": "kb-evidence"})
+    monkeypatch.setattr(kb_batch_ingest, "ensure_base_exists", lambda *args, **kwargs: {"id": "base-1"})
+    monkeypatch.setattr(kb_batch_ingest, "index_document_sections", lambda document_id: {"indexed": 1})
+    monkeypatch.setattr(kb_batch_ingest, "index_document_chunks", lambda document_id: {"indexed": 2})
+    monkeypatch.setattr(kb_batch_ingest.db, "connect", lambda: _Connection())
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    secret_sentence = "The import secret should not be returned."
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/batch-ingest",
+        json={
+            "documents": [
+                {
+                    "base_id": "base-1",
+                    "doc_id": r"C:\secret\finance\doc-1",
+                    "file_name": r"C:\secret\finance\expense-policy.txt",
+                    "content": "Overview\n" + secret_sentence + "\n" + ("approval rule " * 120),
+                },
+                {
+                    "base_id": "base-1",
+                    "document_id": "doc-2",
+                    "file_name": "/private/legal/handbook.txt",
+                    "content": "Rules\n" + ("travel limit " * 90),
+                },
+            ]
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["document_count"] == 2
+    assert payload["succeeded_documents"] == 2
+    assert payload["failed_documents"] == 0
+    assert payload["chunk_count"] >= 2
+    assert payload["indexed_chunks"] == 4
+    assert payload["documents"][0]["input_doc_id"] == "doc-1"
+    assert payload["documents"][0]["file_name"] == "expense-policy.txt"
+    assert payload["documents"][1]["file_name"] == "handbook.txt"
+    response_text = response.text
+    assert secret_sentence not in response_text
+    assert "C:\\secret\\finance" not in response_text
+    assert "/private/legal" not in response_text
+    assert "chunk_text" not in response_text
+    assert "embedding" not in response_text
+    assert any("INSERT INTO kb_documents" in query for query, _params in executed)
+    assert any("INSERT INTO kb_sections" in query for query, _params in executed)
+    assert any("INSERT INTO kb_chunks" in query for query, _params in executed)
+
+
+def test_knowledge_batch_ingest_route_rejects_invalid_payloads(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_batch_ingest_routes = importlib.import_module("app.kb_batch_ingest_routes")
+    monkeypatch.setattr(kb_batch_ingest_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+    cases = [
+        ([], "knowledge_batch_payload_invalid"),
+        ({"documents": [{"base_id": "", "content": "x"}]}, "knowledge_batch_base_required"),
+        ({"documents": [{"base_id": "base-1", "content": "x", "source_file": r"C:\secret\doc.txt"}]}, "knowledge_batch_field_not_allowed"),
+        ({"documents": [{"base_id": "base-1", "content": "x", "embedding": [0.1]}]}, "knowledge_batch_field_not_allowed"),
+    ]
+
+    for body, expected_code in cases:
+        response = client.post("/api/knowledge_base/batch-ingest", json=body, headers=_auth_headers(user))
+        assert response.status_code == 400
+        assert response.json()["code"] == expected_code
+
+
+def test_knowledge_batch_ingest_route_requires_write_permission() -> None:
+    kb_main = _load_kb_module("app.main")
+    user = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/batch-ingest",
+        json={"documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+
+
+def test_knowledge_batch_ingest_route_reports_vector_runtime_unavailable(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_batch_ingest = importlib.import_module("app.kb_batch_ingest")
+    kb_batch_ingest_routes = importlib.import_module("app.kb_batch_ingest_routes")
+    monkeypatch.setattr(kb_batch_ingest_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_batch_ingest, "ensure_vector_store", lambda: (_ for _ in ()).throw(RuntimeError("qdrant down")))
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/batch-ingest",
+        json={"documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "knowledge_batch_vector_unavailable"
+
+
+def test_gateway_knowledge_batch_ingest_uses_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(gateway_main.app)
+
+    allowed = client.post(
+        "/api/knowledge_base/batch-ingest",
+        json={"documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+    blocked = client.post(
+        "/api/knowledge_base/delete",
+        json={},
+        headers=_auth_headers(user),
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.json()["service_path"] == "/api/knowledge_base/batch-ingest"
+    assert calls == [
+        {
+            "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
+            "service_path": "/api/knowledge_base/batch-ingest",
+            "request_path": "/api/knowledge_base/batch-ingest",
         }
     ]
     assert blocked.status_code == 404
