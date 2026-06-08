@@ -180,6 +180,34 @@ class TestSemanticCache:
         assert stats["semantic_misses"] == 1
 
     @pytest.mark.asyncio
+    async def test_semantic_lookup_does_not_cross_model(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import SemanticCache
+
+        async def fake_embed(_: str) -> list[float]:
+            return [1.0, 0.0]
+
+        cache = SemanticCache(embedding_fn=fake_embed, semantic_enabled=True, semantic_threshold=0.9)
+
+        await cache.store(
+            question="refund policy workflow",
+            answer="Refunds require approval.",
+            answer_mode="grounded",
+            corpus_ids=["kb:abc"],
+            model_name="qwen-plus",
+        )
+
+        hit = await cache.lookup(
+            question="how do refunds work?",
+            corpus_ids=["kb:abc"],
+            model_name="gpt-4.1-mini",
+        )
+        stats = cache.stats()
+
+        assert hit is None
+        assert stats["semantic_misses"] == 1
+
+    @pytest.mark.asyncio
     async def test_ttl_expiry(self, monkeypatch) -> None:
         _import_gateway("app.semantic_cache", monkeypatch)
         from app.semantic_cache import SemanticCache
