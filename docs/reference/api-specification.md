@@ -250,6 +250,8 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 `semantic_cache` 为回答级缓存元数据，包含 `enabled`、`hit`、`cache_level`、`similarity_score`、`original_question_hash`、`stored`、`bypass_reason` 与 `cached_usage`。当前同步与 LangGraph 非流式回答路径会在 L1 精确命中或显式开启的 L2 同 scope/corpus key 语义命中时跳过 LLM 生成，在未命中且回答具备 grounded 证据时写入缓存；状态只返回原问题 hash，不返回原问题明文。
 
+`llm_trace.final_answer_tools` 为可选最终回答工具调用 trace，仅在 `GATEWAY_FINAL_ANSWER_TOOLS_ENABLED=true` 且非流式 `grounded` 回答路径参与模型生成时出现。字段包含 `enabled`、`rounds`、`requested`、`executed`、`rejected`、`failed`、`events`、`pre_tool_llm_call_id`，当第二轮模型仍请求工具时会额外包含 `final_tool_calls_blocked`。`events[*]` 只记录脱敏后的工具名、状态、短原因、耗时/缓存状态和结果 key 摘要，不返回工具参数、工具输出、prompt、路径或非白名单工具名原文。
+
 ### `POST /api/v1/chat/sessions/{id}/messages/stream`
 
 SSE 流式回答，事件顺序：
