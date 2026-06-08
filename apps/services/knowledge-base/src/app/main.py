@@ -30,6 +30,7 @@ from .kb_connector_routes import (
 from .kb_connector_scheduler import ConnectorSchedulerManager
 from .kb_ingest_routes import router as kb_ingest_router
 from .kb_index_routes import router as kb_index_router
+from .kb_job_queue_routes import router as kb_job_queue_router
 from .kb_query_routes import router as kb_query_router
 from .kb_rebuild_routes import router as kb_rebuild_router
 from .kb_runtime import db, logger, prepare_runtime, storage
@@ -96,6 +97,7 @@ app.include_router(kb_analytics_router)
 app.include_router(kb_batch_dry_run_router)
 app.include_router(kb_batch_ingest_router)
 app.include_router(kb_index_router)
+app.include_router(kb_job_queue_router)
 app.include_router(kb_rebuild_router)
 app.include_router(kb_base_router)
 app.include_router(kb_chunk_router)

@@ -133,6 +133,33 @@ async def proxy_knowledge_index(request: Request) -> Response:
     )
 
 
+@router.post("/api/knowledge_base/jobs")
+async def proxy_knowledge_job_create(request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path="/api/knowledge_base/jobs",
+    )
+
+
+@router.get("/api/knowledge_base/jobs/{job_id}")
+async def proxy_knowledge_job_get(job_id: str, request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path=f"/api/knowledge_base/jobs/{job_id}",
+    )
+
+
+@router.get("/api/knowledge_base/status")
+async def proxy_knowledge_status(request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path="/api/knowledge_base/status",
+    )
+
+
 @router.api_route("/api/v1/kb/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def proxy_kb(path: str, request: Request) -> Response:
     return await proxy_request(request, service_base_url=runtime_settings.kb_service_url, service_path=f"/api/v1/kb/{path}")

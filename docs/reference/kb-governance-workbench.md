@@ -81,6 +81,12 @@
 
 该入口不同于 batch dry-run：它会写入数据库和向量库，但仍不读取 `source_file` / `source_path`，不扫描目录，不上传文件，也不批量 delete。响应只返回聚合计数、服务端生成的文档 ID 和脱敏文件名，不返回正文、chunk text、embedding 或完整路径。
 
+## Background job queue
+
+`POST /api/knowledge_base/jobs` 提供进程内后台队列入口，支持把同样的内联 `ingest` 请求或受控 `rebuild` 请求串行执行。任务状态可通过 `GET /api/knowledge_base/jobs/{job_id}` 查询，`GET /api/knowledge_base/status` 会返回 `queue` 摘要。
+
+该队列只保存当前进程内的请求体任务，不做持久化；服务重启后不会恢复历史任务。公开状态只返回 `job_id`、`mode`、`status`、计数、脱敏文件名和摘要结果，不返回正文、chunk text、embedding、storage key 或完整路径。它也不读取 `source_file` / `source_path`，不扫描目录，不提供自动文件系统索引能力。
+
 ## Read-only index summary
 
 `GET /api/knowledge_base/index` 提供只读索引摘要，用于查看已入库文档 metadata 的聚合状态。它返回文档数、chunk 数、脱敏文件名、版本和来源摘要；不是文件系统索引，不扫描目录，不读取正文、chunk text、embedding、`storage_path` 或完整本机路径。

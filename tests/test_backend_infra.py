@@ -323,8 +323,12 @@ def _load_kb_module(module_name: str):
         "app.kb_batch_ingest_routes",
         "app.kb_index",
         "app.kb_index_routes",
+        "app.kb_job_queue",
+        "app.kb_job_queue_routes",
         "app.kb_query_routes",
         "app.kb_query_helpers",
+        "app.kb_rebuild",
+        "app.kb_rebuild_routes",
         "app.parsing",
         "app.retrieve",
         "app.runtime",
@@ -4702,6 +4706,388 @@ def test_gateway_knowledge_rebuild_uses_exact_proxy(monkeypatch) -> None:
         }
     ]
     assert blocked.status_code == 404
+
+
+def test_knowledge_job_queue_enqueues_ingest_and_sanitizes_public_snapshot() -> None:
+    kb_job_queue = _load_kb_module("app.kb_job_queue")
+    job_ids = iter(["job-1"])
+    queue = kb_job_queue.KnowledgeBaseJobQueue(max_jobs=5, job_id_factory=lambda: next(job_ids))
+    calls: list[tuple[str, dict[str, object]]] = []
+    secret_sentence = "The inline queue secret should not be returned."
+
+    async def runner(mode: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((mode, payload))
+        return {
+            "success": True,
+            "documents": [
+                {
+                    "document_id": "stored-doc-1",
+                    "file_name": r"C:\secret\finance\expense-policy.txt",
+                    "source_uri": "https://example.test/private/expense-policy.txt",
+                    "storage_path": r"C:\secret\storage\doc.bin",
+                    "storage_key": "private-storage-key",
+                    "embedding": [0.1],
+                    "content": secret_sentence,
+                }
+            ],
+            "source_path": r"C:\secret\finance\expense-policy.txt",
+            "chunk_text": secret_sentence,
+        }
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+        created = await queue.enqueue(
+            mode="ingest",
+            payload={
+                "documents": [
+                    {
+                        "base_id": "base-1",
+                        "doc_id": r"C:\secret\finance\doc-1",
+                        "file_name": r"C:\secret\finance\expense-policy.txt",
+                        "category": "policy",
+                        "content": "Overview\n" + secret_sentence + "\n" + ("approval rule " * 80),
+                    }
+                ]
+            },
+            runner=runner,
+        )
+        await queue.wait_idle()
+        completed = await queue.get("job-1")
+        summary = await queue.summary()
+        assert completed is not None
+        return created, completed, summary
+
+    created, completed, summary = asyncio.run(scenario())
+
+    assert created["job_id"] == "job-1"
+    assert created["mode"] == "ingest"
+    assert created["status"] == "queued"
+    assert created["document_count"] == 1
+    assert created["documents"][0] == {
+        "index": 0,
+        "doc_id": "doc-1",
+        "file_name": "expense-policy.txt",
+        "base_id": "base-1",
+        "category": "policy",
+        "content_chars": len("Overview\n" + secret_sentence + "\n" + ("approval rule " * 80)),
+    }
+    assert calls[0][0] == "ingest"
+    assert calls[0][1]["documents"][0]["content"].startswith("Overview")
+    assert completed["status"] == "completed"
+    assert completed["result"]["documents"][0]["file_name"] == "expense-policy.txt"
+    assert completed["result"]["documents"][0]["source_uri"] == "example.test"
+    assert summary["counts"]["completed"] == 1
+    assert summary["modes"]["ingest"] == 1
+    public_text = json.dumps({"created": created, "completed": completed, "summary": summary}, ensure_ascii=False)
+    assert secret_sentence not in public_text
+    assert "C:\\secret" not in public_text
+    assert "private/expense-policy" not in public_text
+    assert "private-storage-key" not in public_text
+    assert "chunk_text" not in public_text
+    assert "embedding" not in public_text
+    assert "storage_path" not in public_text
+    assert "storage_key" not in public_text
+
+
+def test_knowledge_job_queue_runs_jobs_serially_and_rejects_when_active_queue_is_full() -> None:
+    kb_job_queue = _load_kb_module("app.kb_job_queue")
+    job_ids = iter(["job-1", "job-2"])
+    queue = kb_job_queue.KnowledgeBaseJobQueue(max_jobs=1, job_id_factory=lambda: next(job_ids))
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    events: list[str] = []
+
+    async def runner(_mode: str, payload: dict[str, object]) -> dict[str, object]:
+        doc_id = str(payload["documents"][0]["doc_id"])
+        events.append(f"start:{doc_id}")
+        if doc_id == "doc-1":
+            first_started.set()
+            await release_first.wait()
+        events.append(f"finish:{doc_id}")
+        return {"document_id": doc_id}
+
+    async def scenario() -> tuple[dict[str, object], dict[str, object] | None]:
+        await queue.enqueue(
+            mode="ingest",
+            payload={"documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+            runner=runner,
+        )
+        await first_started.wait()
+        try:
+            await queue.enqueue(
+                mode="ingest",
+                payload={"documents": [{"base_id": "base-1", "doc_id": "doc-2", "content": "hello"}]},
+                runner=runner,
+            )
+        except kb_job_queue.KnowledgeJobQueueError as exc:
+            error = {"code": exc.code, "detail": exc.detail}
+        else:
+            raise AssertionError("expected active full queue to reject enqueue")
+        release_first.set()
+        await queue.wait_idle()
+        return error, await queue.get("job-1")
+
+    error, completed = asyncio.run(scenario())
+
+    assert error["code"] == "knowledge_job_queue_full"
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert events == ["start:doc-1", "finish:doc-1"]
+
+
+def test_knowledge_job_queue_serial_execution_keeps_second_job_queued_until_first_finishes() -> None:
+    kb_job_queue = _load_kb_module("app.kb_job_queue")
+    job_ids = iter(["job-1", "job-2"])
+    queue = kb_job_queue.KnowledgeBaseJobQueue(max_jobs=3, job_id_factory=lambda: next(job_ids))
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    events: list[str] = []
+
+    async def runner(_mode: str, payload: dict[str, object]) -> dict[str, object]:
+        doc_id = str(payload["documents"][0]["doc_id"])
+        events.append(f"start:{doc_id}")
+        if doc_id == "doc-1":
+            first_started.set()
+            await release_first.wait()
+        events.append(f"finish:{doc_id}")
+        return {"document_id": doc_id}
+
+    async def scenario() -> tuple[dict[str, object] | None, dict[str, object], dict[str, object]]:
+        await queue.enqueue(
+            mode="ingest",
+            payload={"documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+            runner=runner,
+        )
+        await first_started.wait()
+        await queue.enqueue(
+            mode="ingest",
+            payload={"documents": [{"base_id": "base-1", "doc_id": "doc-2", "content": "hello"}]},
+            runner=runner,
+        )
+        second_while_first_runs = await queue.get("job-2")
+        release_first.set()
+        await queue.wait_idle()
+        summary = await queue.summary()
+        return second_while_first_runs, await queue.get("job-1") or {}, summary
+
+    queued_second, first, summary = asyncio.run(scenario())
+
+    assert queued_second is not None
+    assert queued_second["status"] == "queued"
+    assert first["status"] == "completed"
+    assert summary["counts"]["completed"] == 2
+    assert events == ["start:doc-1", "finish:doc-1", "start:doc-2", "finish:doc-2"]
+
+
+def test_knowledge_job_queue_failed_job_hides_sensitive_error_detail() -> None:
+    kb_job_queue = _load_kb_module("app.kb_job_queue")
+    queue = kb_job_queue.KnowledgeBaseJobQueue(max_jobs=5, job_id_factory=lambda: "job-failed")
+    secret_sentence = "The failed queue secret should not be returned."
+
+    async def runner(_mode: str, _payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError(f"{secret_sentence} from C:\\secret\\finance\\doc.txt storage-key")
+
+    async def scenario() -> dict[str, object]:
+        await queue.enqueue(
+            mode="ingest",
+            payload={
+                "documents": [
+                    {
+                        "base_id": "base-1",
+                        "doc_id": r"C:\secret\finance\doc-1",
+                        "file_name": r"C:\secret\finance\expense-policy.txt",
+                        "content": secret_sentence,
+                    }
+                ]
+            },
+            runner=runner,
+        )
+        await queue.wait_idle()
+        failed = await queue.get("job-failed")
+        assert failed is not None
+        return failed
+
+    failed = asyncio.run(scenario())
+
+    assert failed["status"] == "failed"
+    assert failed["error"] == {"code": "RuntimeError", "detail": "knowledge job failed"}
+    public_text = json.dumps(failed, ensure_ascii=False)
+    assert secret_sentence not in public_text
+    assert "C:\\secret" not in public_text
+    assert "storage-key" not in public_text
+
+
+def test_knowledge_job_queue_normalizes_rebuild_payload_and_rejects_invalid_mode() -> None:
+    kb_job_queue = _load_kb_module("app.kb_job_queue")
+    kb_rebuild = importlib.import_module("app.kb_rebuild")
+    signature = kb_rebuild.build_knowledge_rebuild_signature("doc-1")
+
+    payload, documents = kb_job_queue.normalize_knowledge_job_payload(
+        "rebuild",
+        {"doc_id": " doc-1 ", "dry_run": True, "signature": signature},
+    )
+
+    assert payload == {"doc_id": "doc-1", "dry_run": True, "signature": signature}
+    assert documents == [{"index": 0, "doc_id": "doc-1", "dry_run": True, "signature": signature}]
+    try:
+        kb_job_queue.normalize_knowledge_job_payload("delete", {"doc_id": "doc-1"})
+    except kb_job_queue.KnowledgeJobQueueError as exc:
+        assert exc.code == "knowledge_job_mode_invalid"
+    else:
+        raise AssertionError("expected invalid job mode to raise")
+
+
+def test_knowledge_jobs_api_enqueues_and_reports_queue_without_raw_content(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_job_queue = importlib.import_module("app.kb_job_queue")
+    kb_job_queue_routes = importlib.import_module("app.kb_job_queue_routes")
+    job_ids = iter(["job-api-1"])
+    queue = kb_job_queue.KnowledgeBaseJobQueue(max_jobs=5, job_id_factory=lambda: next(job_ids))
+    secret_sentence = "The api queue secret should not be returned."
+
+    monkeypatch.setattr(kb_job_queue_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    kb_job_queue_routes.set_knowledge_job_queue(queue)
+
+    def fake_build_result(mode: str, payload: dict[str, object], *, request, user) -> dict[str, object]:
+        assert mode == "ingest"
+        assert str(request.url.path) == "/api/knowledge_base/jobs"
+        return {
+            "success": True,
+            "documents": [
+                {
+                    "document_id": "stored-doc-1",
+                    "file_name": r"C:\secret\finance\expense-policy.txt",
+                    "source_path": r"C:\secret\finance\expense-policy.txt",
+                    "content": secret_sentence,
+                    "embedding": [0.1],
+                    "storage_key": "private-storage-key",
+                }
+            ],
+            "chunk_text": secret_sentence,
+        }
+
+    monkeypatch.setattr(kb_job_queue_routes, "build_knowledge_job_result", fake_build_result)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    created = client.post(
+        "/api/knowledge_base/jobs",
+        json={
+            "mode": "ingest",
+            "documents": [
+                {
+                    "base_id": "base-1",
+                    "doc_id": r"C:\secret\finance\doc-1",
+                    "file_name": r"C:\secret\finance\expense-policy.txt",
+                    "content": "Overview\n" + secret_sentence + "\n" + ("approval rule " * 80),
+                }
+            ],
+        },
+        headers=_auth_headers(user),
+    )
+    assert created.status_code == 200
+    assert created.json()["job_id"] == "job-api-1"
+    assert created.json()["status"] == "queued"
+    assert created.json()["documents"][0]["file_name"] == "expense-policy.txt"
+
+    asyncio.run(queue.wait_idle())
+    fetched = client.get("/api/knowledge_base/jobs/job-api-1", headers=_auth_headers(user))
+    status = client.get("/api/knowledge_base/status", headers=_auth_headers(user))
+
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "completed"
+    assert fetched.json()["result"]["documents"][0]["file_name"] == "expense-policy.txt"
+    assert status.status_code == 200
+    assert status.json()["queue"]["counts"]["completed"] == 1
+    response_text = fetched.text + status.text + created.text
+    assert secret_sentence not in response_text
+    assert "C:\\secret" not in response_text
+    assert "private-storage-key" not in response_text
+    assert "chunk_text" not in response_text
+    assert "embedding" not in response_text
+    assert "storage_key" not in response_text
+
+
+def test_knowledge_jobs_api_rejects_invalid_payloads_and_requires_read_permission(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_job_queue = importlib.import_module("app.kb_job_queue")
+    kb_job_queue_routes = importlib.import_module("app.kb_job_queue_routes")
+    kb_job_queue_routes.set_knowledge_job_queue(kb_job_queue.KnowledgeBaseJobQueue(job_id_factory=lambda: "job-1"))
+    monkeypatch.setattr(kb_job_queue_routes, "build_knowledge_job_result", lambda *args, **kwargs: {"success": True})
+    editor = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    viewer = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    invalid_mode = client.post(
+        "/api/knowledge_base/jobs",
+        json={"mode": "delete", "doc_id": "doc-1"},
+        headers=_auth_headers(editor),
+    )
+    forbidden_create = client.post(
+        "/api/knowledge_base/jobs",
+        json={"mode": "ingest", "documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(viewer),
+    )
+    missing = client.get("/api/knowledge_base/jobs/missing", headers=_auth_headers(viewer))
+
+    assert invalid_mode.status_code == 400
+    assert invalid_mode.json()["code"] == "knowledge_job_mode_invalid"
+    assert forbidden_create.status_code == 403
+    assert forbidden_create.json()["code"] == "permission_denied"
+    assert missing.status_code == 404
+    assert missing.json()["code"] == "knowledge_job_not_found"
+
+
+def test_gateway_knowledge_jobs_use_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(gateway_main.app)
+
+    created = client.post(
+        "/api/knowledge_base/jobs",
+        json={"mode": "ingest", "documents": [{"base_id": "base-1", "doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+    fetched = client.get("/api/knowledge_base/jobs/job-1", headers=_auth_headers(user))
+    status = client.get("/api/knowledge_base/status", headers=_auth_headers(user))
+    blocked = client.get("/api/knowledge_base/jobs/job-1/delete", headers=_auth_headers(user))
+
+    assert created.status_code == 200
+    assert fetched.status_code == 200
+    assert status.status_code == 200
+    assert blocked.status_code == 404
+    assert [call["service_path"] for call in calls] == [
+        "/api/knowledge_base/jobs",
+        "/api/knowledge_base/jobs/job-1",
+        "/api/knowledge_base/status",
+    ]
 
 
 def test_knowledge_index_route_returns_metadata_summary_without_path_or_content(monkeypatch) -> None:

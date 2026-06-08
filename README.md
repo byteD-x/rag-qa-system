@@ -1346,6 +1346,7 @@ curl -X POST http://localhost:8300/api/v1/kb/connectors \
 - `/workspace/kb/governance` 也提供批量 JSON 面板：用户显式粘贴 `{ "documents": [...] }` 后，必须先预览当前 JSON，签名匹配后才可调用固定 batch 写入；写入成功后可对返回的服务端 `document_id` 逐个触发受控 rebuild
 - `POST /api/knowledge_base/batch-dry-run` 仅对请求体内联 `documents[].content` 做多文档分块预览摘要，返回文档数、字符数、section/chunk 计数和脱敏文件名；不会读取本机路径、上传文件、写入向量库或触发批量 rebuild
 - `POST /api/knowledge_base/batch-ingest` 仅批量写入请求体内联 `documents[].content`，按顺序创建文档并索引 section/chunk；不会读取本机路径、上传文件或执行批量 delete
+- `POST /api/knowledge_base/jobs` 可把同样的内联 ingest/rebuild 请求放入进程内串行后台队列，`GET /api/knowledge_base/jobs/{job_id}` 和 `GET /api/knowledge_base/status` 只返回任务摘要、计数和脱敏文件名；队列不持久化、不扫描目录、不读取 `source_file` / `source_path`
 - `GET /api/knowledge_base/index` 返回已入库文档 metadata 摘要，包括文档数、chunk 数、脱敏文件名、版本与来源摘要；它不是文件系统索引，不扫描目录、不读取正文、embedding 或完整路径
 - 可以通过 `POST /api/v1/kb/retrieve/debug` 只看召回和 rerank 结果，不触发 LLM
 

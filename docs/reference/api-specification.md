@@ -489,6 +489,78 @@ SSE 流式回答，事件顺序：
 - 全部成功返回 HTTP 200；非法 payload 返回 HTTP 400；向量运行时不可用返回 HTTP 409；任一文档业务失败返回 HTTP 400 的聚合摘要。
 - 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、脱敏文件名和服务端生成的文档 ID；不会返回正文、chunk text、embedding 或完整路径。Web 治理页只会使用成功项的服务端 `document_id` 触发逐文档受控 rebuild。
 
+### `POST /api/knowledge_base/jobs`
+
+知识库后台任务入队接口，用于把请求体内联 `ingest` 或受控 `rebuild` 放入进程内串行队列。该队列不持久化，不读取 `source_file` / `source_path` 指向的本机文件，不扫描目录，也不提供任意路径任务执行能力。
+
+请求关键字段：
+
+```json
+{
+  "mode": "ingest",
+  "documents": [
+    {
+      "base_id": "00000000-0000-0000-0000-000000000000",
+      "doc_id": "doc-local-1",
+      "file_name": "expense-policy.txt",
+      "content": "inline document text..."
+    }
+  ]
+}
+```
+
+规则：
+
+- `mode` 只支持 `ingest` 和 `rebuild`。
+- `ingest` 复用 `POST /api/knowledge_base/batch-ingest` 的请求体校验和安全字段限制。
+- `rebuild` 复用 `POST /api/knowledge_base/rebuild` 的 `doc_id`、`dry_run`、`signature` 校验。
+- 响应只返回 `job_id`、`mode`、`status`、文档计数、脱敏文档摘要和时间戳，不返回正文、chunk text、embedding、storage key 或完整路径。
+- `status=queued` 表示任务已进入进程内队列；后续执行由同进程后台任务串行完成。服务重启后内存队列不会恢复。
+
+### `GET /api/knowledge_base/jobs/{job_id}`
+
+查询单个后台任务公开状态。普通用户只能读取自己创建的任务，管理员可读取全部任务。
+
+公开字段包括：
+
+- `job_id`
+- `mode`
+- `status`：`queued`、`running`、`completed` 或 `failed`
+- `documents`：只包含 `doc_id`、脱敏 `file_name`、`base_id`、`category`、`content_chars` 等摘要
+- `result`：仅保留执行结果摘要；会过滤正文、chunk text、embedding、storage key 和完整路径
+- `error`：仅保留错误码和固定失败摘要，不回显异常全文
+
+未找到或无权读取时返回 HTTP 404，避免泄露其他用户任务是否存在。
+
+### `GET /api/knowledge_base/status`
+
+返回知识库运行状态摘要中的 `queue` 字段，便于前端或运维页查看当前进程内后台队列。
+
+响应关键字段：
+
+```json
+{
+  "success": true,
+  "queue": {
+    "max_jobs": 100,
+    "total_jobs": 1,
+    "counts": {
+      "queued": 0,
+      "running": 0,
+      "completed": 1,
+      "failed": 0
+    },
+    "modes": {
+      "ingest": 1,
+      "rebuild": 0
+    },
+    "jobs": []
+  }
+}
+```
+
+`queue.jobs` 只返回最近任务摘要，受 `limit` 参数控制；该接口不会读取文件系统、不会拉取正文或 embedding。
+
 ### `POST /api/knowledge_base/rebuild`
 
 受控重建接口，仅用于基于服务端已有 section/chunk 重新写入某个文档的向量索引。该接口不接收 `source_path`、不读取上传源文件、不扫描目录，也不创建或删除文档。
