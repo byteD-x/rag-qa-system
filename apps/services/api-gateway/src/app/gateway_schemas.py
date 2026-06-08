@@ -106,6 +106,18 @@ class ToolWorkflowRequest(BaseModel):
         return normalized
 
 
+class LLMModelDiscoveryRequest(BaseModel):
+    provider: str = Field(default="openai-compatible", max_length=64)
+    base_url: str = Field(default="", max_length=512)
+    credential: str = Field(default="", alias="api_key", max_length=4096)
+    max_models: int = Field(default=200, ge=1, le=1000)
+
+    @field_validator("provider", "base_url", "credential")
+    @classmethod
+    def normalize_model_discovery_text(cls, value: str) -> str:
+        return value.strip()
+
+
 class ClaimHandoffSessionRequest(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=128)
     skill_group: str = Field(default="general", min_length=1, max_length=64)

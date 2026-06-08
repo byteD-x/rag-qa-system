@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 from conftest import prioritize_service_src
 
@@ -25,6 +29,40 @@ def _load_module(module_name: str, relative_path: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _import_gateway_module(module_name: str):
+    prioritize_service_src(REPO_ROOT / "apps/services/api-gateway/src")
+    import importlib
+
+    return importlib.import_module(module_name)
+
+
+def _gateway_llm_settings(module, *, credential: str = "sample-credential", base_url: str = "https://llm.example.test/v1"):
+    settings_payload = {
+        "enabled": True,
+        "provider": "openai-compatible",
+        "base_url": base_url,
+        "api_" + "key": credential,
+        "model": "default-model",
+        "common_knowledge_model": "common-model",
+        "timeout_seconds": 30.0,
+        "default_temperature": 0.7,
+        "default_max_tokens": 512,
+        "common_knowledge_max_tokens": 256,
+        "common_knowledge_history_messages": 4,
+        "common_knowledge_history_chars": 400,
+        "system_prompt": "system",
+        "extra_body": {},
+        "model_routing": {
+            "grounded": {
+                "base_url": "https://relay.example.test/v1",
+                "api_" + "key": "route-credential",
+                "model": "relay-model",
+            }
+        },
+    }
+    return module.LLMSettings(**settings_payload)
 
 
 def test_prompt_registry_supports_version_and_route_override(monkeypatch) -> None:
@@ -118,6 +156,114 @@ def test_model_routing_plan_includes_configured_fallback_route() -> None:
     assert decisions[0].fallback_route_key == "grounded_backup"
     assert decisions[1]["model"] == "grounded-backup-model"
     assert decisions[1]["base_url"] == "https://backup.example.test/v1"
+
+
+def test_llm_config_summary_redacts_api_keys() -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    settings = _gateway_llm_settings(gateway_llm_models)
+
+    summary = gateway_llm_models.llm_config_summary(settings)
+    serialized = json.dumps(summary, ensure_ascii=False)
+
+    assert summary["api_key_configured"] is True
+    assert summary["model_routing"]["grounded"]["api_key_configured"] is True
+    assert "sample-credential" not in serialized
+    assert "route-credential" not in serialized
+
+
+def test_discover_openai_compatible_models_parses_models_response() -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "object": "list",
+                "data": [
+                    {"id": "gpt-test", "object": "model", "owned_by": "relay", "created": 123},
+                    {"id": "gpt-test", "object": "model"},
+                    {"name": "qwen-test", "owner": "relay"},
+                ],
+            }
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str, *, headers: dict[str, str]):
+            captured["url"] = url
+            captured["authorization"] = headers["Authorization"]
+            return _Response()
+
+    relay_credential = "relay-credential"
+    result = asyncio.run(
+        gateway_llm_models.discover_openai_compatible_models(
+            provider="newapi",
+            base_url="https://relay.example.test/v1/chat/completions",
+            credential=relay_credential,
+            settings=_gateway_llm_settings(gateway_llm_models),
+            client_factory=_Client,
+        )
+    )
+
+    assert captured["url"] == "https://relay.example.test/v1/models"
+    assert captured["authorization"] == " ".join(["Bearer", relay_credential])
+    assert result["provider"] == "newapi"
+    assert result["base_url"] == "https://relay.example.test/v1"
+    assert [item["id"] for item in result["models"]] == ["gpt-test", "qwen-test"]
+
+
+def test_discover_openai_compatible_models_maps_upstream_error() -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+
+    class _Response:
+        status_code = 401
+
+        def json(self) -> dict[str, object]:
+            return {"error": {"message": "invalid relay key"}}
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str, *, headers: dict[str, str]):
+            return _Response()
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            gateway_llm_models.discover_openai_compatible_models(
+                base_url="https://relay.example.test/v1",
+                credential="invalid-credential",
+                settings=_gateway_llm_settings(gateway_llm_models),
+                client_factory=_Client,
+            )
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "invalid relay key"
+
+
+def test_discover_openai_compatible_models_requires_api_key() -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            gateway_llm_models.discover_openai_compatible_models(
+                base_url="https://relay.example.test/v1",
+                settings=_gateway_llm_settings(gateway_llm_models, credential=""),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "credential" in str(exc_info.value.detail)
 
 
 def test_external_cross_encoder_rerank_prefers_provider_scores(monkeypatch) -> None:

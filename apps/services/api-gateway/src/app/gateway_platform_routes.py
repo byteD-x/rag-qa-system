@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from shared.auth import CurrentUser
 
 from .gateway_audit_support import require_permission, write_gateway_audit_event
+from .gateway_llm_models import discover_openai_compatible_models, llm_config_summary
 from .gateway_runtime import CHAT_PERMISSION
 from .governance_metrics import get_governance_metrics
 from .gateway_platform_store import (
@@ -25,6 +26,7 @@ from .gateway_platform_store import (
 )
 from .gateway_schemas import (
     AgentProfileRequest,
+    LLMModelDiscoveryRequest,
     PromptTemplateRequest,
     ToolWorkflowRequest,
     UpdateAgentProfileRequest,
@@ -76,6 +78,38 @@ def _tool_workflow_failure_reason(result: dict[str, object]) -> str:
     if "not found" in error:
         return "tool_not_found"
     return "tool_workflow_failed"
+
+
+@router.get("/api/v1/platform/llm/config")
+async def get_llm_config(request: Request, user: CurrentUser) -> dict[str, object]:
+    require_permission(request, user, CHAT_PERMISSION, action="platform.llm.config.get", resource_type="llm_provider")
+    return llm_config_summary()
+
+
+@router.post("/api/v1/platform/llm/models/discover")
+async def post_discover_llm_models(payload: LLMModelDiscoveryRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    require_permission(request, user, CHAT_PERMISSION, action="platform.llm.models.discover", resource_type="llm_provider")
+    result = await discover_openai_compatible_models(
+        provider=payload.provider,
+        base_url=payload.base_url,
+        credential=payload.credential,
+        max_models=payload.max_models,
+    )
+    write_gateway_audit_event(
+        action="platform.llm.models.discover",
+        outcome="success",
+        request=request,
+        user=user,
+        resource_type="llm_provider",
+        scope="manual_discovery",
+        details={
+            "provider": result.get("provider", ""),
+            "base_url": result.get("base_url", ""),
+            "model_count": result.get("count", 0),
+            "api_key_supplied": bool(payload.credential),
+        },
+    )
+    return result
 
 
 @router.get("/api/v1/platform/prompt-templates")
