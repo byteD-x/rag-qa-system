@@ -3,10 +3,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
-from docx import Document as DocxDocument
-from pypdf import PdfReader
 from shared.text_encoding import read_text_with_fallback
 
 
@@ -58,15 +57,23 @@ def parse_document(path: Path, file_type: str) -> ParsedKB:
         text = read_text_with_fallback(path)
         return _parse_text_sections(text)
     if normalized == "pdf":
+        from pypdf import PdfReader
+
         reader = PdfReader(str(path))
         pages = [page.extract_text() or "" for page in reader.pages]
         return _parse_text_sections("\n\n".join(pages))
     if normalized == "docx":
+        from docx import Document as DocxDocument
+
         doc = DocxDocument(str(path))
         return _parse_docx(doc)
     if normalized in {"png", "jpg", "jpeg"}:
         return ParsedKB(sections=[], chunks=[])
     raise ValueError(f"unsupported file type: {file_type}")
+
+
+def parse_text_content(text: str) -> ParsedKB:
+    return _parse_text_sections(text)
 
 
 def normalize_text(text: str) -> str:
@@ -113,7 +120,7 @@ def build_section_chunks(
     return chunks
 
 
-def _parse_docx(doc: DocxDocument) -> ParsedKB:
+def _parse_docx(doc: Any) -> ParsedKB:
     sections: list[KBSection] = []
     current_title = "Section 1"
     current_lines: list[str] = []

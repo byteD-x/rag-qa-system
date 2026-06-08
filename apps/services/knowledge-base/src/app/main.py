@@ -17,6 +17,7 @@ from shared.tracing import TRACE_ID_HEADER, ensure_trace_id, reset_trace_id, set
 
 from .kb_api_support import check_readiness as _kb_readiness_checks
 from .kb_analytics_routes import router as kb_analytics_router
+from .kb_batch_dry_run_routes import router as kb_batch_dry_run_router
 from .kb_base_routes import router as kb_base_router
 from .kb_chunk_routes import router as kb_chunk_router
 from .kb_connector_routes import (
@@ -89,6 +90,7 @@ async def trace_middleware(request: Request, call_next):
 
 app.include_router(kb_system_router)
 app.include_router(kb_analytics_router)
+app.include_router(kb_batch_dry_run_router)
 app.include_router(kb_base_router)
 app.include_router(kb_chunk_router)
 app.include_router(kb_connector_router)

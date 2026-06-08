@@ -22,6 +22,7 @@
 - `apps/services/api-gateway/src/app/main.py`
 - `apps/services/knowledge-base/src/app/kb_analytics_routes.py`
 - `apps/services/knowledge-base/src/app/kb_base_routes.py`
+- `apps/services/knowledge-base/src/app/kb_batch_dry_run_routes.py`
 - `apps/services/knowledge-base/src/app/kb_chunk_routes.py`
 - `apps/services/knowledge-base/src/app/kb_connector_routes.py`
 - `apps/services/knowledge-base/src/app/kb_ingest_routes.py`
@@ -32,10 +33,12 @@
 - `apps/services/knowledge-base/src/app/kb_visual_routes.py`
 - `apps/services/knowledge-base/src/app/main.py`
 
-## 路由总览（96 条）
+## 路由总览（98 条）
 
 | service | methods | path | handler | source |
 |---|---|---|---|---|
+| api-gateway | `POST` | `/api/knowledge_base/batch-dry-run` | `proxy_knowledge_batch_dry_run` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:100` |
+| knowledge-base | `POST` | `/api/knowledge_base/batch-dry-run` | `post_knowledge_batch_dry_run` | `apps/services/knowledge-base/src/app/kb_batch_dry_run_routes.py:18` |
 | api-gateway | `POST` | `/api/v1/admin/costs/provider-billing-records` | `import_provider_billing` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:81` |
 | api-gateway | `POST` | `/api/v1/agents/tool-workflow` | `post_tool_workflow` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:39` |
 | api-gateway | `GET` | `/api/v1/analytics/dashboard` | `get_dashboard` | `apps/services/api-gateway/src/app/gateway_analytics_routes.py:645` |
@@ -104,7 +107,7 @@
 | knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/parts/presign` | `presign_upload_parts` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:143` |
 | knowledge-base | `GET` | `/api/v1/kb/visual-assets/{asset_id}/regions` | `get_visual_asset_regions` | `apps/services/knowledge-base/src/app/kb_visual_routes.py:24` |
 | knowledge-base | `GET` | `/api/v1/kb/visual-assets/{asset_id}/thumbnail` | `get_visual_asset_thumbnail` | `apps/services/knowledge-base/src/app/kb_visual_routes.py:15` |
-| api-gateway | `DELETE, GET, OPTIONS, PATCH, POST, PUT` | `/api/v1/kb/{path:path}` | `proxy_kb` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:100` |
+| api-gateway | `DELETE, GET, OPTIONS, PATCH, POST, PUT` | `/api/v1/kb/{path:path}` | `proxy_kb` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:109` |
 | api-gateway | `POST` | `/api/v1/mcp` | `post_mcp` | `apps/services/api-gateway/src/app/gateway_mcp_routes.py:17` |
 | api-gateway | `GET` | `/api/v1/platform/agent-profiles` | `get_agent_profiles` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:132` |
 | api-gateway | `POST` | `/api/v1/platform/agent-profiles` | `post_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:138` |

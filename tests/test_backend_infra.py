@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import httpx
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 from pydantic import ValidationError
@@ -242,6 +243,7 @@ def _load_gateway_main(monkeypatch):
         "app.main",
         "app.ai_client",
         "app.db",
+        "app.gateway_admin_routes",
         "app.gateway_chat_routes",
         "app.gateway_chat_service",
         "app.gateway_mcp_adapter",
@@ -265,6 +267,7 @@ def _load_gateway_module(module_name: str):
         "app.main",
         "app.gateway_agent",
         "app.gateway_answering",
+        "app.gateway_admin_routes",
         "app.gateway_chat_routes",
         "app.gateway_chat_service",
         "app.gateway_workflows",
@@ -314,8 +317,11 @@ def _load_kb_module(module_name: str):
     for name in (
         module_name,
         "app.main",
+        "app.kb_batch_dry_run",
+        "app.kb_batch_dry_run_routes",
         "app.kb_query_routes",
         "app.kb_query_helpers",
+        "app.parsing",
         "app.retrieve",
         "app.runtime",
         "app.db",
@@ -4145,6 +4151,179 @@ def test_batch_update_documents_request_rejects_empty_patch() -> None:
         assert "patch must contain at least one field" in str(exc)
     else:
         raise AssertionError("expected empty patch to raise ValidationError")
+
+
+def test_knowledge_batch_dry_run_builds_sanitized_summary() -> None:
+    kb_batch = _load_kb_module("app.kb_batch_dry_run")
+    secret_sentence = "The payroll password is swordfish and should stay private."
+    full_doc_id = r"C:\secret\finance\doc-1"
+    full_path = r"C:\secret\finance\expense-policy.txt"
+
+    payload = kb_batch.build_knowledge_batch_dry_run_payload(
+        {
+            "documents": [
+                {
+                    "doc_id": f" {full_doc_id} ",
+                    "file_name": full_path,
+                    "content": "Overview\n" + secret_sentence + "\n" + ("approval rule " * 120),
+                },
+                {
+                    "document_id": "doc-2",
+                    "file_name": "/private/legal/handbook.txt",
+                    "content": "Rules\n" + ("travel limit " * 90),
+                },
+            ]
+        }
+    )
+
+    assert payload["dry_run"] is True
+    assert payload["document_count"] == 2
+    assert payload["total_chunks"] == sum(item["chunk_count"] for item in payload["documents"])
+    assert payload["total_content_chars"] == sum(item["content_chars"] for item in payload["documents"])
+    assert payload["documents"][0]["doc_id"] == "doc-1"
+    assert payload["documents"][0]["file_name"] == "expense-policy.txt"
+    assert payload["documents"][0]["chunk_count"] >= 2
+    assert payload["documents"][1]["file_name"] == "handbook.txt"
+    assert payload["documents"][1]["section_count"] >= 1
+    assert payload["documents"][0]["sections"][0]["chunk_count"] >= 1
+    response_text = json.dumps(payload, ensure_ascii=False)
+    assert secret_sentence not in response_text
+    assert full_doc_id not in response_text
+    assert full_path not in response_text
+    assert "/private/legal" not in response_text
+    assert "chunk_text" not in response_text
+    assert "embedding" not in response_text
+
+
+def test_knowledge_batch_dry_run_route_rejects_invalid_payloads(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_batch_routes = importlib.import_module("app.kb_batch_dry_run_routes")
+    monkeypatch.setattr(kb_batch_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+    too_many_documents = [{"doc_id": f"doc-{index}", "content": "x"} for index in range(21)]
+    oversized_documents = [{"doc_id": "large", "content": "x" * 300_001}]
+    cases = [
+        ({}, "knowledge_batch_documents_required"),
+        ([], "knowledge_batch_payload_invalid"),
+        ({"documents": "bad"}, "knowledge_batch_documents_required"),
+        ({"documents": []}, "knowledge_batch_documents_required"),
+        ({"documents": ["bad"]}, "knowledge_batch_document_invalid"),
+        ({"documents": [{"doc_id": "blank", "content": "  "}]}, "knowledge_batch_content_required"),
+        ({"documents": [{"doc_id": "path", "content": "x", "source_path": "/tmp/source.txt"}]}, "knowledge_batch_field_not_allowed"),
+        ({"documents": too_many_documents}, "knowledge_batch_too_many_documents"),
+        ({"documents": oversized_documents}, "knowledge_batch_content_too_large"),
+    ]
+
+    for body, expected_code in cases:
+        response = client.post("/api/knowledge_base/batch-dry-run", json=body, headers=_auth_headers(user))
+        assert response.status_code == 400
+        assert response.json()["code"] == expected_code
+
+
+def test_knowledge_batch_dry_run_route_requires_write_permission() -> None:
+    kb_main = _load_kb_module("app.main")
+    user = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/batch-dry-run",
+        json={"documents": [{"doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+
+
+def test_knowledge_batch_dry_run_route_returns_summary_without_raw_content(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_batch_routes = importlib.import_module("app.kb_batch_dry_run_routes")
+    monkeypatch.setattr(kb_batch_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/batch-dry-run",
+        json={
+            "documents": [
+                {
+                    "doc_id": "doc-policy",
+                    "file_name": r"D:\company\restricted\policy.txt",
+                    "content": "Policy\nSensitive reimbursement sentence.\n" + ("finance approval " * 80),
+                }
+            ]
+        },
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["document_count"] == 1
+    assert payload["documents"][0]["doc_id"] == "doc-policy"
+    assert payload["documents"][0]["file_name"] == "policy.txt"
+    assert payload["documents"][0]["chunk_count"] >= 1
+    response_text = response.text
+    assert "Sensitive reimbursement sentence" not in response_text
+    assert "D:\\company\\restricted" not in response_text
+    assert "chunk_text" not in response_text
+    assert "embedding" not in response_text
+
+
+def test_gateway_knowledge_batch_dry_run_uses_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(gateway_main.app)
+
+    allowed = client.post(
+        "/api/knowledge_base/batch-dry-run",
+        json={"documents": [{"doc_id": "doc-1", "content": "hello"}]},
+        headers=_auth_headers(user),
+    )
+    blocked = client.post(
+        "/api/knowledge_base/delete",
+        json={},
+        headers=_auth_headers(user),
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.json()["service_path"] == "/api/knowledge_base/batch-dry-run"
+    assert calls == [
+        {
+            "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
+            "service_path": "/api/knowledge_base/batch-dry-run",
+            "request_path": "/api/knowledge_base/batch-dry-run",
+        }
+    ]
+    assert blocked.status_code == 404
 
 
 def test_retrieve_debug_route_serializes_evidence_and_debug_meta(monkeypatch) -> None:

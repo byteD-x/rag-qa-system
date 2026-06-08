@@ -435,6 +435,31 @@ SSE 流式回答，事件顺序：
 - `hybrid_ready`
 - `ready`
 
+### `POST /api/knowledge_base/batch-dry-run`
+
+批量 dry-run 预览接口，仅用于估算请求体内联多文档内容的分块规模，不读取文件路径、不扫描目录、不上传文件、不写数据库、不写向量库，也不触发批量 rebuild。
+
+请求关键字段：
+
+```json
+{
+  "documents": [
+    {
+      "doc_id": "doc-local-1",
+      "file_name": "expense-policy.txt",
+      "content": "inline document text..."
+    }
+  ]
+}
+```
+
+规则：
+
+- `documents` 必须是非空数组，最多 20 篇。
+- 所有 `documents[].content` 合计最多 300000 字符。
+- 每个文档只接收内联 `content`；`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
+- 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
+
 ### 视觉资产
 
 - `GET /api/v1/kb/documents/{document_id}/visual-assets`

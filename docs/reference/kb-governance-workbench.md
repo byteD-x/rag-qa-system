@@ -63,6 +63,12 @@
 
 正式 rebuild 成功后，页面只展示摘要字段，例如 `doc_id`、`version`、`chunk_count`、`indexed_chunks`、`deleted_previous`。该入口不新增文件上传、目录扫描、任意路径读取或手工输入 `source_path` 能力，也不会把治理页扩展为通用文件重建工具。
 
+## Batch dry-run preview
+
+`POST /api/knowledge_base/batch-dry-run` 提供多文档分块预览摘要。请求体只接收 `documents` 数组，每个元素使用内联 `content`，可选 `doc_id` / `document_id` 与 `file_name`；服务端最多接收 20 篇、合计 300000 字符。响应只返回文档数、总字符数、section/chunk 计数、字符范围和脱敏后的叶子文件名，不返回原文、chunk text、embedding 或完整路径。
+
+该入口只用于预览分块规模和治理操作前的安全检查，不读取 `source_path`，不扫描目录，不上传文件，不写入数据库或向量库，也不触发批量 rebuild。
+
 ## Notes
 
 - 治理接口要求 `kb.manage` 权限。
