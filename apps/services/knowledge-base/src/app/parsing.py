@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from shared.text_encoding import read_text_with_fallback
+from shared.token_estimation import estimate_tokens
 
 
 TXT_HEADING_RE = re.compile(r"^\s*(第[0-9一二三四五六七八九十百千万零两〇]+[章节篇].*|[A-Z][A-Za-z0-9\s_-]{2,40}|#+\s+.+)$")
@@ -85,17 +86,25 @@ def build_section_chunks(
     *,
     window: int = DEFAULT_CHUNK_WINDOW,
     overlap: int = DEFAULT_CHUNK_OVERLAP,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
 ) -> list[KBChunk]:
     if window < 1:
         raise ValueError("chunk window must be positive")
     if overlap < 0:
         raise ValueError("chunk overlap must not be negative")
+    if max_tokens is not None and max_tokens < 1:
+        raise ValueError("chunk max_tokens must be positive")
+    if token_overlap is not None and token_overlap < 0:
+        raise ValueError("chunk token_overlap must not be negative")
 
     chunks: list[KBChunk] = []
     cursor = 0
     chunk_index = 1
     while cursor < len(section.text):
         end = min(cursor + window, len(section.text))
+        if max_tokens is not None:
+            end = _token_limited_end(section.text, cursor, end, max_tokens)
         snippet = section.text[cursor:end].strip()
         if snippet:
             chunks.append(
@@ -116,8 +125,45 @@ def build_section_chunks(
             chunk_index += 1
         if end >= len(section.text):
             break
-        cursor = max(end - overlap, cursor + 1)
+        if max_tokens is not None and token_overlap is not None:
+            cursor = _token_overlap_cursor(section.text, cursor, end, token_overlap)
+        else:
+            cursor = max(end - overlap, cursor + 1)
     return chunks
+
+
+def _token_limited_end(text: str, cursor: int, max_end: int, max_tokens: int) -> int:
+    low = cursor + 1
+    high = max_end
+    best = low
+    while low <= high:
+        mid = (low + high) // 2
+        snippet = text[cursor:mid].strip()
+        if not snippet or estimate_tokens(snippet) <= max_tokens:
+            best = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
+
+
+def _token_overlap_cursor(text: str, cursor: int, end: int, token_overlap: int) -> int:
+    if token_overlap == 0:
+        return end
+
+    low = cursor
+    high = end
+    best = end
+    while low <= high:
+        mid = (low + high) // 2
+        snippet = text[mid:end].strip()
+        tokens = estimate_tokens(snippet) if snippet else 0
+        if tokens <= token_overlap:
+            best = mid
+            high = mid - 1
+        else:
+            low = mid + 1
+    return max(best, cursor + 1)
 
 
 def _parse_docx(doc: Any) -> ParsedKB:

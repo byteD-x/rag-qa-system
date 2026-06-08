@@ -17,41 +17,12 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from shared.token_estimation import estimate_tokens
+
 from .gateway_runtime import logger
-
-# ---------------------------------------------------------------------------
-# Token 估算
-# ---------------------------------------------------------------------------
-
-# 中文字符≈1.5 token，英文单词≈1.3 token，标点≈0.5 token
-_CJK_RE = re.compile(r"[一-鿿㐀-䶿豈-﫿]")
-_ENGLISH_WORD_RE = re.compile(r"[a-zA-Z]+")
-_NUMBER_RE = re.compile(r"\d+")
-
-
-def estimate_tokens(text: str) -> int:
-    """快速估算文本的 token 数量（无需 tiktoken 依赖）。
-
-    策略：
-    - 每个中文字符 ≈ 1.5 token
-    - 每个英文单词 ≈ 1.3 token（含前后空格）
-    - 每个数字 ≈ 0.5 token
-    - 其余字符（标点/换行）≈ 0.3 token 每字符
-
-    这种估算在大多数中文 LLM tokenizer 上误差在 ±15% 以内。
-    """
-    if not text:
-        return 0
-    cjk_chars = len(_CJK_RE.findall(text))
-    english_words = len(_ENGLISH_WORD_RE.findall(text))
-    number_tokens = len(_NUMBER_RE.findall(text))
-    remaining = max(len(text) - cjk_chars - sum(len(m) for m in _ENGLISH_WORD_RE.findall(text)) - sum(len(m) for m in _NUMBER_RE.findall(text)), 0)
-    estimated = (cjk_chars * 1.5 + english_words * 1.3 + number_tokens * 0.5 + remaining * 0.3)
-    return max(int(estimated), 1)
 
 
 def estimate_message_tokens(message: dict[str, Any]) -> int:

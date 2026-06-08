@@ -508,6 +508,45 @@ def test_kb_section_chunking_uses_shared_window_and_overlap() -> None:
     assert chunks[0].asset_id == "asset-1"
 
 
+def test_kb_section_chunking_can_limit_estimated_tokens() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    from shared.token_estimation import estimate_tokens
+
+    parsing = importlib.import_module("app.parsing")
+    text = "审批规则" * 200
+    section = parsing.KBSection(
+        id="section-token",
+        section_index=4,
+        title="Policy Rules",
+        summary="",
+        search_text="",
+        text=text,
+        char_start=100,
+        char_end=100 + len(text),
+        source_kind="visual_ocr",
+        page_number=7,
+        asset_id="asset-token",
+    )
+
+    default_chunks = parsing.build_section_chunks(section)
+    token_chunks = parsing.build_section_chunks(section, max_tokens=90, token_overlap=12)
+
+    assert len(default_chunks) == 1
+    assert len(token_chunks) > len(default_chunks)
+    assert all(estimate_tokens(chunk.text) <= 90 for chunk in token_chunks)
+    assert [chunk.chunk_index for chunk in token_chunks] == list(range(1, len(token_chunks) + 1))
+    assert token_chunks[0].char_start == 100
+    assert token_chunks[-1].char_end == 100 + len(text)
+    assert token_chunks[1].char_start < token_chunks[0].char_end
+    assert token_chunks[0].search_text.startswith("policy rules ")
+    assert token_chunks[0].source_kind == "visual_ocr"
+    assert token_chunks[0].page_number == 7
+    assert token_chunks[0].asset_id == "asset-token"
+
+
 def test_kb_worker_reuses_shared_section_chunking() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
     prioritize_service_src(kb_src)
