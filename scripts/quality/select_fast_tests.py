@@ -232,6 +232,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "scripts/generate_api_route_index.py": [
         "tests/test_api_route_index.py",
     ],
+    "scripts/inspect_diagnostics_support_package.py": [
+        "tests/test_diagnostics_support_package.py",
+    ],
     "docs/API_ROUTE_INDEX.md": [
         "tests/test_api_route_index.py",
     ],

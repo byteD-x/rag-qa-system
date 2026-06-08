@@ -824,6 +824,14 @@ def test_fast_test_selector_routes_api_route_index_files_to_drift_tests() -> Non
     assert targets == ["tests/test_api_route_index.py"]
 
 
+def test_fast_test_selector_routes_diagnostics_support_script_to_owned_tests() -> None:
+    selector = _load_script_module("fast_test_selector_diagnostics_support_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["scripts/inspect_diagnostics_support_package.py"])
+
+    assert targets == ["tests/test_diagnostics_support_package.py"]
+
+
 def test_fast_test_selector_routes_dockerignore_to_container_asset_tests() -> None:
     selector = _load_script_module("fast_test_selector_dockerignore_test", "scripts/quality/select_fast_tests.py")
 
