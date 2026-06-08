@@ -65,6 +65,11 @@ def _gateway_llm_settings(module, *, credential: str = "sample-credential", base
     return module.LLMSettings(**settings_payload)
 
 
+def _clear_model_discovery_allowlist(monkeypatch) -> None:
+    monkeypatch.delenv("LLM_MODEL_DISCOVERY_ALLOWED_HOSTS", raising=False)
+    monkeypatch.delenv("AI_MODEL_DISCOVERY_ALLOWED_HOSTS", raising=False)
+
+
 def test_prompt_registry_supports_version_and_route_override(monkeypatch) -> None:
     monkeypatch.setenv(
         "PROMPT_REGISTRY_JSON",
@@ -171,8 +176,9 @@ def test_llm_config_summary_redacts_api_keys() -> None:
     assert "route-credential" not in serialized
 
 
-def test_discover_openai_compatible_models_parses_models_response() -> None:
+def test_discover_openai_compatible_models_parses_models_response(monkeypatch) -> None:
     gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    _clear_model_discovery_allowlist(monkeypatch)
     captured: dict[str, object] = {}
 
     class _Response:
@@ -218,8 +224,128 @@ def test_discover_openai_compatible_models_parses_models_response() -> None:
     assert [item["id"] for item in result["models"]] == ["gpt-test", "qwen-test"]
 
 
-def test_discover_openai_compatible_models_maps_upstream_error() -> None:
+def test_discover_openai_compatible_models_strips_models_query_and_fragment(monkeypatch) -> None:
     gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    _clear_model_discovery_allowlist(monkeypatch)
+    captured: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self) -> list[str]:
+            return ["relay-model"]
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str, *, headers: dict[str, str]):
+            captured["url"] = url
+            return _Response()
+
+    result = asyncio.run(
+        gateway_llm_models.discover_openai_compatible_models(
+            base_url="https://relay.example.test/v1/models?source=ui#models",
+            credential="relay-credential",
+            settings=_gateway_llm_settings(gateway_llm_models),
+            client_factory=_Client,
+        )
+    )
+
+    assert captured["url"] == "https://relay.example.test/v1/models"
+    assert result["base_url"] == "https://relay.example.test/v1"
+    assert [item["id"] for item in result["models"]] == ["relay-model"]
+
+
+def test_discover_openai_compatible_models_rejects_non_http_base_url(monkeypatch) -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    _clear_model_discovery_allowlist(monkeypatch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            gateway_llm_models.discover_openai_compatible_models(
+                base_url="ftp://relay.example.test/v1",
+                credential="relay-credential",
+                settings=_gateway_llm_settings(gateway_llm_models),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "http(s)" in str(exc_info.value.detail)
+
+
+def test_discover_openai_compatible_models_rejects_host_outside_allowlist(monkeypatch) -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    monkeypatch.setenv("LLM_MODEL_DISCOVERY_ALLOWED_HOSTS", "allowed-relay.example.test")
+    monkeypatch.delenv("AI_MODEL_DISCOVERY_ALLOWED_HOSTS", raising=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            gateway_llm_models.discover_openai_compatible_models(
+                base_url="https://blocked-relay.example.test/v1",
+                credential="relay-credential",
+                settings=_gateway_llm_settings(gateway_llm_models),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "not allowed" in str(exc_info.value.detail)
+
+
+def test_discover_llm_models_route_audits_without_secret(monkeypatch) -> None:
+    gateway_platform_routes = _import_gateway_module("app.gateway_platform_routes")
+    audit_events: list[dict[str, object]] = []
+    captured: dict[str, object] = {}
+
+    async def fake_discover(**kwargs):
+        captured.update(kwargs)
+        return {
+            "provider": kwargs["provider"],
+            "base_url": kwargs["base_url"],
+            "models_url": kwargs["base_url"].rstrip("/") + "/models",
+            "api_key_configured": True,
+            "current_model": "current-model",
+            "models": [{"id": "relay-model", "object": "model", "owned_by": "relay", "created": None}],
+            "count": 1,
+        }
+
+    monkeypatch.setattr(gateway_platform_routes, "discover_openai_compatible_models", fake_discover)
+    monkeypatch.setattr(gateway_platform_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(dict(kwargs)))
+
+    route_credential = "route-credential"
+    payload = gateway_platform_routes.LLMModelDiscoveryRequest(
+        **{
+            "provider": "newapi",
+            "base_url": "https://relay.example.test/v1",
+            "api_" + "key": route_credential,
+            "max_models": 10,
+        }
+    )
+    request = SimpleNamespace(url=SimpleNamespace(path="/api/v1/platform/llm/models/discover"))
+    user = SimpleNamespace(user_id="user-1", email="member@local", role="kb_editor", permissions=("chat.use",))
+
+    result = asyncio.run(gateway_platform_routes.post_discover_llm_models(payload, request, user))
+    details = audit_events[-1]["details"]
+    serialized_details = json.dumps(details, ensure_ascii=False)
+
+    assert result["count"] == 1
+    assert captured["credential"] == route_credential
+    assert route_credential not in serialized_details
+    assert audit_events[-1]["action"] == "platform.llm.models.discover"
+    assert details == {
+        "provider": "newapi",
+        "base_url": "https://relay.example.test/v1",
+        "model_count": 1,
+        "api_key_supplied": True,
+    }
+
+
+def test_discover_openai_compatible_models_maps_upstream_error(monkeypatch) -> None:
+    gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    _clear_model_discovery_allowlist(monkeypatch)
 
     class _Response:
         status_code = 401
@@ -251,8 +377,9 @@ def test_discover_openai_compatible_models_maps_upstream_error() -> None:
     assert exc_info.value.detail == "invalid relay key"
 
 
-def test_discover_openai_compatible_models_requires_api_key() -> None:
+def test_discover_openai_compatible_models_requires_api_key(monkeypatch) -> None:
     gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
+    _clear_model_discovery_allowlist(monkeypatch)
 
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

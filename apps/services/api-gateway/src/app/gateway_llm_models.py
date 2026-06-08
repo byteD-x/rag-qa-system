@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -60,6 +61,22 @@ def _normalize_base_url(raw_base_url: str) -> str:
 
 def _models_url(base_url: str) -> str:
     return f"{_normalize_base_url(base_url)}/models"
+
+
+def _allowed_model_discovery_hosts() -> set[str]:
+    raw = os.getenv("LLM_MODEL_DISCOVERY_ALLOWED_HOSTS") or os.getenv("AI_MODEL_DISCOVERY_ALLOWED_HOSTS") or ""
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _ensure_model_discovery_host_allowed(base_url: str) -> None:
+    allowed_hosts = _allowed_model_discovery_hosts()
+    if not allowed_hosts:
+        return
+    parsed = urlsplit(base_url)
+    host = (parsed.hostname or "").lower()
+    netloc = parsed.netloc.lower()
+    if host not in allowed_hosts and netloc not in allowed_hosts:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM model discovery host is not allowed")
 
 
 def _provider_error_detail(response: httpx.Response) -> str:
@@ -137,6 +154,7 @@ async def discover_openai_compatible_models(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM credential is required for model discovery")
 
     normalized_base_url = _normalize_base_url(resolved_base_url)
+    _ensure_model_discovery_host_allowed(normalized_base_url)
     url = _models_url(normalized_base_url)
     headers = {"Authorization": "Bearer " + resolved_credential, "Accept": "application/json"}
     max_items = min(max(int(max_models or DEFAULT_MAX_MODELS), 1), 1000)
