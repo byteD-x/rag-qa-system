@@ -547,6 +547,64 @@ def test_kb_section_chunking_can_limit_estimated_tokens() -> None:
     assert token_chunks[0].asset_id == "asset-token"
 
 
+def test_kb_section_chunking_rejects_invalid_token_options() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    parsing = importlib.import_module("app.parsing")
+    section = parsing.KBSection(
+        id="section-invalid",
+        section_index=1,
+        title="Policy",
+        summary="",
+        search_text="",
+        text="审批规则",
+        char_start=0,
+        char_end=4,
+    )
+
+    invalid_cases = [
+        {"window": 0},
+        {"overlap": -1},
+        {"max_tokens": 0},
+        {"token_overlap": -1},
+    ]
+    for kwargs in invalid_cases:
+        with pytest.raises(ValueError):
+            parsing.build_section_chunks(section, **kwargs)
+
+
+def test_kb_section_chunking_advances_with_tiny_token_budget() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    parsing = importlib.import_module("app.parsing")
+    text = "审批规则"
+    section = parsing.KBSection(
+        id="section-tiny-budget",
+        section_index=1,
+        title="Policy",
+        summary="",
+        search_text="",
+        text=text,
+        char_start=20,
+        char_end=20 + len(text),
+    )
+
+    chunks = parsing.build_section_chunks(section, max_tokens=1, token_overlap=0)
+
+    assert [chunk.chunk_index for chunk in chunks] == [1, 2, 3, 4]
+    assert [(chunk.char_start, chunk.char_end) for chunk in chunks] == [
+        (20, 21),
+        (21, 22),
+        (22, 23),
+        (23, 24),
+    ]
+    assert "".join(chunk.text for chunk in chunks) == text
+
+
 def test_kb_worker_reuses_shared_section_chunking() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
     prioritize_service_src(kb_src)
