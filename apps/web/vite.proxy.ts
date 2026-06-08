@@ -19,6 +19,10 @@ export function createApiProxy(gatewayOrigin: string) {
     '/api/v1': {
       target: gatewayOrigin,
       changeOrigin: true
+    },
+    '/api/v2': {
+      target: gatewayOrigin,
+      changeOrigin: true
     }
   };
 }

@@ -55,4 +55,13 @@ describe('vite dev proxy allowlist', () => {
       changeOrigin: true,
     });
   });
+
+  it('keeps the gateway v2 proxy available for chat graph endpoints', () => {
+    const proxy: Record<string, unknown> = createApiProxy('http://localhost:8080');
+
+    expect(proxy['/api/v2']).toEqual({
+      target: 'http://localhost:8080',
+      changeOrigin: true,
+    });
+  });
 });

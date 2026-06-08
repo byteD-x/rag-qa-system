@@ -141,6 +141,7 @@ export function createChatRunV2(
   options: { idempotencyKey?: string } = {}
 ) {
   return request.post(`/api/v2/chat/threads/${threadId}/runs`, data, {
+    baseURL: '',
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-v2-run')
     }
@@ -148,7 +149,7 @@ export function createChatRunV2(
 }
 
 export function getChatRunV2(runId: string) {
-  return request.get(`/api/v2/chat/runs/${runId}`);
+  return request.get(`/api/v2/chat/runs/${runId}`, { baseURL: '' });
 }
 
 export function resumeChatRunV2(
@@ -166,6 +167,7 @@ export function resumeChatRunV2(
   options: { idempotencyKey?: string } = {}
 ) {
   return request.post(`/api/v2/chat/runs/${runId}/resume`, data, {
+    baseURL: '',
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-v2-resume')
     }
