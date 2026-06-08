@@ -58,6 +58,7 @@
 - 知识库批量 dry-run 预览：`POST /api/knowledge_base/batch-dry-run` 只处理请求体内联多文档内容，输出分块摘要和脱敏文件名，不读取路径、不写入向量库、不触发批量 rebuild
 - 知识库批量写入 API：`POST /api/knowledge_base/batch-ingest` 只写入请求体内联文档并索引 section/chunk，不读取路径、不上传文件、不批量 delete
 - 知识库后台任务队列：`POST /api/knowledge_base/jobs` 支持把内联 ingest/rebuild 放入进程内串行队列，状态接口只返回任务摘要和脱敏文件名，不持久化、不扫描目录、不读取 source_file/source_path
+- 知识库固定 inbox 预览：`GET /api/knowledge_base/auto-index/preview` 只读扫描固定 `KB_BLOB_ROOT/knowledge_base/inbox` 一层文本/Markdown，输出分块摘要和跳过原因，不接收任意路径、不递归扫描、不自动入库
 - 知识库只读索引 API：`GET /api/knowledge_base/index` 只返回已入库 metadata 摘要，不做文件系统索引，不回显正文、embedding 或完整路径
 - Token级成本估算 + 本地 embedding / 证据数量上限等成本控制
 

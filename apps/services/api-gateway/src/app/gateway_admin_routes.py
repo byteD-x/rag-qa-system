@@ -106,6 +106,15 @@ async def proxy_knowledge_batch_dry_run(request: Request) -> Response:
     )
 
 
+@router.get("/api/knowledge_base/auto-index/preview")
+async def proxy_knowledge_auto_index_preview(request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path="/api/knowledge_base/auto-index/preview",
+    )
+
+
 @router.post("/api/knowledge_base/rebuild")
 async def proxy_knowledge_rebuild(request: Request) -> Response:
     return await proxy_request(

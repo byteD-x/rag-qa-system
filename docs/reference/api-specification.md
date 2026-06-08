@@ -461,6 +461,45 @@ SSE 流式回答，事件顺序：
 - 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
 - Web 治理页的批量 JSON 面板复用该接口做门禁预览；textarea 内容变化后，写入按钮会重新锁定，直到当前 JSON 再次 dry-run 通过。
 
+### `GET /api/knowledge_base/auto-index/preview`
+
+固定 inbox 只读预览接口，用于查看 `KB_BLOB_ROOT/knowledge_base/inbox` 下可被纳入后续自动索引流程的一层文本/Markdown 文件。该接口只做 dry-run 摘要，不写数据库、不写向量库、不自动入库。
+
+规则：
+
+- 要求 `kb.write` 权限。
+- inbox 路径固定由服务端 `KB_BLOB_ROOT` 推导，接口不接收路径参数。
+- 只扫描 inbox 目录一层，不递归子目录；符号链接、子目录、非文本/Markdown 扩展名会被跳过。
+- 当前支持 `.txt`、`.md`、`.markdown`，只按 UTF-8 / UTF-8 BOM 读取；非法 UTF-8 文件会被跳过。
+- 响应只返回 `dry_run`、`source=fixed_inbox`、脱敏 `inbox`、存在性、文档/跳过/字符/chunk 计数、每个文档的分块摘要和跳过原因。
+- 响应不返回正文、chunk text、embedding、`storage_path` 或完整本机路径。
+
+响应关键字段：
+
+```json
+{
+  "dry_run": true,
+  "source": "fixed_inbox",
+  "inbox": "knowledge_base/inbox",
+  "exists": true,
+  "document_count": 1,
+  "skipped_count": 0,
+  "chunk_count": 2,
+  "char_count": 1200,
+  "documents": [
+    {
+      "doc_id": "runbook",
+      "file_name": "runbook.md",
+      "file_type": "md",
+      "content_chars": 1200,
+      "section_count": 1,
+      "chunk_count": 2
+    }
+  ],
+  "skipped": []
+}
+```
+
 ### `POST /api/knowledge_base/batch-ingest`
 
 批量写入接口，仅用于把请求体内联多文档文本写入指定知识库并索引 section/chunk。该接口不会读取 `source_file` / `source_path` 指向的本机文件，不扫描目录，不上传文件，也不执行批量 rebuild/delete。

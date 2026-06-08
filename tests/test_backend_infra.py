@@ -317,6 +317,8 @@ def _load_kb_module(module_name: str):
     for name in (
         module_name,
         "app.main",
+        "app.kb_auto_index",
+        "app.kb_auto_index_routes",
         "app.kb_batch_dry_run",
         "app.kb_batch_dry_run_routes",
         "app.kb_batch_ingest",
@@ -4329,6 +4331,137 @@ def test_gateway_knowledge_batch_dry_run_uses_exact_proxy(monkeypatch) -> None:
             "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
             "service_path": "/api/knowledge_base/batch-dry-run",
             "request_path": "/api/knowledge_base/batch-dry-run",
+        }
+    ]
+    assert blocked.status_code == 404
+
+
+def test_knowledge_auto_index_preview_summarizes_fixed_inbox_without_raw_content(tmp_path: Path, monkeypatch) -> None:
+    kb_auto_index = _load_kb_module("app.kb_auto_index")
+    data_root = tmp_path / "data"
+    inbox = data_root / "knowledge_base" / "inbox"
+    inbox.mkdir(parents=True)
+    secret_sentence = "The auto index secret should not be returned."
+    (inbox / "runbook.md").write_text("# Runbook\n" + secret_sentence + "\n" + ("approval flow " * 90), encoding="utf-8")
+    (inbox / "notes.txt").write_text("\ufeffNotes\n" + ("travel policy " * 80), encoding="utf-8")
+    (inbox / "manual.pdf").write_bytes(b"%PDF-1.4")
+    (inbox / "bad.txt").write_bytes(b"\xff\xfe\x00")
+    (inbox / "nested").mkdir()
+    monkeypatch.setattr(kb_auto_index, "BLOB_ROOT", data_root)
+
+    payload = kb_auto_index.build_knowledge_auto_index_preview_payload()
+
+    assert payload["dry_run"] is True
+    assert payload["source"] == "fixed_inbox"
+    assert payload["inbox"] == "knowledge_base/inbox"
+    assert payload["exists"] is True
+    assert payload["document_count"] == 2
+    assert payload["skipped_count"] == 3
+    assert payload["chunk_count"] == sum(item["chunk_count"] for item in payload["documents"])
+    assert payload["char_count"] == sum(item["content_chars"] for item in payload["documents"])
+    assert [item["file_name"] for item in payload["documents"]] == ["notes.txt", "runbook.md"]
+    assert {item["reason"] for item in payload["skipped"]} == {"unsupported_extension", "utf8_decode_failed", "directory_ignored"}
+    assert payload["documents"][0]["sections"][0]["chunk_count"] >= 1
+    response_text = json.dumps(payload, ensure_ascii=False)
+    assert secret_sentence not in response_text
+    assert str(tmp_path) not in response_text
+    assert "chunk_text" not in response_text
+    assert "embedding" not in response_text
+
+
+def test_knowledge_auto_index_preview_reports_missing_inbox_without_path_leak(tmp_path: Path, monkeypatch) -> None:
+    kb_auto_index = _load_kb_module("app.kb_auto_index")
+    data_root = tmp_path / "data"
+    monkeypatch.setattr(kb_auto_index, "BLOB_ROOT", data_root)
+
+    payload = kb_auto_index.build_knowledge_auto_index_preview_payload()
+
+    assert payload == {
+        "dry_run": True,
+        "source": "fixed_inbox",
+        "inbox": "knowledge_base/inbox",
+        "exists": False,
+        "document_count": 0,
+        "skipped_count": 0,
+        "chunk_count": 0,
+        "char_count": 0,
+        "documents": [],
+        "skipped": [],
+        "limits": {
+            "max_files": kb_auto_index.AUTO_INDEX_MAX_FILES,
+            "max_file_bytes": kb_auto_index.AUTO_INDEX_MAX_FILE_BYTES,
+            "max_total_chars": kb_auto_index.AUTO_INDEX_MAX_TOTAL_CHARS,
+            "allowed_extensions": sorted(kb_auto_index.AUTO_INDEX_ALLOWED_EXTENSIONS),
+        },
+    }
+    assert str(tmp_path) not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_knowledge_auto_index_preview_route_uses_fixed_inbox_and_write_permission(tmp_path: Path, monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_auto_index = importlib.import_module("app.kb_auto_index")
+    data_root = tmp_path / "data"
+    inbox = data_root / "knowledge_base" / "inbox"
+    inbox.mkdir(parents=True)
+    secret_sentence = "The API auto index secret should not be returned."
+    (inbox / "runbook.md").write_text("# Runbook\n" + secret_sentence + "\n" + ("approval flow " * 90), encoding="utf-8")
+    monkeypatch.setattr(kb_auto_index, "BLOB_ROOT", data_root)
+    editor = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    viewer = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    allowed = client.get("/api/knowledge_base/auto-index/preview", headers=_auth_headers(editor))
+    forbidden = client.get("/api/knowledge_base/auto-index/preview", headers=_auth_headers(viewer))
+
+    assert allowed.status_code == 200
+    assert allowed.json()["source"] == "fixed_inbox"
+    assert allowed.json()["documents"][0]["file_name"] == "runbook.md"
+    assert forbidden.status_code == 403
+    assert forbidden.json()["code"] == "permission_denied"
+    assert secret_sentence not in allowed.text
+    assert str(tmp_path) not in allowed.text
+    assert "chunk_text" not in allowed.text
+    assert "embedding" not in allowed.text
+
+
+def test_gateway_knowledge_auto_index_preview_uses_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(gateway_main.app)
+
+    allowed = client.get("/api/knowledge_base/auto-index/preview", headers=_auth_headers(user))
+    blocked = client.get("/api/knowledge_base/auto-index/preview/delete", headers=_auth_headers(user))
+
+    assert allowed.status_code == 200
+    assert allowed.json()["service_path"] == "/api/knowledge_base/auto-index/preview"
+    assert calls == [
+        {
+            "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
+            "service_path": "/api/knowledge_base/auto-index/preview",
+            "request_path": "/api/knowledge_base/auto-index/preview",
         }
     ]
     assert blocked.status_code == 404
