@@ -321,6 +321,8 @@ def _load_kb_module(module_name: str):
         "app.kb_batch_dry_run_routes",
         "app.kb_batch_ingest",
         "app.kb_batch_ingest_routes",
+        "app.kb_index",
+        "app.kb_index_routes",
         "app.kb_query_routes",
         "app.kb_query_helpers",
         "app.parsing",
@@ -4697,6 +4699,216 @@ def test_gateway_knowledge_rebuild_uses_exact_proxy(monkeypatch) -> None:
             "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
             "service_path": "/api/knowledge_base/rebuild",
             "request_path": "/api/knowledge_base/rebuild",
+        }
+    ]
+    assert blocked.status_code == 404
+
+
+def test_knowledge_index_route_returns_metadata_summary_without_path_or_content(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_index = importlib.import_module("app.kb_index")
+    kb_index_routes = importlib.import_module("app.kb_index_routes")
+    executed: list[tuple[str, object]] = []
+
+    class _Cursor:
+        def __init__(self):
+            self._rows: list[dict[str, object]] = []
+            self._row: dict[str, object] | None = None
+
+        def execute(self, query, params=None):
+            query_text = str(query)
+            executed.append((query_text, params))
+            if "COUNT(*) AS document_count" in query_text:
+                self._row = {"document_count": 2, "chunk_count": 7}
+                self._rows = []
+                return
+            self._row = None
+            self._rows = [
+                {
+                    "document_id": "doc-1",
+                    "base_id": "base-1",
+                    "base_name": "Finance",
+                    "file_name": r"C:\secret\finance\expense-policy.txt",
+                    "file_type": "txt",
+                    "status": "ready",
+                    "query_ready": True,
+                    "enhancement_status": "chunk_vectors_ready",
+                    "section_count": 2,
+                    "chunk_count": 7,
+                    "stats_json": {
+                        "category": "policy",
+                        "raw_text": "Department owner and finance reviewer signatures are required.",
+                        "embedding": [0.1, 0.2],
+                    },
+                    "source_type": "batch_ingest",
+                    "source_uri": r"C:\secret\finance\expense-policy.txt",
+                    "version_family_key": "doc-1",
+                    "version_label": "v1",
+                    "version_number": 1,
+                    "version_status": "active",
+                    "is_current_version": True,
+                    "created_at": datetime(2026, 6, 1, tzinfo=timezone.utc),
+                    "updated_at": datetime(2026, 6, 2, tzinfo=timezone.utc),
+                }
+            ]
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return self._rows
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(kb_index_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_index, "check_vector_store", lambda: {"status": "ok"})
+    monkeypatch.setattr(kb_index.db, "connect", lambda: _Connection())
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.get("/api/knowledge_base/index?limit=1", headers=_auth_headers(user))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["vector_memory_available"] is True
+    assert payload["supports_index"] is True
+    assert payload["source"] == "knowledge_base"
+    assert payload["chunk_count"] == 7
+    assert payload["document_count"] == 2
+    assert payload["truncated"] is True
+    assert payload["documents"] == [
+        {
+            "document_id": "doc-1",
+            "base_id": "base-1",
+            "base_name": "Finance",
+            "file_name": "expense-policy.txt",
+            "file_type": "txt",
+            "status": "ready",
+            "query_ready": True,
+            "enhancement_status": "chunk_vectors_ready",
+            "section_count": 2,
+            "chunk_count": 7,
+            "category": "policy",
+            "source_type": "batch_ingest",
+            "source_ref": "expense-policy.txt",
+            "version_family_key": "doc-1",
+            "version_label": "v1",
+            "version_number": 1,
+            "version_status": "active",
+            "is_current_version": True,
+            "created_at": "2026-06-01T00:00:00+00:00",
+            "updated_at": "2026-06-02T00:00:00+00:00",
+        }
+    ]
+    assert "text_content" not in response.text
+    assert "raw_text" not in response.text
+    assert "embedding" not in response.text
+    assert "storage_path" not in response.text
+    assert "C:\\secret" not in response.text
+    assert all("text_content" not in query for query, _params in executed)
+    assert all("embedding" not in query.lower() for query, _params in executed)
+    assert all("storage_path" not in query for query, _params in executed)
+
+
+def test_knowledge_index_route_degrades_when_metadata_index_is_unsupported(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_index = importlib.import_module("app.kb_index")
+    kb_index_routes = importlib.import_module("app.kb_index_routes")
+
+    monkeypatch.setattr(kb_index_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(kb_index, "check_vector_store", lambda: (_ for _ in ()).throw(RuntimeError("qdrant down")))
+    monkeypatch.setattr(
+        kb_index,
+        "load_knowledge_index_counts",
+        lambda **_kwargs: (_ for _ in ()).throw(kb_index.KnowledgeIndexUnsupported()),
+    )
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.get("/api/knowledge_base/index", headers=_auth_headers(user))
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "vector_memory_available": False,
+        "supports_index": False,
+        "source": "knowledge_base",
+        "chunk_count": 0,
+        "document_count": 0,
+        "documents": [],
+        "truncated": False,
+    }
+
+
+def test_knowledge_index_route_requires_read_permission() -> None:
+    kb_main = _load_kb_module("app.main")
+    user = auth_module.AuthUser(
+        user_id="audit-1",
+        email="audit@local",
+        role="audit_viewer",
+        permissions=auth_module.permissions_for_role("audit_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.get("/api/knowledge_base/index", headers=_auth_headers(user))
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+
+
+def test_gateway_knowledge_index_uses_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(gateway_main.app)
+
+    allowed = client.get("/api/knowledge_base/index?limit=10", headers=_auth_headers(user))
+    blocked = client.get("/api/knowledge_base/index/delete", headers=_auth_headers(user))
+
+    assert allowed.status_code == 200
+    assert allowed.json()["service_path"] == "/api/knowledge_base/index"
+    assert calls == [
+        {
+            "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
+            "service_path": "/api/knowledge_base/index",
+            "request_path": "/api/knowledge_base/index",
         }
     ]
     assert blocked.status_code == 404

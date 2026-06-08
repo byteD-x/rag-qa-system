@@ -57,6 +57,7 @@
 - 知识库治理页批量 JSON：显式粘贴 `{documents:[...]}` 后必须先 batch dry-run，签名匹配才允许 batch-ingest；写入成功后可对生成的 document_id 逐个触发受控 rebuild
 - 知识库批量 dry-run 预览：`POST /api/knowledge_base/batch-dry-run` 只处理请求体内联多文档内容，输出分块摘要和脱敏文件名，不读取路径、不写入向量库、不触发批量 rebuild
 - 知识库批量写入 API：`POST /api/knowledge_base/batch-ingest` 只写入请求体内联文档并索引 section/chunk，不读取路径、不上传文件、不批量 delete
+- 知识库只读索引 API：`GET /api/knowledge_base/index` 只返回已入库 metadata 摘要，不做文件系统索引，不回显正文、embedding 或完整路径
 - Token级成本估算 + 本地 embedding / 证据数量上限等成本控制
 
 ### 9. AI Agent 自主决策体系

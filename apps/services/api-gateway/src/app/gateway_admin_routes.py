@@ -124,6 +124,15 @@ async def proxy_knowledge_batch_ingest(request: Request) -> Response:
     )
 
 
+@router.get("/api/knowledge_base/index")
+async def proxy_knowledge_index(request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path="/api/knowledge_base/index",
+    )
+
+
 @router.api_route("/api/v1/kb/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def proxy_kb(path: str, request: Request) -> Response:
     return await proxy_request(request, service_base_url=runtime_settings.kb_service_url, service_path=f"/api/v1/kb/{path}")

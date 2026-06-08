@@ -81,6 +81,12 @@
 
 该入口不同于 batch dry-run：它会写入数据库和向量库，但仍不读取 `source_file` / `source_path`，不扫描目录，不上传文件，也不批量 delete。响应只返回聚合计数、服务端生成的文档 ID 和脱敏文件名，不返回正文、chunk text、embedding 或完整路径。
 
+## Read-only index summary
+
+`GET /api/knowledge_base/index` 提供只读索引摘要，用于查看已入库文档 metadata 的聚合状态。它返回文档数、chunk 数、脱敏文件名、版本和来源摘要；不是文件系统索引，不扫描目录，不读取正文、chunk text、embedding、`storage_path` 或完整本机路径。
+
+当 metadata 枚举不可用时，响应会降级为 `supports_index=false`、空文档列表和 0 计数，不会改用本机路径扫描作为补偿。
+
 ## Notes
 
 - 治理接口要求 `kb.manage` 权限。

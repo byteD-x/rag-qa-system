@@ -510,6 +510,45 @@ SSE 流式回答，事件顺序：
 - 正式执行时必须携带与当前 `doc_id` 匹配的 `signature`；签名不匹配返回 HTTP 400。
 - 正式执行只删除并重建该文档已有 section/chunk 的向量索引，成功后返回 `indexed_sections`、`indexed_chunks`、`chunk_count` 等摘要字段。
 
+### `GET /api/knowledge_base/index`
+
+只读知识库索引摘要接口，用于查看当前已入库文档的 metadata 聚合状态。该接口不读取文件系统目录，不读取正文、chunk text、embedding、`storage_path` 或完整本机路径。
+
+查询参数：
+
+- `limit`：返回文档摘要数量，默认 100，范围 1-500。
+
+响应关键字段：
+
+```json
+{
+  "success": true,
+  "vector_memory_available": true,
+  "supports_index": true,
+  "source": "knowledge_base",
+  "chunk_count": 42,
+  "document_count": 8,
+  "documents": [
+    {
+      "document_id": "document-uuid",
+      "base_id": "base-uuid",
+      "base_name": "Finance",
+      "file_name": "policy.txt",
+      "source_ref": "policy.txt",
+      "chunk_count": 6,
+      "version_label": "v1"
+    }
+  ],
+  "truncated": false
+}
+```
+
+说明：
+
+- `documents` 只包含脱敏后的文档级摘要，例如文件叶子名、版本、状态、section/chunk 计数和来源摘要。
+- `source_ref` 对本机路径只保留叶子文件名；对 URL 只保留 host；对自定义 scheme 只保留 scheme。
+- 如果当前运行时不支持 metadata 枚举，接口返回 `supports_index=false`、空列表和计数 0；不会转而扫描目录。
+
 ### 视觉资产
 
 - `GET /api/v1/kb/documents/{document_id}/visual-assets`
