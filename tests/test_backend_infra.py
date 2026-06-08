@@ -766,6 +766,76 @@ def test_generate_grounded_answer_final_tools_default_off_keeps_plain_llm_call(m
     assert "owner sign-off" in result["answer"]
 
 
+def test_generate_grounded_answer_final_tools_enabled_records_zero_round_trace(monkeypatch) -> None:
+    gateway_answering = _load_gateway_module("app.gateway_answering")
+    monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
+    calls: list[dict[str, object]] = []
+
+    class _Settings:
+        configured = True
+        provider = "openai-compatible"
+        base_url = "https://llm.example.test/v1"
+        api_key = ""
+        model = "default-model"
+        system_prompt = ""
+        default_temperature = 0.7
+        default_max_tokens = 900
+        common_knowledge_model = ""
+        common_knowledge_max_tokens = 256
+        common_knowledge_history_messages = 1
+        common_knowledge_history_chars = 24
+        timeout_seconds = 30.0
+        extra_body = {}
+        model_routing = {}
+
+    async def fake_create_llm_completion(**kwargs):
+        calls.append(dict(kwargs))
+        assert kwargs.get("tools") is not None
+        assert kwargs.get("include_raw_message") is True
+        assert "extra_messages" not in kwargs or kwargs.get("extra_messages") is None
+        return {
+            "answer": "Expense approvals require owner sign-off. [1]",
+            "provider": "mock-provider",
+            "model": kwargs["model"],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+            "llm_trace": {"llm_call_id": "llm-no-tools", "prompt_key": "chat_grounded_answer"},
+        }
+
+    monkeypatch.setattr(gateway_answering, "load_llm_settings", lambda: _Settings())
+    monkeypatch.setattr(gateway_answering, "create_llm_completion", fake_create_llm_completion)
+
+    result = asyncio.run(
+        gateway_answering.generate_grounded_answer(
+            question="What approvals are needed for expense reimbursement?",
+            history=[],
+            evidence=[
+                {
+                    "document_title": "Expense policy",
+                    "section_title": "Approval",
+                    "quote": "Department owner approval is required before reimbursement.",
+                    "raw_text": "Department owner approval is required before reimbursement.",
+                    "evidence_path": {"final_score": 0.82},
+                }
+            ],
+            answer_mode="grounded",
+        )
+    )
+
+    assert len(calls) == 1
+    trace = result["llm_trace"]["final_answer_tools"]
+    assert trace == {
+        "enabled": True,
+        "rounds": 0,
+        "requested": 0,
+        "executed": 0,
+        "rejected": 0,
+        "failed": 0,
+        "events": [],
+        "pre_tool_llm_call_id": "llm-no-tools",
+    }
+    assert "_raw_message" not in result
+
+
 def test_generate_grounded_answer_executes_one_round_of_whitelisted_final_tools(monkeypatch) -> None:
     gateway_answering = _load_gateway_module("app.gateway_answering")
     monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
@@ -858,6 +928,95 @@ def test_generate_grounded_answer_executes_one_round_of_whitelisted_final_tools(
     ]
     assert "prompt_preview" not in str(trace)
     assert "_raw_message" not in result
+
+
+def test_generate_grounded_answer_skips_final_tools_over_budget(monkeypatch) -> None:
+    gateway_answering = _load_gateway_module("app.gateway_answering")
+    monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
+    calls: list[dict[str, object]] = []
+
+    class _Settings:
+        configured = True
+        provider = "openai-compatible"
+        base_url = "https://llm.example.test/v1"
+        api_key = ""
+        model = "default-model"
+        system_prompt = ""
+        default_temperature = 0.7
+        default_max_tokens = 900
+        common_knowledge_model = ""
+        common_knowledge_max_tokens = 256
+        common_knowledge_history_messages = 1
+        common_knowledge_history_chars = 24
+        timeout_seconds = 30.0
+        extra_body = {}
+        model_routing = {}
+
+    async def fake_create_llm_completion(**kwargs):
+        calls.append(dict(kwargs))
+        if kwargs.get("tools") is not None:
+            tool_calls = [
+                {"id": f"call-stats-{index}", "name": "tool_registry_stats", "args": {}}
+                for index in range(4)
+            ]
+            return {
+                "answer": "",
+                "provider": "mock-provider",
+                "model": kwargs["model"],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+                "tool_calls": tool_calls,
+                "_raw_message": gateway_answering.AIMessage(content="", tool_calls=tool_calls),
+                "llm_trace": {"llm_call_id": "llm-before-tools", "prompt_key": "chat_grounded_answer"},
+            }
+        extra_messages = list(kwargs.get("extra_messages") or [])
+        tool_payloads = [
+            json.loads(str(item.content))
+            for item in extra_messages
+            if isinstance(item, gateway_answering.ToolMessage)
+        ]
+        assert len(tool_payloads) == 4
+        assert all(payload["success"] is True for payload in tool_payloads[:3])
+        assert tool_payloads[3] == {"success": False, "error": "tool call budget exceeded"}
+        return {
+            "answer": "Only the first three final-answer tools were executed. [1]",
+            "provider": "mock-provider",
+            "model": kwargs["model"],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 12},
+            "llm_trace": {"llm_call_id": "llm-after-tools", "prompt_key": "chat_grounded_answer"},
+        }
+
+    monkeypatch.setattr(gateway_answering, "load_llm_settings", lambda: _Settings())
+    monkeypatch.setattr(gateway_answering, "create_llm_completion", fake_create_llm_completion)
+
+    result = asyncio.run(
+        gateway_answering.generate_grounded_answer(
+            question="Summarize available diagnostics.",
+            history=[],
+            evidence=[
+                {
+                    "document_title": "Diagnostics",
+                    "section_title": "Tools",
+                    "quote": "Tool statistics can be used for diagnostics.",
+                    "raw_text": "Tool statistics can be used for diagnostics.",
+                    "evidence_path": {"final_score": 0.82},
+                }
+            ],
+            answer_mode="grounded",
+        )
+    )
+
+    assert len(calls) == 2
+    trace = result["llm_trace"]["final_answer_tools"]
+    assert trace["requested"] == 4
+    assert trace["executed"] == 3
+    assert trace["rejected"] == 1
+    assert trace["failed"] == 0
+    assert [event["status"] for event in trace["events"]] == ["success", "success", "success", "skipped"]
+    assert trace["events"][3] == {
+        "tool": "tool_registry_stats",
+        "status": "skipped",
+        "reason": "tool_call_budget_exceeded",
+    }
 
 
 def test_generate_grounded_answer_normalizes_non_object_final_tools_args_without_trace_leak(monkeypatch) -> None:
