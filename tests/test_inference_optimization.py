@@ -347,6 +347,47 @@ class TestSemanticCache:
         assert stats["total_entries"] >= 1
         assert "hit_rate_estimate" in stats
 
+    def test_cache_stats_prunes_expired_entries_consistently(self, monkeypatch) -> None:
+        _import_gateway("app.semantic_cache", monkeypatch)
+        from app.semantic_cache import CacheEntry, SemanticCache
+
+        cache = SemanticCache()
+        cache._memory_cache.clear()
+        cache._lru_order.clear()
+        now = time.time()
+        entries = [
+            CacheEntry(
+                cache_key="expired-1", corpus_key="kb:x", question_embedding=[], question="old-1", answer="a",
+                answer_mode="g", citations=[], usage={}, corpus_ids=["kb:x"],
+                model_name="t", created_at=now - 10, ttl_seconds=1,
+            ),
+            CacheEntry(
+                cache_key="expired-2", corpus_key="kb:x", question_embedding=[], question="old-2", answer="a",
+                answer_mode="g", citations=[], usage={}, corpus_ids=["kb:x"],
+                model_name="t", created_at=now - 20, ttl_seconds=1,
+            ),
+            CacheEntry(
+                cache_key="live", corpus_key="kb:x", question_embedding=[], question="live", answer="a",
+                answer_mode="g", citations=[], usage={}, corpus_ids=["kb:x"],
+                model_name="t", created_at=now, ttl_seconds=999,
+            ),
+        ]
+        for entry in entries:
+            cache._memory_cache[entry.cache_key] = entry
+            cache._lru_order.append(entry.cache_key)
+
+        stats = cache.stats()
+        stats_after_prune = cache.stats()
+
+        assert stats["expired_entries"] == 2
+        assert stats["expired"] == 2
+        assert stats["size"] == 1
+        assert stats["total_entries"] == 1
+        assert stats_after_prune["expired_entries"] == 0
+        assert stats_after_prune["expired"] == 2
+        assert stats_after_prune["size"] == 1
+        assert stats_after_prune["total_entries"] == 1
+
     @pytest.mark.asyncio
     async def test_cache_stats_tracks_runtime_events(self, monkeypatch) -> None:
         _import_gateway("app.semantic_cache", monkeypatch)

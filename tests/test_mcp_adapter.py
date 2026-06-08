@@ -31,6 +31,12 @@ def _load_gateway_module(module_name: str, monkeypatch):
     return importlib.reload(module)
 
 
+def _assert_no_private_markers(value: object) -> None:
+    text = str(value)
+    assert "prompt_preview" not in text
+    assert "C:/private/source.txt" not in text
+
+
 @pytest.mark.asyncio
 async def test_mcp_initialize_returns_readonly_capabilities(monkeypatch) -> None:
     adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
@@ -50,6 +56,59 @@ async def test_mcp_initialize_returns_readonly_capabilities(monkeypatch) -> None
     assert result["protocolVersion"] == "2024-11-05"
     assert result["serverInfo"]["name"] == "rag-qa-gateway-readonly"
     assert result["capabilities"] == {"tools": {"listChanged": False}}
+
+
+@pytest.mark.asyncio
+async def test_mcp_missing_id_request_returns_null_id_response(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+
+    response = await adapter.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {},
+        }
+    )
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] is None
+    assert response["result"]["protocolVersion"] == adapter.MCP_PROTOCOL_FALLBACK_VERSION
+    details = adapter.mcp_audit_details({"jsonrpc": "2.0", "method": "initialize"}, response)
+    assert details == {"method": "initialize", "has_error": False}
+
+
+@pytest.mark.asyncio
+async def test_mcp_rejects_non_object_request_without_echoing_payload(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+
+    response = await adapter.handle_mcp_request(["prompt_preview", "C:/private/source.txt"])
+
+    assert response["jsonrpc"] == "2.0"
+    assert response["id"] is None
+    assert response["error"]["code"] == -32600
+    assert response["error"]["message"] == "Invalid Request"
+    _assert_no_private_markers(response)
+
+
+@pytest.mark.asyncio
+async def test_mcp_rejects_non_object_params_without_echoing_payload(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+    message = {
+        "jsonrpc": "2.0",
+        "id": "bad-params",
+        "method": "tools/call",
+        "params": ["prompt_preview", "C:/private/source.txt"],
+    }
+
+    response = await adapter.handle_mcp_request(message)
+    details = adapter.mcp_audit_details(message, response)
+
+    assert response["id"] == "bad-params"
+    assert response["error"]["code"] == -32602
+    assert response["error"]["data"]["reason"] == "params must be an object"
+    assert details == {"method": "tools/call", "has_error": True, "error_code": -32602}
+    _assert_no_private_markers(response)
+    _assert_no_private_markers(details)
 
 
 @pytest.mark.asyncio
@@ -166,6 +225,56 @@ async def test_mcp_tools_call_rejects_blocked_tools_and_non_object_arguments(mon
     )
     assert invalid_args["error"]["code"] == -32602
     assert invalid_args["error"]["data"]["reason"] == "arguments must be an object"
+
+
+@pytest.mark.asyncio
+async def test_mcp_blocked_tool_error_response_does_not_echo_tool_name(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+    message = {
+        "jsonrpc": "2.0",
+        "id": "blocked-private",
+        "method": "tools/call",
+        "params": {"name": "prompt_preview C:/private/source.txt", "arguments": {}},
+    }
+
+    response = await adapter.handle_mcp_request(message)
+    details = adapter.mcp_audit_details(message, response)
+
+    assert response["error"]["code"] == -32602
+    assert response["error"]["data"]["reason"] == "tool is not allowed"
+    assert details["tool_name"] == "not_allowed"
+    _assert_no_private_markers(response)
+    _assert_no_private_markers(details)
+
+
+@pytest.mark.asyncio
+async def test_mcp_failed_tool_returns_is_error_with_sanitized_text(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+
+    async def fake_failed_workflow(**_kwargs: object) -> dict[str, object]:
+        return {"success": False, "error": "workflow failed\r\n" + ("x" * 300)}
+
+    monkeypatch.setattr(adapter, "run_tool_workflow", fake_failed_workflow)
+
+    response = await adapter.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "failed-tool",
+            "method": "tools/call",
+            "params": {"name": "kb_scope_summary", "arguments": {}},
+        }
+    )
+
+    result = response["result"]
+    text = result["content"][0]["text"]
+    assert response["id"] == "failed-tool"
+    assert "error" not in response
+    assert result["isError"] is True
+    assert "structuredContent" not in result
+    assert text.startswith("workflow failed")
+    assert "\r" not in text
+    assert "\n" not in text
+    assert len(text) == 240
 
 
 @pytest.mark.asyncio

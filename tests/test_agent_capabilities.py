@@ -430,6 +430,82 @@ class TestToolRegistry:
         tr._category_index.clear()
         tr._cache.clear()
 
+    @pytest.mark.asyncio
+    async def test_workflow_trace_summary_handles_sparse_and_failed_tool_calls(self, monkeypatch) -> None:
+        _import_module("app.business_tools", monkeypatch)
+        from app.business_tools import ensure_business_tools_registered
+        from app.tool_registry import tool_registry as tr
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
+        ensure_business_tools_registered()
+
+        empty_result = await tr.execute("workflow_trace_summary", {})
+        assert empty_result.success
+        assert empty_result.data["trace_completeness"] == 0.0
+        assert empty_result.data["tool_call_count"] == 0
+        assert empty_result.data["tool_success_rate"] == 0.0
+        assert empty_result.data["model_route"] == ""
+        assert empty_result.data["fallback_used"] is False
+        assert empty_result.data["cache_hit"] is False
+        assert empty_result.data["hallucination_passed"] is None
+
+        partial_state_result = await tr.execute(
+            "workflow_trace_summary",
+            {
+                "workflow_state": {
+                    "llm_trace": {
+                        "model": "test-model-lite",
+                        "fallback_used": True,
+                    }
+                },
+                "tool_calls": [],
+            },
+        )
+        assert partial_state_result.success
+        assert partial_state_result.data["trace_completeness"] == 0.5
+        assert partial_state_result.data["tool_call_count"] == 0
+        assert partial_state_result.data["tool_success_rate"] == 0.0
+        assert partial_state_result.data["model_route"] == "test-model-lite"
+        assert partial_state_result.data["fallback_used"] is True
+        assert partial_state_result.data["cache_hit"] is False
+        assert partial_state_result.data["hallucination_passed"] is None
+
+        failed_call_result = await tr.execute(
+            "workflow_trace_summary",
+            {
+                "workflow_state": {
+                    "response": {
+                        "llm_trace": {
+                            "route": "quality",
+                            "fallback_model": "test-fallback",
+                        },
+                        "semantic_cache": {"cache_hit": False},
+                        "hallucination": {"passed": False},
+                    }
+                },
+                "tool_calls": [
+                    {"tool": "search", "error": "upstream unavailable"},
+                    {"tool": "summarize", "success": True},
+                    {"tool": "rerank", "success": False},
+                ],
+            },
+        )
+        assert failed_call_result.success
+        assert failed_call_result.data["trace_completeness"] == 1.0
+        assert failed_call_result.data["tool_call_count"] == 3
+        assert failed_call_result.data["tool_success_rate"] == 0.3333
+        assert failed_call_result.data["model_route"] == "quality"
+        assert failed_call_result.data["fallback_used"] is True
+        assert failed_call_result.data["cache_hit"] is False
+        assert failed_call_result.data["hallucination_passed"] is False
+
+        tr._tools.clear()
+        tr._category_index.clear()
+        tr._cache.clear()
+
 
 # ============================================================================
 # 任务拆解引擎测试
