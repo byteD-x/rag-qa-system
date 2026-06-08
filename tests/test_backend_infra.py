@@ -860,6 +860,97 @@ def test_generate_grounded_answer_executes_one_round_of_whitelisted_final_tools(
     assert "_raw_message" not in result
 
 
+def test_generate_grounded_answer_normalizes_non_object_final_tools_args_without_trace_leak(monkeypatch) -> None:
+    gateway_answering = _load_gateway_module("app.gateway_answering")
+    monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
+    calls: list[dict[str, object]] = []
+    leaked_arg = "C:/private/prompt_preview/source.txt"
+
+    class _Settings:
+        configured = True
+        provider = "openai-compatible"
+        base_url = "https://llm.example.test/v1"
+        api_key = ""
+        model = "default-model"
+        system_prompt = ""
+        default_temperature = 0.7
+        default_max_tokens = 900
+        common_knowledge_model = ""
+        common_knowledge_max_tokens = 256
+        common_knowledge_history_messages = 1
+        common_knowledge_history_chars = 24
+        timeout_seconds = 30.0
+        extra_body = {}
+        model_routing = {}
+
+    async def fake_create_llm_completion(**kwargs):
+        calls.append(dict(kwargs))
+        if kwargs.get("tools") is not None:
+            tool_calls = [
+                {
+                    "id": "call-stats",
+                    "name": "tool_registry_stats",
+                    "args": ["prompt_preview", leaked_arg],
+                }
+            ]
+            return {
+                "answer": "",
+                "provider": "mock-provider",
+                "model": kwargs["model"],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+                "tool_calls": tool_calls,
+                "_raw_message": gateway_answering.AIMessage(
+                    content="",
+                    tool_calls=[{"id": "call-stats", "name": "tool_registry_stats", "args": {}}],
+                ),
+                "llm_trace": {"llm_call_id": "llm-before-tools", "prompt_key": "chat_grounded_answer"},
+            }
+        extra_messages = list(kwargs.get("extra_messages") or [])
+        tool_payloads = [
+            json.loads(str(item.content))
+            for item in extra_messages
+            if isinstance(item, gateway_answering.ToolMessage)
+        ]
+        assert tool_payloads[0]["success"] is True
+        return {
+            "answer": "The final tool call used safe default arguments. [1]",
+            "provider": "mock-provider",
+            "model": kwargs["model"],
+            "usage": {"prompt_tokens": 20, "completion_tokens": 12},
+            "llm_trace": {"llm_call_id": "llm-after-tools", "prompt_key": "chat_grounded_answer"},
+        }
+
+    monkeypatch.setattr(gateway_answering, "load_llm_settings", lambda: _Settings())
+    monkeypatch.setattr(gateway_answering, "create_llm_completion", fake_create_llm_completion)
+
+    result = asyncio.run(
+        gateway_answering.generate_grounded_answer(
+            question="Summarize available diagnostics.",
+            history=[],
+            evidence=[
+                {
+                    "document_title": "Diagnostics",
+                    "section_title": "Tools",
+                    "quote": "Tool statistics can be used for diagnostics.",
+                    "raw_text": "Tool statistics can be used for diagnostics.",
+                    "evidence_path": {"final_score": 0.82},
+                }
+            ],
+            answer_mode="grounded",
+        )
+    )
+
+    assert len(calls) == 2
+    trace = result["llm_trace"]["final_answer_tools"]
+    assert trace["requested"] == 1
+    assert trace["executed"] == 1
+    assert trace["events"][0]["tool"] == "tool_registry_stats"
+    assert trace["events"][0]["status"] == "success"
+    trace_text = json.dumps(trace, ensure_ascii=False)
+    assert "prompt_preview" not in trace_text
+    assert leaked_arg not in trace_text
+
+
 def test_generate_grounded_answer_rejects_non_whitelisted_final_tool_call(monkeypatch) -> None:
     gateway_answering = _load_gateway_module("app.gateway_answering")
     monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
