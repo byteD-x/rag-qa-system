@@ -572,6 +572,43 @@ LLM_API_KEY=your-llm-api-key
 LLM_MODEL=qwen3.5-plus
 ```
 
+### 接入 newapi / sub2api 等中转站
+
+模型生成链路按 OpenAI-compatible 协议请求 `LLM_BASE_URL`，因此 newapi、sub2api 或其他兼容中转站通常只需要替换下面三项：
+
+```env
+LLM_PROVIDER=openai-compatible
+LLM_BASE_URL=https://your-relay.example.com/v1
+LLM_API_KEY=
+LLM_MODEL=relay-model-id
+```
+
+`LLM_API_KEY` 请由本地 `.env`、容器密钥或专用密钥管理系统填入，不要把真实值提交到仓库。
+
+如果需要按场景使用不同中转站或模型，可通过 `LLM_MODEL_ROUTING_JSON` 配置路由；`docker-compose.yml` 已将该变量传入 Gateway 服务：
+
+```env
+LLM_MODEL_ROUTING_JSON='{
+  "grounded": {
+      "provider": "openai-compatible",
+      "base_url": "https://your-relay.example.com/v1",
+      "api_key": "",
+      "model": "relay-grounded-model",
+      "fallback_route_key": "grounded_backup"
+    },
+    "grounded_backup": {
+      "provider": "openai-compatible",
+      "base_url": "https://backup-relay.example.com/v1",
+      "api_key": "",
+      "model": "relay-backup-model"
+    }
+  }'
+```
+
+`api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。
+
+平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，后端会请求 `{LLM_BASE_URL}/models` 拉取模型列表，并返回可选择的模型 ID 与配置片段。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入响应；生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容。
+
 ### Vercel 展示型 `.env` 模板
 
 仓库提供了 [`.env.vercel.example`](.env.vercel.example)。

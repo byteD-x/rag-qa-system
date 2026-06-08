@@ -38,7 +38,7 @@
 - `apps/services/knowledge-base/src/app/kb_visual_routes.py`
 - `apps/services/knowledge-base/src/app/main.py`
 
-## 路由总览（112 条）
+## 路由总览（114 条）
 
 | service | methods | path | handler | source |
 |---|---|---|---|---|
@@ -59,7 +59,7 @@
 | api-gateway | `GET` | `/api/knowledge_base/status` | `proxy_knowledge_status` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:163` |
 | knowledge-base | `GET` | `/api/knowledge_base/status` | `get_knowledge_status` | `apps/services/knowledge-base/src/app/kb_job_queue_routes.py:53` |
 | api-gateway | `POST` | `/api/v1/admin/costs/provider-billing-records` | `import_provider_billing` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:81` |
-| api-gateway | `POST` | `/api/v1/agents/tool-workflow` | `post_tool_workflow` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:39` |
+| api-gateway | `POST` | `/api/v1/agents/tool-workflow` | `post_tool_workflow` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:42` |
 | api-gateway | `GET` | `/api/v1/analytics/dashboard` | `get_dashboard` | `apps/services/api-gateway/src/app/gateway_analytics_routes.py:645` |
 | api-gateway | `GET` | `/api/v1/audit/events` | `list_audit_events` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:34` |
 | api-gateway | `POST` | `/api/v1/auth/login` | `login` | `apps/services/api-gateway/src/app/gateway_auth_routes.py:15` |
@@ -128,16 +128,18 @@
 | knowledge-base | `GET` | `/api/v1/kb/visual-assets/{asset_id}/thumbnail` | `get_visual_asset_thumbnail` | `apps/services/knowledge-base/src/app/kb_visual_routes.py:15` |
 | api-gateway | `DELETE, GET, OPTIONS, PATCH, POST, PUT` | `/api/v1/kb/{path:path}` | `proxy_kb` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:172` |
 | api-gateway | `POST` | `/api/v1/mcp` | `post_mcp` | `apps/services/api-gateway/src/app/gateway_mcp_routes.py:17` |
-| api-gateway | `GET` | `/api/v1/platform/agent-profiles` | `get_agent_profiles` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:132` |
-| api-gateway | `POST` | `/api/v1/platform/agent-profiles` | `post_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:138` |
-| api-gateway | `DELETE` | `/api/v1/platform/agent-profiles/{profile_id}` | `remove_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:178` |
-| api-gateway | `GET` | `/api/v1/platform/agent-profiles/{profile_id}` | `get_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:154` |
-| api-gateway | `PATCH` | `/api/v1/platform/agent-profiles/{profile_id}` | `patch_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:161` |
-| api-gateway | `GET` | `/api/v1/platform/prompt-templates` | `get_prompt_templates` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:81` |
-| api-gateway | `POST` | `/api/v1/platform/prompt-templates` | `post_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:87` |
-| api-gateway | `DELETE` | `/api/v1/platform/prompt-templates/{template_id}` | `remove_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:124` |
-| api-gateway | `GET` | `/api/v1/platform/prompt-templates/{template_id}` | `get_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:102` |
-| api-gateway | `PATCH` | `/api/v1/platform/prompt-templates/{template_id}` | `patch_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:108` |
+| api-gateway | `GET` | `/api/v1/platform/agent-profiles` | `get_agent_profiles` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:167` |
+| api-gateway | `POST` | `/api/v1/platform/agent-profiles` | `post_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:173` |
+| api-gateway | `DELETE` | `/api/v1/platform/agent-profiles/{profile_id}` | `remove_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:213` |
+| api-gateway | `GET` | `/api/v1/platform/agent-profiles/{profile_id}` | `get_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:189` |
+| api-gateway | `PATCH` | `/api/v1/platform/agent-profiles/{profile_id}` | `patch_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:196` |
+| api-gateway | `GET` | `/api/v1/platform/llm/config` | `get_llm_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:84` |
+| api-gateway | `POST` | `/api/v1/platform/llm/models/discover` | `post_discover_llm_models` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:90` |
+| api-gateway | `GET` | `/api/v1/platform/prompt-templates` | `get_prompt_templates` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:116` |
+| api-gateway | `POST` | `/api/v1/platform/prompt-templates` | `post_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:122` |
+| api-gateway | `DELETE` | `/api/v1/platform/prompt-templates/{template_id}` | `remove_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:159` |
+| api-gateway | `GET` | `/api/v1/platform/prompt-templates/{template_id}` | `get_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:137` |
+| api-gateway | `PATCH` | `/api/v1/platform/prompt-templates/{template_id}` | `patch_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:143` |
 | api-gateway | `GET` | `/api/v1/system/metrics-summary` | `metrics_summary` | `apps/services/api-gateway/src/app/gateway_system_routes.py:63` |
 | api-gateway | `POST` | `/api/v2/chat/interrupts/{interrupt_id}/submit` | `submit_chat_interrupt` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:259` |
 | api-gateway | `GET` | `/api/v2/chat/runs/{run_id}` | `get_chat_run` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:218` |
