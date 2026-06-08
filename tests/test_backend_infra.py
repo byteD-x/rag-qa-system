@@ -1271,6 +1271,179 @@ def test_generate_grounded_answer_blocks_second_round_final_tool_calls(monkeypat
     assert "Tool statistics can be used for diagnostics" in result["answer"]
 
 
+def test_create_llm_completion_maps_openai_response_contract(monkeypatch) -> None:
+    ai_client = _load_gateway_module("app.ai_client")
+    relay_credential = "relay-" + "credential"
+    captured: dict[str, object] = {}
+
+    class _FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "model": "relay-model",
+                "choices": [
+                    {
+                        "message": {
+                            "content": [{"type": "text", "text": "Grounded answer"}],
+                            "reasoning_content": "Checked the cited evidence.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 3},
+            }
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return _FakeResponse()
+
+    monkeypatch.setattr(ai_client.httpx, "AsyncClient", _FakeAsyncClient)
+
+    settings = ai_client.LLMSettings(
+        enabled=True,
+        provider="mock-provider",
+        base_url="https://example.invalid/v1/",
+        **{"api_" + "key": relay_credential},
+        model="default-model",
+        common_knowledge_model="",
+        timeout_seconds=30.0,
+        default_temperature=0.7,
+        default_max_tokens=512,
+        common_knowledge_max_tokens=256,
+        common_knowledge_history_messages=4,
+        common_knowledge_history_chars=400,
+        system_prompt="",
+        extra_body={"reasoning": {"effort": "medium"}},
+    )
+
+    result = asyncio.run(
+        ai_client.create_llm_completion(
+            settings=settings,
+            messages=[{"role": "user", "content": "Answer with evidence"}],
+            model="relay-model",
+            temperature=0.2,
+            max_tokens=128,
+        )
+    )
+
+    assert captured["url"] == "https://example.invalid/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == " ".join(["Bearer", relay_credential])
+    assert isinstance(captured["json"], dict)
+    assert captured["json"]["model"] == "relay-model"
+    assert captured["json"]["temperature"] == 0.2
+    assert captured["json"]["max_tokens"] == 128
+    assert captured["json"]["reasoning"] == {"effort": "medium"}
+    assert result["answer"] == "Grounded answer"
+    assert result["reasoning"] == "Checked the cited evidence."
+    assert result["model"] == "relay-model"
+    assert result["provider"] == "mock-provider"
+    assert result["finish_reason"] == "stop"
+    assert result["usage"] == {"prompt_tokens": 8, "completion_tokens": 3}
+
+
+def test_create_llm_completion_stream_handles_non_sse_json_response(monkeypatch) -> None:
+    ai_client = _load_gateway_module("app.ai_client")
+    relay_credential = "relay-" + "credential"
+    captured: dict[str, object] = {}
+
+    class _FakeStreamResponse:
+        status_code = 200
+        headers = {"content-type": "application/json"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aread(self):
+            return json.dumps(
+                {
+                    "model": "non-sse-model",
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "Non-SSE answer",
+                                "reasoning_content": [{"text": "Fallback parser used."}],
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 4, "completion_tokens": 2},
+                }
+            ).encode("utf-8")
+
+    class _FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, json=None):
+            captured["method"] = method
+            captured["url"] = url
+            captured["json"] = json
+            return _FakeStreamResponse()
+
+    monkeypatch.setattr(ai_client.httpx, "AsyncClient", _FakeAsyncClient)
+
+    settings = ai_client.LLMSettings(
+        enabled=True,
+        provider="mock-provider",
+        base_url="https://example.invalid/v1",
+        **{"api_" + "key": relay_credential},
+        model="default-model",
+        common_knowledge_model="",
+        timeout_seconds=30.0,
+        default_temperature=0.7,
+        default_max_tokens=512,
+        common_knowledge_max_tokens=256,
+        common_knowledge_history_messages=4,
+        common_knowledge_history_chars=400,
+        system_prompt="",
+        extra_body={"metadata": {"route": "grounded"}},
+    )
+    snapshots: list[str] = []
+
+    result = asyncio.run(
+        ai_client.create_llm_completion_stream(
+            settings=settings,
+            messages=[{"role": "user", "content": "Say hello"}],
+            model="non-sse-model",
+            temperature=0.3,
+            max_tokens=128,
+            on_text_delta=lambda _delta, answer_text: snapshots.append(answer_text),
+        )
+    )
+
+    assert snapshots == ["Non-SSE answer"]
+    assert captured["method"] == "POST"
+    assert isinstance(captured["json"], dict)
+    assert captured["json"]["stream"] is True
+    assert captured["json"]["metadata"] == {"route": "grounded"}
+    assert result["answer"] == "Non-SSE answer"
+    assert result["reasoning"] == "Fallback parser used."
+    assert result["model"] == "non-sse-model"
+    assert result["usage"] == {"prompt_tokens": 4, "completion_tokens": 2}
+
+
 def test_create_llm_completion_stream_yields_live_deltas(monkeypatch) -> None:
     ai_client = _load_gateway_module("app.ai_client")
     captured: dict[str, object] = {}

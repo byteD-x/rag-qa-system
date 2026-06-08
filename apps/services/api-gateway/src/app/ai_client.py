@@ -86,7 +86,7 @@ def _parse_model_routing(raw: str) -> dict[str, dict[str, Any]]:
         if not isinstance(route_key, str) or not isinstance(raw_definition, dict):
             continue
         cleaned: dict[str, Any] = {}
-        for key in ("provider", "base_url", "api_key", "model"):
+        for key in ("provider", "base_url", "api_key", "model", "fallback_route_key"):
             value = raw_definition.get(key)
             if isinstance(value, str) and value.strip():
                 cleaned[key] = value.strip()

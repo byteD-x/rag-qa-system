@@ -163,6 +163,31 @@ def test_model_routing_plan_includes_configured_fallback_route() -> None:
     assert decisions[1]["base_url"] == "https://backup.example.test/v1"
 
 
+def test_gateway_llm_settings_parses_fallback_route_key_from_env(monkeypatch) -> None:
+    ai_client = _import_gateway_module("app.ai_client")
+    monkeypatch.setenv(
+        "LLM_MODEL_ROUTING_JSON",
+        json.dumps(
+            {
+                "grounded": {
+                    "model": "grounded-model",
+                    "fallback_route_key": "grounded_backup",
+                },
+                "grounded_backup": {
+                    "model": "grounded-backup-model",
+                    "base_url": "https://backup.example.test/v1",
+                },
+            }
+        ),
+    )
+    monkeypatch.delenv("AI_MODEL_ROUTING_JSON", raising=False)
+
+    settings = ai_client.load_llm_settings()
+
+    assert settings.model_routing["grounded"]["fallback_route_key"] == "grounded_backup"
+    assert settings.model_routing["grounded_backup"]["model"] == "grounded-backup-model"
+
+
 def test_llm_config_summary_redacts_api_keys() -> None:
     gateway_llm_models = _import_gateway_module("app.gateway_llm_models")
     settings = _gateway_llm_settings(gateway_llm_models)
