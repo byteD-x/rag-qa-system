@@ -890,7 +890,82 @@ LangGraph 编排版知识库问答接口。
 - `sql_query` 通过 `dsn_env` 引用后端环境变量中的 DSN，避免在请求体中直接传递敏感连接串
 - `run-due` 适合配合外部 cron / worker 做定时执行
 
-## 11. Prompt Template 与 Agent Profile
+## 11. 平台配置、Prompt Template 与 Agent Profile
+
+### LLM 配置与模型发现
+
+#### `GET /api/v1/platform/llm/config`
+
+用途：
+
+- 返回 Gateway 当前 LLM 配置的脱敏摘要，供 `/workspace/platform/models` 模型接入页展示。
+- 展示默认 provider、Base URL、当前模型、common knowledge 模型和 route 配置。
+- route 配置会保留 `fallback_route_key`、`temperature`、`max_tokens`、`timeout_seconds` 与 `extra_body` 摘要，但密钥只返回 `api_key_configured`，不返回原文。
+
+权限：
+
+- 需要 `chat.use`。
+
+响应关键字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `enabled` | `boolean` | LLM 是否启用 |
+| `configured` | `boolean` | 默认 Base URL、凭据和模型是否齐备 |
+| `provider` | `string` | 当前默认 provider，例如 `openai-compatible`、`newapi`、`sub2api` |
+| `base_url` | `string` | 当前默认 OpenAI-compatible Base URL |
+| `api_key_configured` | `boolean` | 默认凭据是否已配置 |
+| `current_model` | `string` | 当前默认模型 ID |
+| `common_knowledge_model` | `string` | common knowledge 路径模型 ID |
+| `model_routing` | `object` | route key 到脱敏 route 摘要的映射 |
+
+#### `POST /api/v1/platform/llm/models/discover`
+
+用途：
+
+- 为 newapi、sub2api 或其他 OpenAI-compatible 中转站提供模型发现辅助。
+- 服务端会把输入 Base URL 规范化到 `{base_url}/models`，兼容用户误填 `/chat/completions` 或 `/models` 的情况。
+- 响应只返回模型列表、规范化后的 Base URL 和模型发现 URL；请求凭据只用于本次上游 `/models` 请求，不保存、不写入审计详情、不回显。
+
+权限：
+
+- 需要 `chat.use`。
+
+请求体：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `provider` | `string` | `openai-compatible` | UI 展示用 provider，可填 `newapi`、`sub2api` 等 |
+| `base_url` | `string` | 当前后端配置 | OpenAI-compatible Base URL，必须是 `http` 或 `https` URL |
+| `api_key` | `string` | 当前后端配置 | 仅用于本次发现请求的凭据；文档和日志不得记录真实值 |
+| `max_models` | `int` | `200` | 返回模型数量上限，范围 `1-1000` |
+
+响应关键字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `provider` | `string` | 请求或后端配置解析出的 provider |
+| `base_url` | `string` | 规范化后的 Base URL |
+| `models_url` | `string` | 实际请求的模型发现 URL |
+| `api_key_configured` | `boolean` | 本次发现请求是否具备凭据 |
+| `current_model` | `string` | 后端当前默认模型 |
+| `models` | `array` | 模型条目列表，每项包含 `id`、`object`、`owned_by`、`created` |
+| `count` | `int` | 返回模型数量 |
+
+安全边界：
+
+- `base_url` 只允许 `http(s)`。
+- 如配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` 或 `AI_MODEL_DISCOVERY_ALLOWED_HOSTS`，发现请求只允许访问白名单 host 或 host:port。
+- 上游错误体中的 `error.message` 或 `message` 会映射为 `502` detail；非 JSON 或非法模型列表也会返回 `502`。
+
+请求示例：
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/platform/llm/models/discover" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"newapi","base_url":"https://relay.example.com/v1","max_models":20}'
+```
 
 ### Prompt Template
 

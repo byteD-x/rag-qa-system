@@ -585,7 +585,7 @@ LLM_MODEL=relay-model-id
 
 `LLM_API_KEY` 请由本地 `.env`、容器密钥或专用密钥管理系统填入，不要把真实值提交到仓库。
 
-如果需要按场景使用不同中转站或模型，可通过 `LLM_MODEL_ROUTING_JSON` 配置路由；`docker-compose.yml` 已将该变量传入 Gateway 服务：
+如果需要按场景使用不同中转站或模型，可通过 `LLM_MODEL_ROUTING_JSON`（兼容别名：`AI_MODEL_ROUTING_JSON`）配置路由；`docker-compose.yml` 已将这两个变量传入 Gateway 服务。每个 route 可覆盖 `provider`、`base_url`、`api_key`、`model`、`temperature`、`max_tokens`、`timeout_seconds` 与 `extra_body`，也可用 `fallback_route_key` 指向备线路由：
 
 ```env
 LLM_MODEL_ROUTING_JSON='{
@@ -605,9 +605,9 @@ LLM_MODEL_ROUTING_JSON='{
   }'
 ```
 
-`api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。
+`api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。`fallback_route_key` 会被 Gateway 的回答生成链路用于失败后切换备线路由；平台配置摘要只返回 `api_key_configured`，不会返回密钥原文。
 
-平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，后端会请求 `{LLM_BASE_URL}/models` 拉取模型列表，并返回可选择的模型 ID 与配置片段。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入响应；生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容。
+平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，前端会调用 `POST /api/v1/platform/llm/models/discover`，后端会规范化 Base URL 并请求 `{base_url}/models` 拉取模型列表，返回可选择的模型 ID 与配置片段。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入响应；生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容。
 
 ### Vercel 展示型 `.env` 模板
 
@@ -1618,11 +1618,18 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `prompt registry`
 - `model routing`
 - route fallback
+- OpenAI-compatible 中转站模型发现与配置片段生成
 
 常见配置入口：
 
 - `PROMPT_REGISTRY_JSON`
 - `PROMPT_REGISTRY_PATH`
+- `LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON`
+- `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS`
+
+管理入口：
+
+- `工作台 -> 模型接入`：读取 `GET /api/v1/platform/llm/config` 的脱敏配置摘要，调用 `POST /api/v1/platform/llm/models/discover` 获取中转站模型列表，并生成可复制的 `LLM_MODEL_ROUTING_JSON` 片段。
 
 ### 8. 运营分析看板
 
@@ -1670,8 +1677,6 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `view=personal` 仅返回当前用户范围内的知识库运维数据
 - `view=admin` 需要 `kb.manage` 或平台管理员权限
 - 页面中的“重试 ingest”“执行单个 connector”“执行所有到期 connector”均复用现有写接口，不新增破坏性运维入口
-- `LLM_MODEL_ROUTING_JSON`
-- `AI_MODEL_ROUTING_JSON`
 
 ### 5. 重排与视觉能力
 
