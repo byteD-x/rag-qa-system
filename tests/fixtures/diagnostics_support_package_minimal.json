@@ -1,0 +1,47 @@
+{
+  "manifest": {
+    "package_id": "diag-minimal-001",
+    "created_at": "2026-06-08T12:00:00Z",
+    "source": "desktop-diagnostics"
+  },
+  "snapshot": {
+    "runtime": {
+      "readiness": {
+        "checks": [
+          {
+            "name": "knowledge_base",
+            "status": "failed",
+            "blocking": true,
+            "detail": "readiness endpoint returned 503"
+          },
+          {
+            "name": "web",
+            "status": "ok",
+            "blocking": true
+          }
+        ]
+      },
+      "status": {
+        "diagnostics": {
+          "api_gateway": {
+            "level": "error",
+            "message": "gateway readiness degraded"
+          }
+        }
+      }
+    },
+    "update": {
+      "status": "pending",
+      "version": "2026.06.08",
+      "checksum": "sha256:fixture"
+    },
+    "logs": {
+      "knowledge_base": [
+        {
+          "level": "error",
+          "message": "object storage readiness failed"
+        }
+      ]
+    }
+  }
+}
