@@ -46,7 +46,7 @@ def mcp_audit_details(message: Any, response: dict[str, Any]) -> dict[str, Any]:
         details["error_code"] = error.get("code")
     params = request.get("params")
     if isinstance(params, dict) and str(request.get("method") or "") == "tools/call":
-        details["tool_name"] = str(params.get("name") or "")
+        details["tool_name"] = _audit_tool_name(params.get("name"))
     return details
 
 
@@ -121,6 +121,15 @@ def _tool_call_result(*, tool_name: str, data: dict[str, Any]) -> dict[str, Any]
         "structuredContent": data,
         "isError": False,
     }
+
+
+def _audit_tool_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if not name:
+        return ""
+    if name in MCP_ADAPTER_TOOL_NAMES:
+        return name
+    return "not_allowed"
 
 
 def _jsonrpc_result(request_id: Any, result: dict[str, Any]) -> dict[str, Any]:

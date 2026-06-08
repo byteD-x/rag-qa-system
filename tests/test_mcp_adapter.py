@@ -137,6 +137,28 @@ async def test_mcp_tools_call_rejects_blocked_tools_and_non_object_arguments(mon
 
 
 @pytest.mark.asyncio
+async def test_mcp_audit_details_redacts_non_whitelisted_tool_name(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+    leaked_tool_name = "prompt_preview C:/private/source.txt"
+    message = {
+        "jsonrpc": "2.0",
+        "id": "blocked",
+        "method": "tools/call",
+        "params": {"name": leaked_tool_name, "arguments": {}},
+    }
+
+    response = await adapter.handle_mcp_request(message)
+    details = adapter.mcp_audit_details(message, response)
+
+    assert response["error"]["code"] == -32602
+    assert details["has_error"] is True
+    assert details["tool_name"] == "not_allowed"
+    details_text = str(details)
+    assert "prompt_preview" not in details_text
+    assert "C:/private/source.txt" not in details_text
+
+
+@pytest.mark.asyncio
 async def test_mcp_unknown_method_returns_jsonrpc_error(monkeypatch) -> None:
     adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
 
