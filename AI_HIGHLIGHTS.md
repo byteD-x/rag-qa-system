@@ -53,9 +53,10 @@
 - 多维度评估（Accuracy/Faithfulness/Citation/Recall@K），并补充 deterministic retrieval fixture
 - 全链路Trace ID追踪
 - 运行时治理指标：Tool Workflow / Prompt rollback 聚合计数、成功率、耗时和短失败原因，通过 `metrics-summary` 与 Prometheus 指标族暴露
-- 知识库治理页受控 rebuild：单文档 dry-run 签名匹配后才执行固定端点调用，不开放文件上传、目录扫描或任意路径重建
+- 知识库治理页受控 rebuild：单文档 dry-run 签名匹配后才执行固定端点调用，只基于服务端已有 section/chunk 重建向量，不开放文件上传、目录扫描或任意路径重建
+- 知识库治理页批量 JSON：显式粘贴 `{documents:[...]}` 后必须先 batch dry-run，签名匹配才允许 batch-ingest；写入成功后可对生成的 document_id 逐个触发受控 rebuild
 - 知识库批量 dry-run 预览：`POST /api/knowledge_base/batch-dry-run` 只处理请求体内联多文档内容，输出分块摘要和脱敏文件名，不读取路径、不写入向量库、不触发批量 rebuild
-- 知识库批量写入 API：`POST /api/knowledge_base/batch-ingest` 只写入请求体内联文档并索引 section/chunk，不读取路径、不上传文件、不批量 rebuild/delete
+- 知识库批量写入 API：`POST /api/knowledge_base/batch-ingest` 只写入请求体内联文档并索引 section/chunk，不读取路径、不上传文件、不批量 delete
 - Token级成本估算 + 本地 embedding / 证据数量上限等成本控制
 
 ### 9. AI Agent 自主决策体系

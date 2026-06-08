@@ -459,10 +459,11 @@ SSE 流式回答，事件顺序：
 - 所有 `documents[].content` 合计最多 300000 字符。
 - 每个文档只接收内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
 - 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
+- Web 治理页的批量 JSON 面板复用该接口做门禁预览；textarea 内容变化后，写入按钮会重新锁定，直到当前 JSON 再次 dry-run 通过。
 
 ### `POST /api/knowledge_base/batch-ingest`
 
-批量写入接口，仅用于把请求体内联多文档文本写入指定知识库并索引 section/chunk。该接口不会读取 `source_file` / `source_path` 指向的本机文件，不扫描目录，不上传文件，不执行批量 rebuild/delete，也不接入桌面设置页。
+批量写入接口，仅用于把请求体内联多文档文本写入指定知识库并索引 section/chunk。该接口不会读取 `source_file` / `source_path` 指向的本机文件，不扫描目录，不上传文件，也不执行批量 rebuild/delete。
 
 请求关键字段：
 
@@ -486,7 +487,28 @@ SSE 流式回答，事件顺序：
 - 每个文档必须提供 `base_id` 和内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
 - 服务端生成真实 `document_id`，客户端传入的 `doc_id` / `document_id` 仅作为脱敏后的输入标识回显。
 - 全部成功返回 HTTP 200；非法 payload 返回 HTTP 400；向量运行时不可用返回 HTTP 409；任一文档业务失败返回 HTTP 400 的聚合摘要。
-- 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、脱敏文件名和服务端生成的文档 ID；不会返回正文、chunk text、embedding 或完整路径。
+- 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、脱敏文件名和服务端生成的文档 ID；不会返回正文、chunk text、embedding 或完整路径。Web 治理页只会使用成功项的服务端 `document_id` 触发逐文档受控 rebuild。
+
+### `POST /api/knowledge_base/rebuild`
+
+受控重建接口，仅用于基于服务端已有 section/chunk 重新写入某个文档的向量索引。该接口不接收 `source_path`、不读取上传源文件、不扫描目录，也不创建或删除文档。
+
+请求关键字段：
+
+```json
+{
+  "doc_id": "document-uuid",
+  "dry_run": true,
+  "signature": "kb-rebuild:00000000"
+}
+```
+
+规则：
+
+- 要求 `kb.write` 权限，并按 `doc_id` 校验文档访问范围。
+- `dry_run=true` 时返回当前文档的 section/chunk 计数、版本摘要和服务端签名，不写入向量库。
+- 正式执行时必须携带与当前 `doc_id` 匹配的 `signature`；签名不匹配返回 HTTP 400。
+- 正式执行只删除并重建该文档已有 section/chunk 的向量索引，成功后返回 `indexed_sections`、`indexed_chunks`、`chunk_count` 等摘要字段。
 
 ### 视觉资产
 
@@ -1022,6 +1044,7 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 - 为知识治理工作台提供低置信 OCR 区域、待处理切片、批处理事件等聚合读模型。
 - 支持个人视角与管理员视角。
 - 前端治理页的单文档 rebuild 动作固定调用 `POST /api/knowledge_base/rebuild`，执行前必须先 dry-run 并校验 payload signature；该入口只传已选文档 ID 与签名，不开放文件上传、目录扫描、任意路径读取或手工 `source_path`。
+- 前端治理页的批量 JSON 面板固定调用 `POST /api/knowledge_base/batch-dry-run` 与 `POST /api/knowledge_base/batch-ingest`，写入前必须先对当前 JSON dry-run；写入成功后的重建动作仅逐个调用受控 rebuild。
 
 相关事件端点：
 

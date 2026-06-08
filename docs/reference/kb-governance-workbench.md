@@ -61,7 +61,13 @@
 
 治理页已接入单文档受控 rebuild 动作。页面只允许在已选择 1 个文档时预览或执行 rebuild；预览会按当前 payload 生成签名并调用固定 `POST /api/knowledge_base/rebuild`，只有 `lastDryRunSignature` 与当前 payload signature 一致时才允许执行正式 rebuild。
 
-正式 rebuild 成功后，页面只展示摘要字段，例如 `doc_id`、`version`、`chunk_count`、`indexed_chunks`、`deleted_previous`。该入口不新增文件上传、目录扫描、任意路径读取或手工输入 `source_path` 能力，也不会把治理页扩展为通用文件重建工具。
+正式 rebuild 只基于服务端已有 section/chunk 重建该文档的向量索引，不重新读取上传源文件或本地路径。成功后页面只展示摘要字段，例如 `doc_id`、`version`、`chunk_count`、`indexed_chunks`、`deleted_previous`。该入口不新增文件上传、目录扫描、任意路径读取或手工输入 `source_path` 能力，也不会把治理页扩展为通用文件重建工具。
+
+## Batch JSON panel
+
+治理页提供批量 JSON 面板，用于人工粘贴 `{ "documents": [...] }` 后执行受控预览和写入。页面不会读取本机文件、不会扫描目录，也不会从浏览器文件选择器自动生成 payload；用户修改 textarea 后，写入和“重建写入结果”按钮会重新锁定，必须再次对当前 JSON 执行 batch dry-run。
+
+批量写入成功后，页面只从 batch-ingest 响应中提取服务端生成的 `document_id`，并按文档逐个调用既有固定 `POST /api/knowledge_base/rebuild`。该动作不是新的后端批量 rebuild/delete 接口，也不会回显正文、chunk text、embedding 或完整路径。
 
 ## Batch dry-run preview
 
@@ -73,7 +79,7 @@
 
 `POST /api/knowledge_base/batch-ingest` 提供受控的 Web API 批量写入口。请求体只接收 `documents` 数组，每个元素必须提供 `base_id` 与内联 `content`，可选 `doc_id` / `document_id`、`file_name` 与 `category`；服务端会按顺序创建文档、写入 section/chunk，并触发现有向量索引。
 
-该入口不同于 batch dry-run：它会写入数据库和向量库，但仍不读取 `source_file` / `source_path`，不扫描目录，不上传文件，不批量 rebuild/delete，也不接入桌面设置页。响应只返回聚合计数、服务端生成的文档 ID 和脱敏文件名，不返回正文、chunk text、embedding 或完整路径。
+该入口不同于 batch dry-run：它会写入数据库和向量库，但仍不读取 `source_file` / `source_path`，不扫描目录，不上传文件，也不批量 delete。响应只返回聚合计数、服务端生成的文档 ID 和脱敏文件名，不返回正文、chunk text、embedding 或完整路径。
 
 ## Notes
 

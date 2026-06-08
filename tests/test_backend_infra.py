@@ -4527,6 +4527,181 @@ def test_gateway_knowledge_batch_ingest_uses_exact_proxy(monkeypatch) -> None:
     assert blocked.status_code == 404
 
 
+def test_knowledge_rebuild_route_reindexes_existing_units_without_path_access(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_rebuild = importlib.import_module("app.kb_rebuild")
+    kb_rebuild_routes = importlib.import_module("app.kb_rebuild_routes")
+    executed: list[tuple[str, object]] = []
+
+    class _Cursor:
+        def execute(self, query, params=None):
+            executed.append((str(query), params))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Connection:
+        def cursor(self):
+            return _Cursor()
+
+        def commit(self):
+            executed.append(("COMMIT", None))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    audit_events: list[dict[str, object]] = []
+    monkeypatch.setattr(kb_rebuild_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        kb_rebuild,
+        "load_document",
+        lambda doc_id, **kwargs: {
+            "id": doc_id,
+            "version_label": "v1",
+            "section_count": 2,
+            "chunk_count": 3,
+            "created_by": "editor-1",
+        },
+    )
+    monkeypatch.setattr(kb_rebuild, "ensure_vector_store", lambda: {"collection": "kb-evidence"})
+    monkeypatch.setattr(kb_rebuild, "delete_document_vectors", lambda document_id: executed.append(("DELETE_VECTORS", document_id)))
+    monkeypatch.setattr(kb_rebuild, "index_document_sections", lambda document_id: {"rows": 2, "indexed": 2})
+    monkeypatch.setattr(kb_rebuild, "index_document_chunks", lambda document_id: {"rows": 3, "indexed": 3})
+    monkeypatch.setattr(kb_rebuild, "audit_event", lambda **kwargs: audit_events.append(dict(kwargs)))
+    monkeypatch.setattr(kb_rebuild.db, "connect", lambda: _Connection())
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+    signature = kb_rebuild.build_knowledge_rebuild_signature("doc-1")
+
+    dry_run = client.post(
+        "/api/knowledge_base/rebuild",
+        json={"doc_id": "doc-1", "dry_run": True, "signature": signature},
+        headers=_auth_headers(user),
+    )
+    rebuild = client.post(
+        "/api/knowledge_base/rebuild",
+        json={"doc_id": "doc-1", "dry_run": False, "signature": signature},
+        headers=_auth_headers(user),
+    )
+
+    assert dry_run.status_code == 200
+    assert dry_run.json() == {
+        "doc_id": "doc-1",
+        "version": "v1",
+        "section_count": 2,
+        "chunk_count": 3,
+        "dry_run": True,
+        "signature": signature,
+    }
+    assert rebuild.status_code == 200
+    payload = rebuild.json()
+    assert payload["doc_id"] == "doc-1"
+    assert payload["dry_run"] is False
+    assert payload["indexed_sections"] == 2
+    assert payload["indexed_chunks"] == 3
+    assert "source_path" not in rebuild.text
+    assert "storage_path" not in rebuild.text
+    assert ("DELETE_VECTORS", "doc-1") in executed
+    assert any("UPDATE kb_documents" in query for query, _params in executed)
+    assert any("INSERT INTO kb_document_events" in query for query, _params in executed)
+    assert [event["action"] for event in audit_events] == ["kb.rebuild.dry_run", "kb.rebuild"]
+
+
+def test_knowledge_rebuild_route_rejects_invalid_payloads(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_rebuild_routes = importlib.import_module("app.kb_rebuild_routes")
+    monkeypatch.setattr(kb_rebuild_routes, "require_kb_permission", lambda *args, **kwargs: None)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(kb_main.app)
+    cases = [
+        ({}, "knowledge_rebuild_doc_required"),
+        ({"doc_id": "doc-1", "source_path": "/tmp/source.txt"}, "knowledge_rebuild_field_not_allowed"),
+        ({"doc_id": "doc-1", "dry_run": False, "signature": "stale"}, "knowledge_rebuild_signature_mismatch"),
+    ]
+
+    for body, expected_code in cases:
+        response = client.post("/api/knowledge_base/rebuild", json=body, headers=_auth_headers(user))
+        assert response.status_code == 400
+        assert response.json()["code"] == expected_code
+
+
+def test_knowledge_rebuild_route_requires_write_permission() -> None:
+    kb_main = _load_kb_module("app.main")
+    user = auth_module.AuthUser(
+        user_id="viewer-1",
+        email="viewer@local",
+        role="kb_viewer",
+        permissions=auth_module.permissions_for_role("kb_viewer"),
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.post(
+        "/api/knowledge_base/rebuild",
+        json={"doc_id": "doc-1", "dry_run": True},
+        headers=_auth_headers(user),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+
+
+def test_gateway_knowledge_rebuild_uses_exact_proxy(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_admin_routes = importlib.import_module("app.gateway_admin_routes")
+    calls: list[dict[str, str]] = []
+
+    async def fake_proxy_request(request, *, service_base_url: str, service_path: str):
+        calls.append({"service_base_url": service_base_url, "service_path": service_path, "request_path": request.url.path})
+        return JSONResponse({"proxied": True, "service_path": service_path})
+
+    monkeypatch.setattr(gateway_admin_routes, "proxy_request", fake_proxy_request)
+    user = auth_module.AuthUser(
+        user_id="editor-1",
+        email="editor@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    client = TestClient(gateway_main.app)
+
+    allowed = client.post(
+        "/api/knowledge_base/rebuild",
+        json={"doc_id": "doc-1", "dry_run": True},
+        headers=_auth_headers(user),
+    )
+    blocked = client.post(
+        "/api/knowledge_base/rebuild/delete",
+        json={},
+        headers=_auth_headers(user),
+    )
+
+    assert allowed.status_code == 200
+    assert allowed.json()["service_path"] == "/api/knowledge_base/rebuild"
+    assert calls == [
+        {
+            "service_base_url": gateway_admin_routes.runtime_settings.kb_service_url,
+            "service_path": "/api/knowledge_base/rebuild",
+            "request_path": "/api/knowledge_base/rebuild",
+        }
+    ]
+    assert blocked.status_code == 404
+
+
 def test_retrieve_debug_route_serializes_evidence_and_debug_meta(monkeypatch) -> None:
     kb_main = _load_kb_module("app.main")
     kb_query_routes = importlib.import_module("app.kb_query_routes")

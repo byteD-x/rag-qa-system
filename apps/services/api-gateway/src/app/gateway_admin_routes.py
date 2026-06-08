@@ -106,6 +106,15 @@ async def proxy_knowledge_batch_dry_run(request: Request) -> Response:
     )
 
 
+@router.post("/api/knowledge_base/rebuild")
+async def proxy_knowledge_rebuild(request: Request) -> Response:
+    return await proxy_request(
+        request,
+        service_base_url=runtime_settings.kb_service_url,
+        service_path="/api/knowledge_base/rebuild",
+    )
+
+
 @router.post("/api/knowledge_base/batch-ingest")
 async def proxy_knowledge_batch_ingest(request: Request) -> Response:
     return await proxy_request(

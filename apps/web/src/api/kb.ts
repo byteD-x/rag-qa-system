@@ -497,6 +497,116 @@ export interface RebuildKnowledgeDocumentResponse {
   [key: string]: unknown;
 }
 
+export interface KnowledgeBatchDocumentPayload {
+  base_id?: string;
+  doc_id?: string;
+  document_id?: string;
+  file_name?: string;
+  name?: string;
+  category?: string;
+  content: string;
+}
+
+export interface KnowledgeBatchDocumentsPayload {
+  documents: KnowledgeBatchDocumentPayload[];
+}
+
+export interface KnowledgeBatchDryRunDocument {
+  doc_id: string;
+  file_name: string;
+  content_chars: number;
+  section_count: number;
+  chunk_count: number;
+  sections?: Array<{
+    section_index: number;
+    char_start: number;
+    char_end: number;
+    char_count: number;
+    chunk_count: number;
+  }>;
+  truncated_sections?: number;
+}
+
+export interface KnowledgeBatchDryRunResponse {
+  dry_run: true;
+  document_count: number;
+  total_content_chars: number;
+  total_sections: number;
+  total_chunks: number;
+  documents: KnowledgeBatchDryRunDocument[];
+  limits?: {
+    max_documents?: number;
+    max_content_chars?: number;
+  };
+}
+
+export interface KnowledgeBatchIngestDocument {
+  index: number;
+  ok: boolean;
+  input_doc_id?: string;
+  document_id?: string;
+  base_id?: string;
+  file_name?: string;
+  section_count?: number;
+  chunk_count?: number;
+  indexed_sections?: number;
+  indexed_chunks?: number;
+  skipped_chunks?: number;
+  status?: string;
+  code?: string;
+  detail?: string;
+}
+
+export interface KnowledgeBatchIngestResponse {
+  success: boolean;
+  batch: {
+    task_id: string;
+    status: string;
+  };
+  document_count: number;
+  succeeded_documents: number;
+  failed_documents: number;
+  section_count: number;
+  chunk_count: number;
+  indexed_sections: number;
+  indexed_chunks: number;
+  skipped_chunks: number;
+  documents: KnowledgeBatchIngestDocument[];
+  code?: string;
+  detail?: string;
+}
+
+export interface RebuildKnowledgeDocumentsResponse {
+  document_count: number;
+  succeeded_documents: number;
+  failed_documents: number;
+  documents: Array<{
+    doc_id: string;
+    ok: boolean;
+    result?: RebuildKnowledgeDocumentResponse;
+    code?: string;
+    detail?: string;
+  }>;
+}
+
+function normalizeForSignature(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeForSignature(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        const next = (value as Record<string, unknown>)[key];
+        if (typeof next !== 'undefined') {
+          acc[key] = normalizeForSignature(next);
+        }
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
 export function buildKnowledgeRebuildSignature(target: RebuildKnowledgeDocumentTarget) {
   const canonical = JSON.stringify({ doc_id: String(target.doc_id || '').trim() });
   let hash = 0;
@@ -506,8 +616,54 @@ export function buildKnowledgeRebuildSignature(target: RebuildKnowledgeDocumentT
   return `kb-rebuild:${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+export function buildKnowledgeBatchSignature(payload: KnowledgeBatchDocumentsPayload) {
+  const canonical = JSON.stringify(normalizeForSignature(payload));
+  let hash = 0;
+  for (let index = 0; index < canonical.length; index += 1) {
+    hash = ((hash << 5) - hash + canonical.charCodeAt(index)) | 0;
+  }
+  return `kb-batch:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 export function rebuildKnowledgeDocument(data: RebuildKnowledgeDocumentPayload) {
   return request.post<RebuildKnowledgeDocumentResponse>('/knowledge_base/rebuild', data, { baseURL: '/api' });
+}
+
+export function dryRunKnowledgeDocuments(data: KnowledgeBatchDocumentsPayload) {
+  return request.post<KnowledgeBatchDryRunResponse>('/knowledge_base/batch-dry-run', data, { baseURL: '/api' });
+}
+
+export function ingestKnowledgeDocuments(data: KnowledgeBatchDocumentsPayload) {
+  return request.post<KnowledgeBatchIngestResponse>('/knowledge_base/batch-ingest', data, { baseURL: '/api' });
+}
+
+export async function rebuildKnowledgeDocuments(data: { document_ids: string[] }): Promise<RebuildKnowledgeDocumentsResponse> {
+  const documentIds = Array.from(new Set(data.document_ids.map((item) => String(item || '').trim()).filter(Boolean)));
+  const documents: RebuildKnowledgeDocumentsResponse['documents'] = [];
+  for (const docId of documentIds) {
+    try {
+      const response = await rebuildKnowledgeDocument({
+        doc_id: docId,
+        dry_run: false,
+        signature: buildKnowledgeRebuildSignature({ doc_id: docId })
+      });
+      documents.push({ doc_id: docId, ok: true, result: ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse });
+    } catch (error) {
+      documents.push({
+        doc_id: docId,
+        ok: false,
+        code: 'knowledge_rebuild_failed',
+        detail: error instanceof Error ? error.message : 'rebuild failed'
+      });
+    }
+  }
+  const failedDocuments = documents.filter((item) => !item.ok).length;
+  return {
+    document_count: documents.length,
+    succeeded_documents: documents.length - failedDocuments,
+    failed_documents: failedDocuments,
+    documents
+  };
 }
 
 export function queryKB(data: {

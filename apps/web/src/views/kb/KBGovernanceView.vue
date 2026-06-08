@@ -34,6 +34,122 @@
       </div>
     </section>
 
+    <section class="panel" data-testid="kb-batch-json-panel">
+      <div class="panel-head">
+        <strong>批量知识库 JSON</strong>
+        <div class="actions">
+          <el-button
+            text
+            :disabled="knowledgeBatchDryRunLoading || knowledgeBatchIngestLoading || knowledgeBatchRebuildLoading"
+            data-testid="kb-batch-reset-button"
+            @click="resetKnowledgeBatch"
+          >
+            清空
+          </el-button>
+          <el-button
+            plain
+            :loading="knowledgeBatchDryRunLoading"
+            :disabled="!canRunKnowledgeBatchDryRun"
+            data-testid="kb-batch-dry-run-button"
+            @click="runKnowledgeBatchDryRun"
+          >
+            预览
+          </el-button>
+          <el-button
+            type="primary"
+            plain
+            :loading="knowledgeBatchIngestLoading"
+            :disabled="!canRunKnowledgeBatchIngest"
+            data-testid="kb-batch-ingest-button"
+            @click="runKnowledgeBatchIngest"
+          >
+            批量写入
+          </el-button>
+          <el-button
+            type="warning"
+            plain
+            :loading="knowledgeBatchRebuildLoading"
+            :disabled="!canRunKnowledgeBatchRebuild"
+            data-testid="kb-batch-rebuild-button"
+            @click="runKnowledgeBatchRebuild"
+          >
+            重建写入结果
+          </el-button>
+        </div>
+      </div>
+      <el-input
+        v-model="knowledgeBatchJson"
+        type="textarea"
+        :rows="6"
+        data-testid="kb-batch-json-input"
+        placeholder='{"documents":[{"base_id":"base-1","file_name":"policy.txt","content":"正文"}]}'
+      />
+      <div class="toolbar-meta">
+        <span v-if="canRunKnowledgeBatchIngest">当前 JSON 已通过 dry-run。</span>
+        <span v-else-if="knowledgeBatchPayloadSignature">写入前需先预览当前 JSON。</span>
+        <span v-else>请提供 documents JSON。</span>
+      </div>
+    </section>
+
+    <section v-if="lastKnowledgeBatchDryRunResult" class="panel" data-testid="kb-batch-dry-run-summary">
+      <div class="panel-head">
+        <strong>批量预览结果</strong>
+      </div>
+      <div class="toolbar-meta">
+        <span>文档 {{ lastKnowledgeBatchDryRunResult.document_count }}</span>
+        <span>字符 {{ lastKnowledgeBatchDryRunResult.total_content_chars }}</span>
+        <span>section {{ lastKnowledgeBatchDryRunResult.total_sections }}</span>
+        <span>chunk {{ lastKnowledgeBatchDryRunResult.total_chunks }}</span>
+      </div>
+      <div class="list">
+        <article v-for="item in lastKnowledgeBatchDryRunResult.documents" :key="item.doc_id" class="list-item">
+          <strong>{{ item.file_name }}</strong>
+          <span>字符 {{ item.content_chars }}</span>
+          <span>section {{ item.section_count }}</span>
+          <span>chunk {{ item.chunk_count }}</span>
+        </article>
+      </div>
+    </section>
+
+    <section v-if="lastKnowledgeBatchIngestResult" class="panel" data-testid="kb-batch-ingest-summary">
+      <div class="panel-head">
+        <strong>批量写入结果</strong>
+      </div>
+      <div class="toolbar-meta">
+        <span>任务 {{ lastKnowledgeBatchIngestResult.batch.task_id }}</span>
+        <span>成功 {{ lastKnowledgeBatchIngestResult.succeeded_documents }}</span>
+        <span>失败 {{ lastKnowledgeBatchIngestResult.failed_documents }}</span>
+        <span>chunk {{ lastKnowledgeBatchIngestResult.chunk_count }}</span>
+      </div>
+      <div class="list">
+        <article v-for="item in lastKnowledgeBatchIngestResult.documents" :key="`${item.index}-${item.document_id || item.input_doc_id}`" class="list-item">
+          <strong>{{ item.file_name || item.input_doc_id || item.document_id }}</strong>
+          <span>{{ item.ok ? 'ready' : item.code || 'failed' }}</span>
+          <span v-if="item.document_id">{{ item.document_id }}</span>
+          <span v-if="item.detail">{{ item.detail }}</span>
+        </article>
+      </div>
+    </section>
+
+    <section v-if="lastKnowledgeBatchRebuildResult" class="panel" data-testid="kb-batch-rebuild-summary">
+      <div class="panel-head">
+        <strong>批量重建结果</strong>
+      </div>
+      <div class="toolbar-meta">
+        <span>文档 {{ lastKnowledgeBatchRebuildResult.document_count }}</span>
+        <span>成功 {{ lastKnowledgeBatchRebuildResult.succeeded_documents }}</span>
+        <span>失败 {{ lastKnowledgeBatchRebuildResult.failed_documents }}</span>
+      </div>
+      <div class="list">
+        <article v-for="item in lastKnowledgeBatchRebuildResult.documents" :key="item.doc_id" class="list-item">
+          <strong>{{ item.doc_id }}</strong>
+          <span>{{ item.ok ? '完成' : item.code || 'failed' }}</span>
+          <span v-if="item.result?.chunk_count !== undefined">chunk {{ item.result.chunk_count }}</span>
+          <span v-if="item.detail">{{ item.detail }}</span>
+        </article>
+      </div>
+    </section>
+
     <section v-if="selectedDocumentIds.length" class="panel">
       <div class="panel-head">
         <strong>已选 {{ selectedDocumentIds.length }} 项</strong>
@@ -342,17 +458,24 @@ import { useRouter } from 'vue-router';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import {
   batchUpdateKBDocuments,
+  buildKnowledgeBatchSignature,
   buildKnowledgeRebuildSignature,
+  dryRunKnowledgeDocuments,
   getKBDocument,
   getKBDocumentVisualAssets,
   getKBGovernance,
   getKBGovernanceBatchEventDetail,
   getKBGovernanceBatchEvents,
   getKBVisualAssetRegions,
+  ingestKnowledgeDocuments,
+  rebuildKnowledgeDocuments,
   rebuildKnowledgeDocument,
   updateKBDocument,
   type BatchUpdateKBDocumentsPayload,
   type BatchUpdateKBDocumentsResponse,
+  type KnowledgeBatchDocumentsPayload,
+  type KnowledgeBatchDryRunResponse,
+  type KnowledgeBatchIngestResponse,
   type KBGovernanceBatchEventItem,
   type KBGovernanceBatchEventDetailResponse,
   type KBGovernanceBatchEventsResponse,
@@ -360,6 +483,7 @@ import {
   type KBGovernanceResponse,
   type KBGovernanceVersionConflictItem,
   type KBVisualAssetRegion,
+  type RebuildKnowledgeDocumentsResponse,
   type RebuildKnowledgeDocumentPayload,
   type RebuildKnowledgeDocumentResponse
 } from '@/api/kb';
@@ -385,6 +509,9 @@ const loading = ref(false);
 const bulkLoading = ref(false);
 const batchEventsLoading = ref(false);
 const batchEventDetailLoading = ref(false);
+const knowledgeBatchDryRunLoading = ref(false);
+const knowledgeBatchIngestLoading = ref(false);
+const knowledgeBatchRebuildLoading = ref(false);
 const rebuildDryRunLoading = ref(false);
 const rebuildLoading = ref(false);
 const savingEdit = ref(false);
@@ -398,6 +525,12 @@ const selectedBatchEvent = ref<KBGovernanceBatchEventItem | null>(null);
 const selectedBatchEventTask = ref<KBGovernanceBatchEventDetailResponse | null>(null);
 const selectedDocumentIds = ref<string[]>([]);
 const batchReviewerNote = ref('');
+const knowledgeBatchJson = ref('');
+const lastKnowledgeBatchDryRunSignature = ref('');
+const lastKnowledgeBatchDryRunResult = ref<KnowledgeBatchDryRunResponse | null>(null);
+const lastKnowledgeBatchIngestSignature = ref('');
+const lastKnowledgeBatchIngestResult = ref<KnowledgeBatchIngestResponse | null>(null);
+const lastKnowledgeBatchRebuildResult = ref<RebuildKnowledgeDocumentsResponse | null>(null);
 const lastBatchRequest = ref<BatchUpdateKBDocumentsPayload | null>(null);
 const lastBatchResult = ref<BatchUpdateKBDocumentsResponse | null>(null);
 const lastDryRunSignature = ref('');
@@ -415,6 +548,23 @@ const documentForm = reactive({ owner_user_id: '', version_family_key: '', versi
 
 const canWrite = computed(() => authStore.hasPermission('kb.write'));
 const currentUserId = computed(() => String(authStore.user?.id || ''));
+const parsedKnowledgeBatchPayload = computed<KnowledgeBatchDocumentsPayload | null>(() => {
+  const raw = knowledgeBatchJson.value.trim();
+  if (!raw) return null;
+  try {
+    const payload = JSON.parse(raw) as KnowledgeBatchDocumentsPayload;
+    return Array.isArray(payload?.documents) && payload.documents.length ? payload : null;
+  } catch {
+    return null;
+  }
+});
+const knowledgeBatchPayloadSignature = computed(() => parsedKnowledgeBatchPayload.value ? buildKnowledgeBatchSignature(parsedKnowledgeBatchPayload.value) : '');
+const canRunKnowledgeBatchDryRun = computed(() => canWrite.value && Boolean(parsedKnowledgeBatchPayload.value));
+const canRunKnowledgeBatchIngest = computed(() => canRunKnowledgeBatchDryRun.value && Boolean(lastKnowledgeBatchDryRunSignature.value) && lastKnowledgeBatchDryRunSignature.value === knowledgeBatchPayloadSignature.value);
+const knowledgeBatchRebuildDocumentIds = computed(() => (lastKnowledgeBatchIngestResult.value?.documents ?? [])
+  .filter((item) => item.ok && item.document_id)
+  .map((item) => String(item.document_id)));
+const canRunKnowledgeBatchRebuild = computed(() => canRunKnowledgeBatchIngest.value && lastKnowledgeBatchIngestSignature.value === knowledgeBatchPayloadSignature.value && knowledgeBatchRebuildDocumentIds.value.length > 0);
 const rebuildTarget = computed(() => selectedDocumentIds.value.length === 1 ? { doc_id: String(selectedDocumentIds.value[0] || '') } : null);
 const rebuildPayloadSignature = computed(() => rebuildTarget.value ? buildKnowledgeRebuildSignature(rebuildTarget.value) : '');
 const canRunRebuildDryRun = computed(() => canWrite.value && Boolean(rebuildTarget.value));
@@ -536,6 +686,84 @@ const loadGovernance = async () => { loading.value = true; resetLowConfidenceReg
 const loadBatchEvents = async () => { batchEventsLoading.value = true; try { const response = await getKBGovernanceBatchEvents({ view: viewMode.value, limit: 8 }); const payload = ((response as any).data ?? response) as KBGovernanceBatchEventsResponse; batchEvents.value = Array.isArray(payload.items) ? payload.items : []; } catch { batchEvents.value = []; } finally { batchEventsLoading.value = false; } };
 const loadAllData = async () => { await Promise.all([loadGovernance(), loadBatchEvents()]); };
 const findQueueItem = (documentId: string) => [...(governance.value?.queues.pending_review ?? []), ...(governance.value?.queues.approved_ready ?? []), ...(governance.value?.queues.rejected_documents ?? []), ...(governance.value?.queues.expired_documents ?? []), ...(governance.value?.queues.visual_attention ?? []), ...(governance.value?.queues.missing_version_family ?? [])].find((item) => item.document_id === documentId) || null;
+const resetKnowledgeBatch = () => {
+  knowledgeBatchJson.value = '';
+  lastKnowledgeBatchDryRunSignature.value = '';
+  lastKnowledgeBatchDryRunResult.value = null;
+  lastKnowledgeBatchIngestSignature.value = '';
+  lastKnowledgeBatchIngestResult.value = null;
+  lastKnowledgeBatchRebuildResult.value = null;
+};
+const requireKnowledgeBatchPayload = (): KnowledgeBatchDocumentsPayload | null => {
+  const payload = parsedKnowledgeBatchPayload.value;
+  if (!payload) {
+    ElMessage.warning('请填写包含 documents 数组的 JSON。');
+    return null;
+  }
+  return payload;
+};
+const runKnowledgeBatchDryRun = async () => {
+  const payload = requireKnowledgeBatchPayload();
+  if (!payload) return;
+  knowledgeBatchDryRunLoading.value = true;
+  try {
+    const response = await dryRunKnowledgeDocuments(payload);
+    lastKnowledgeBatchDryRunResult.value = ((response as any).data ?? response) as KnowledgeBatchDryRunResponse;
+    lastKnowledgeBatchDryRunSignature.value = knowledgeBatchPayloadSignature.value;
+    lastKnowledgeBatchIngestResult.value = null;
+    lastKnowledgeBatchIngestSignature.value = '';
+    lastKnowledgeBatchRebuildResult.value = null;
+    ElMessage.success('批量 dry-run 已通过。');
+  } finally {
+    knowledgeBatchDryRunLoading.value = false;
+  }
+};
+const runKnowledgeBatchIngest = async () => {
+  const payload = requireKnowledgeBatchPayload();
+  if (!payload) return;
+  if (!canRunKnowledgeBatchIngest.value) {
+    ElMessage.warning('请先对当前批量 JSON 执行 dry-run。');
+    return;
+  }
+  knowledgeBatchIngestLoading.value = true;
+  try {
+    const response = await ingestKnowledgeDocuments(payload);
+    lastKnowledgeBatchIngestResult.value = ((response as any).data ?? response) as KnowledgeBatchIngestResponse;
+    lastKnowledgeBatchIngestSignature.value = knowledgeBatchPayloadSignature.value;
+    lastKnowledgeBatchRebuildResult.value = null;
+    const successCount = Number(lastKnowledgeBatchIngestResult.value.succeeded_documents || 0);
+    const failedCount = Number(lastKnowledgeBatchIngestResult.value.failed_documents || 0);
+    if (successCount > 0) {
+      ElMessage.success(`批量写入完成：成功 ${successCount} 项${failedCount ? `，失败 ${failedCount} 项` : ''}`);
+      await Promise.all([loadGovernance(), loadBatchEvents()]);
+      return;
+    }
+    ElMessage.error('批量写入失败，请查看失败项详情。');
+  } finally {
+    knowledgeBatchIngestLoading.value = false;
+  }
+};
+const runKnowledgeBatchRebuild = async () => {
+  if (!canRunKnowledgeBatchRebuild.value) {
+    ElMessage.warning('请先使用当前 JSON 完成 dry-run 和批量写入。');
+    return;
+  }
+  knowledgeBatchRebuildLoading.value = true;
+  try {
+    lastKnowledgeBatchRebuildResult.value = await rebuildKnowledgeDocuments({
+      document_ids: knowledgeBatchRebuildDocumentIds.value
+    });
+    const result = lastKnowledgeBatchRebuildResult.value;
+    if (result.succeeded_documents > 0) {
+      ElMessage.success(`批量重建完成：成功 ${result.succeeded_documents} 项${result.failed_documents ? `，失败 ${result.failed_documents} 项` : ''}`);
+      await Promise.all([loadGovernance(), loadBatchEvents()]);
+      return;
+    }
+    ElMessage.error('批量重建失败，请查看失败项详情。');
+  } finally {
+    knowledgeBatchRebuildLoading.value = false;
+  }
+};
 const buildRebuildPayload = (dryRun: boolean): RebuildKnowledgeDocumentPayload | null => rebuildTarget.value ? { ...rebuildTarget.value, dry_run: dryRun, signature: rebuildPayloadSignature.value } : null;
 const runRebuildDryRun = async () => {
   const payload = buildRebuildPayload(true);
