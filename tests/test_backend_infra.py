@@ -955,6 +955,7 @@ def test_generate_grounded_answer_rejects_non_whitelisted_final_tool_call(monkey
     gateway_answering = _load_gateway_module("app.gateway_answering")
     monkeypatch.setattr(gateway_answering, "runtime_settings", SimpleNamespace(final_answer_tools_enabled=True))
     calls: list[dict[str, object]] = []
+    leaked_tool_name = "prompt_preview C:/private/source.txt"
 
     class _Settings:
         configured = True
@@ -979,7 +980,7 @@ def test_generate_grounded_answer_rejects_non_whitelisted_final_tool_call(monkey
             tool_calls = [
                 {
                     "id": "call-forbidden",
-                    "name": "delete_document",
+                    "name": leaked_tool_name,
                     "args": {"document_id": "secret-doc"},
                 }
             ]
@@ -992,6 +993,13 @@ def test_generate_grounded_answer_rejects_non_whitelisted_final_tool_call(monkey
                 "_raw_message": gateway_answering.AIMessage(content="", tool_calls=tool_calls),
                 "llm_trace": {"llm_call_id": "llm-before-tools", "prompt_key": "chat_grounded_answer"},
             }
+        extra_messages = list(kwargs.get("extra_messages") or [])
+        tool_messages = [
+            item
+            for item in extra_messages
+            if isinstance(item, gateway_answering.ToolMessage)
+        ]
+        assert tool_messages[0].name == "not_allowed"
         return {
             "answer": "The requested operation is outside the final-answer tool boundary. [1]",
             "provider": "mock-provider",
@@ -1025,8 +1033,11 @@ def test_generate_grounded_answer_rejects_non_whitelisted_final_tool_call(monkey
     assert trace["requested"] == 1
     assert trace["executed"] == 0
     assert trace["rejected"] == 1
-    assert trace["events"] == [{"tool": "delete_document", "status": "rejected", "reason": "tool_not_allowed"}]
-    assert "secret-doc" not in str(trace)
+    assert trace["events"] == [{"tool": "not_allowed", "status": "rejected", "reason": "tool_not_allowed"}]
+    trace_text = str(trace)
+    assert "prompt_preview" not in trace_text
+    assert "C:/private/source.txt" not in trace_text
+    assert "secret-doc" not in trace_text
 
 
 def test_generate_grounded_answer_blocks_second_round_final_tool_calls(monkeypatch) -> None:

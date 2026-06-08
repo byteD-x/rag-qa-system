@@ -75,11 +75,12 @@ async def _execute_final_answer_tool_calls(tool_calls: list[dict[str, Any]]) -> 
 
     for index, tool_call in enumerate(tool_calls, start=1):
         tool_name = str(tool_call.get("name") or "").strip()
+        trace_tool_name = _final_answer_trace_tool_name(tool_name)
         tool_call_id = str(tool_call.get("id") or f"call-{index}")
         raw_args = tool_call.get("args")
         args = raw_args if isinstance(raw_args, dict) else {}
         payload: dict[str, Any]
-        event: dict[str, Any] = {"tool": tool_name or "unknown"}
+        event: dict[str, Any] = {"tool": trace_tool_name}
 
         if index > FINAL_ANSWER_MAX_TOOL_CALLS:
             event["status"] = "skipped"
@@ -111,7 +112,7 @@ async def _execute_final_answer_tool_calls(tool_calls: list[dict[str, Any]]) -> 
             ToolMessage(
                 content=json.dumps(payload, ensure_ascii=False),
                 tool_call_id=tool_call_id,
-                name=tool_name or "unknown",
+                name=trace_tool_name,
             )
         )
 
@@ -130,6 +131,15 @@ async def _execute_final_answer_tool_calls(tool_calls: list[dict[str, Any]]) -> 
 def _safe_tool_error(error: str) -> str:
     text = str(error or "").strip().replace("\n", " ")
     return text[:160] if text else "tool execution failed"
+
+
+def _final_answer_trace_tool_name(value: Any) -> str:
+    name = str(value or "").strip()
+    if name in FINAL_ANSWER_TOOL_NAMES:
+        return name
+    if not name:
+        return "unknown"
+    return "not_allowed"
 
 
 def _tool_trace_without_internal_fields(completion: dict[str, Any]) -> dict[str, Any]:
