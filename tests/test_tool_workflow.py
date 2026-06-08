@@ -82,6 +82,34 @@ async def test_plan_reflect_repair_repairs_empty_data_control_scopes_once(monkey
 
 
 @pytest.mark.asyncio
+async def test_plan_reflect_repair_redacts_payload_values_from_metadata(monkeypatch) -> None:
+    tool_workflow = _load_gateway_module("app.tool_workflow", monkeypatch)
+    from app.business_tools import ensure_business_tools_registered
+    from app.tool_registry import tool_registry
+
+    tool_registry._tools.clear()
+    tool_registry._category_index.clear()
+    tool_registry._cache.clear()
+    ensure_business_tools_registered()
+    sensitive_reason = "prompt_preview C:/private/source.txt"
+
+    result = await tool_workflow.run_tool_workflow(
+        tool_name="data_controls_dry_run",
+        payload={"scopes": [], "reason": sensitive_reason},
+        workflow_mode="plan_reflect_repair",
+    )
+
+    assert result["success"] is True
+    assert result["metadata"]["repair_count"] == 1
+    assert result["planning"]["payload_keys"] == ["reason", "scopes"]
+    assert result["repair"]["payload_keys"] == ["reason", "scopes"]
+    response_text = str(result)
+    assert sensitive_reason not in response_text
+    assert "prompt_preview" not in response_text
+    assert "C:/private/source.txt" not in response_text
+
+
+@pytest.mark.asyncio
 async def test_plan_reflect_repair_does_not_repair_unknown_or_dangerous_payload(monkeypatch) -> None:
     tool_workflow = _load_gateway_module("app.tool_workflow", monkeypatch)
     from app.business_tools import ensure_business_tools_registered
