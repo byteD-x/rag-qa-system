@@ -42,6 +42,61 @@ export function deleteAgentProfile(profileId: string) {
   return request.delete(`/platform/agent-profiles/${profileId}`);
 }
 
+// ---- LLM Providers ----
+export interface LlmRouteSummary {
+  provider?: string;
+  base_url?: string;
+  model?: string;
+  fallback_route_key?: string;
+  temperature?: number;
+  max_tokens?: number;
+  timeout_seconds?: number;
+  api_key_configured: boolean;
+}
+
+export interface LlmConfigSummary {
+  enabled: boolean;
+  configured: boolean;
+  provider: string;
+  base_url: string;
+  api_key_configured: boolean;
+  current_model: string;
+  common_knowledge_model: string;
+  model_routing: Record<string, LlmRouteSummary>;
+}
+
+export interface LlmModelItem {
+  id: string;
+  object: string;
+  owned_by: string;
+  created: number | null;
+}
+
+export interface LlmModelDiscoveryResult {
+  provider: string;
+  base_url: string;
+  models_url: string;
+  api_key_configured: boolean;
+  current_model: string;
+  models: LlmModelItem[];
+  count: number;
+}
+
+export interface LlmModelDiscoveryPayload {
+  provider?: string;
+  base_url?: string;
+  api_key?: string;
+  max_models?: number;
+}
+
+export function getLlmConfig() {
+  return request.get<LlmConfigSummary>('/platform/llm/config');
+}
+
+export function discoverLlmModels(data: LlmModelDiscoveryPayload) {
+  return request.post<LlmModelDiscoveryResult>('/platform/llm/models/discover', data);
+}
+
 // ---- Tool Registry ----
 export interface ToolRegistrySummary {
   registered_tools: number;

@@ -168,6 +168,17 @@ const routes = [
         }
       },
       {
+        path: 'platform/models',
+        name: 'ModelProviderView',
+        component: () => import('@/views/platform/ModelProviderView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: '模型接入',
+          subtitle: '',
+          breadcrumb: ['工作台', '模型接入']
+        }
+      },
+      {
         path: 'platform/monitor',
         name: 'AgentMonitorView',
         component: () => import('@/views/platform/AgentMonitorView.vue'),

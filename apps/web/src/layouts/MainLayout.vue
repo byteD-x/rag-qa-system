@@ -227,6 +227,11 @@ const navItemsPrimary = [
     icon: EditPen
   },
   {
+    path: '/workspace/platform/models',
+    label: '模型接入',
+    icon: Platform
+  },
+  {
     path: '/workspace/kb/upload',
     label: '知识库治理',
     icon: Files
@@ -258,7 +263,8 @@ const navItemsPrimaryFiltered = computed(() =>
     if (
       item.path === '/workspace/chat' ||
       item.path === '/workspace/platform/agents' ||
-      item.path === '/workspace/platform/prompts'
+      item.path === '/workspace/platform/prompts' ||
+      item.path === '/workspace/platform/models'
     ) {
       return authStore.hasPermission('chat.use');
     }
