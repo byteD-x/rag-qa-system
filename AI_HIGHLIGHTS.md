@@ -1,6 +1,6 @@
 # RAG-QA 2.0 - AI应用开发亮点
 
-> Last updated: 2026-06-06
+> Last updated: 2026-06-08
 > 本文是作品集和简历口径入口；涉及收益指标时必须区分“最小 fixture 已验证”和“真实业务待补指标”。
 
 ## 项目简介
@@ -37,6 +37,7 @@
 ### 5. 模型路由与降级
 - 按场景配置不同模型参数
 - 级联降级，主模型失败自动切换
+- 支持 OpenAI-compatible 中转站接入、newapi/sub2api 模型发现和 `fallback_route_key` 备线路由
 - 支持流式生成 + Token实时追踪
 
 ### 6. 多模态视觉处理
@@ -78,13 +79,14 @@
 - **五层分层指令体系**：L1系统→L2场景→L3 Agent→L4会话→L5调用级，优先级合并+冲突检测+安全校验
 - **6大场景模板**：企业QA/技术支持/合规审查/培训教练/数据分析/代码审查，一键切换
 - **RAG幻觉检测**：引用一致性+数字一致性+LLM深度分析三路径，自动标记高风险回答
+- **模型接入页**：展示脱敏 LLM 配置摘要，发现 OpenAI-compatible 中转站模型并生成 `LLM_MODEL_ROUTING_JSON` 配置片段
 - **Python SDK**：同步/异步双客户端，覆盖问答/流式/知识库管理/Agent模式/成本查询/缓存管理
 
 ---
 
 ## 简历一句话描述
 
-> 独立设计并实现企业级RAG问答系统，涵盖多路检索融合、LangGraph工作流编排、**Agent自主决策**（任务拆解+反思闭环+三层记忆+工具注册中心）、多模态视觉处理、AI安全防护、**推理优化**（三层缓存+模型健康熔断+智能路由）、**五层指令体系**、RAG幻觉检测和Python SDK等完整AI工程能力。
+> 独立设计并实现企业级RAG问答系统，涵盖多路检索融合、LangGraph工作流编排、**Agent自主决策**（任务拆解+反思闭环+三层记忆+工具注册中心）、多模态视觉处理、AI安全防护、**模型中转站接入与路由 fallback**、**推理优化**（三层缓存+模型健康熔断+智能路由）、**五层指令体系**、RAG幻觉检测和Python SDK等完整AI工程能力。
 
 ---
 
@@ -135,7 +137,7 @@
 
 ## 面试口径校准
 
-- **已实现**：本地 embedding 抽象、Qdrant 向量召回、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、人工接管队列、**Agent自主决策（任务拆解+反思+记忆+工具注册）、三层缓存、模型健康熔断、五层指令体系、6大场景模板、RAG幻觉检测、Python SDK**。
+- **已实现**：本地 embedding 抽象、Qdrant 向量召回、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、人工接管队列、**Agent自主决策（任务拆解+反思+记忆+工具注册）、三层缓存、模型健康熔断、模型中转站接入与路由 fallback、五层指令体系、6大场景模板、RAG幻觉检测、Python SDK**。
 - **已验证**：最小离线 fixture 可产出 retrieval ablation、embedding benchmark 和 local ingest benchmark 报告；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项。
 - **可选增强**：外部 embedding provider 和 Cross-Encoder rerank 已预留配置入口，但不是默认低成本路线。
 - **待补指标**：真实业务数据上的延迟、吞吐、命中率提升和成本节省，需要以线上或压测报告补充，不在简历中写成确定收益。

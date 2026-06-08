@@ -210,24 +210,28 @@
 1. **解决的问题**：单一 LLM 可能存在稳定性问题，不同模型在不同场景下表现各异
 2. **具体实现**：
    - 基于配置的模型路由，支持根据 prompt 类型选择不同模型
-   - 实现了模型调用失败后的自动降级机制
+   - 支持 `LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON` 覆盖 route 级 provider、Base URL、模型、温度、token 上限和 `extra_body`
+   - 通过 `fallback_route_key` 串联备线路由，在 5xx、超时等服务端失败时尝试切换；4xx、认证失败或配置错误会按原错误返回
    - 支持流式输出和非流式输出两种模式
+   - 平台模型接入页可调用 `/api/v1/platform/llm/models/discover` 拉取 OpenAI-compatible 中转站模型，并生成配置片段
 3. **关键文件/函数**：
    - `model_routing.py` 中的 `execute_with_model_route_fallback` 函数
    - `gateway_answering.py` 中的 `generate_grounded_answer` 和 `stream_grounded_answer` 函数
+   - `gateway_llm_models.py` 中的脱敏配置摘要和模型发现逻辑
+   - `ModelProviderView.vue` 中的模型接入页面
 4. **关键参数**：
    - 温度参数：grounded answer 0.2，common knowledge 0.4
    - 最大 token 数：1200
 5. **为什么值得讲**：模型路由和降级机制是生产级 RAG 系统的必备能力，能提高系统稳定性和灵活性
 6. **trade-off**：
    - 优点：提高了系统稳定性，支持根据场景选择最优模型
-   - 缺点：增加了配置复杂度，需要维护多个模型的 API 密钥
-7. **当前局限**：模型路由规则固定，未支持基于负载或性能的动态路由
+   - 缺点：增加了配置复杂度，需要维护多个模型的 API 密钥；模型发现也需要生产环境配置 Host allowlist 控制可访问中转站
+7. **当前局限**：模型路由规则固定，未支持基于负载或性能的动态路由；模型发现只做配置辅助，不保存 API Key，也未宣称真实中转站端到端压测
 8. **优化方向**：
    - 实现基于负载的动态模型路由
    - 支持模型性能监控和自动切换
    - 实现成本和性能的自动平衡
-9. **面试表述**："我们实现了 LLM 调用的模型路由和降级机制，能根据不同场景选择合适的模型，并在模型调用失败时自动降级到备用模型。同时支持流式和非流式输出，提高了系统的稳定性和用户体验。"
+9. **面试表述**："我们实现了 LLM 调用的显式模型路由和 fallback 机制。不同场景可以通过配置选择不同中转站、模型和参数，主 route 遇到 5xx 或超时等服务端失败时会按 `fallback_route_key` 尝试备线路由；同时提供模型接入页，帮助从 newapi、sub2api 等 OpenAI-compatible 中转站发现模型并生成配置片段。这个能力提高了接入灵活性和故障可控性，但不是基于实时负载的自动调度，也不保存用户输入的 API Key。"
 10. **可能的追问**：
     - 追问 1："模型路由的规则是怎么定义的？"
     - 追问 2："降级机制是如何触发的？"
@@ -235,8 +239,8 @@
     - 追问 4："温度参数为什么这样设置？"
     - 追问 5："最大 token 数是如何确定的？"
 11. **追问回答**：
-    - 追问 1："模型路由规则基于 prompt 类型和配置文件，比如 'chat_grounded_answer' 类型的 prompt 使用更精确的模型，'chat_common_knowledge' 类型的 prompt 使用更灵活的模型。路由规则可以通过配置文件动态调整。"
-    - 追问 2："当模型调用返回 HTTP 错误、超时或其他异常时，会触发降级机制，自动尝试下一个优先级的模型。降级顺序和尝试次数可以通过配置调整。"
+    - 追问 1："模型路由规则基于 prompt 定义里的 route key 和环境配置。`LLM_MODEL_ROUTING_JSON` 可以给每个 route 覆盖 provider、base_url、api_key、model、temperature、max_tokens、timeout_seconds 和 extra_body，也可以用 `fallback_route_key` 指向备线。"
+    - 追问 2："降级不是黑盒 SDK 重试，而是显式 route plan。当前在 HTTP 5xx、超时等服务端失败时尝试下一个 route；4xx、认证失败和配置错误通常不继续切换，因为这些问题换路由也可能掩盖真实配置错误。"
     - 追问 3："流式输出和非流式输出使用不同的函数实现，但共享相同的 prompt 构建逻辑。流式输出通过回调函数逐块返回结果，非流式输出一次性返回完整结果。"
     - 追问 4："温度参数 0.2 用于 grounded answer，是为了保证回答的准确性和一致性；0.4 用于 common knowledge，是为了增加回答的多样性。温度参数可以根据不同模型和场景调整。"
     - 追问 5："最大 token 数 1200 是基于成本控制和回答长度的平衡，既能保证回答的完整性，又能避免不必要的 token 消耗。这个参数可以根据模型能力和业务需求调整。"

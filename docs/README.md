@@ -1,6 +1,6 @@
 # 文档总览
 
-> Last updated: 2026-06-06
+> Last updated: 2026-06-08
 
 本目录收纳项目的参考文档、API 规范、面试材料和架构图。日常使用优先阅读根目录 [README.md](../README.md)，需要接口、工作流或展示口径细节时再进入本目录。
 
@@ -11,6 +11,7 @@
 | 了解项目和本地启动 | [README.md](../README.md) | 项目能力、快速开始、环境变量、验证命令 |
 | 查接口契约 | [reference/api-specification.md](reference/api-specification.md) | Gateway 与 KB Service 的核心 HTTP API |
 | 查路由索引 | [API_ROUTE_INDEX.md](API_ROUTE_INDEX.md) | 静态生成的 FastAPI path、method、handler 与源码位置清单 |
+| 配置模型中转站 | [../README.md](../README.md#接入-newapi--sub2api-等中转站) / [reference/api-specification.md](reference/api-specification.md#llm-配置与模型发现) | newapi/sub2api 接入、`工作台 -> 模型接入`、模型发现接口、`LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON` 和 `fallback_route_key` |
 | 理解企业聊天补问 | [reference/enterprise-chat-v2.md](reference/enterprise-chat-v2.md) | LangGraph v2 线程、运行、中断、恢复与 `answer_basis` |
 | 理解人工接管队列 | [reference/api-specification.md](reference/api-specification.md) | Gateway 本地接管队列、认领请求与生产后端边界 |
 | 理解知识库智能提问 | [reference/kb-smart-ask-workflow.md](reference/kb-smart-ask-workflow.md) | 文档详情页到聊天页的结构化提问链路 |

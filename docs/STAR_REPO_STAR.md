@@ -12,13 +12,14 @@
 **Action**：
 - 使用多信号检索和 EvidenceBlock 保存文档、章节、原文、分数和 evidence path。
 - 回答链路根据证据强度选择 grounded、weak 或 refusal 路径。
+- 通过 `fallback_route_key` 把主 route 与备线路由串成显式 fallback plan，并在模型接入页提供中转站模型发现与配置片段生成。
 - 将 `trace_id`、`llm_trace`、成本估算和反馈快照写入 Gateway 工作流与会话元数据。
 
 **Result**：
-- 本地测试覆盖 common knowledge、strict refusal、fallback route、引用和反馈快照等关键分支。
+- 本地测试覆盖 common knowledge、strict refusal、fallback route、模型配置脱敏、OpenAI-compatible 模型发现、引用和反馈快照等关键分支。
 - 可在面试中展示“证据结构 + 回答边界 + trace”的工程闭环；真实业务准确率仍需目标数据集验证。
 
-**证据**：`apps/services/api-gateway/src/app/gateway_answering.py`、`apps/services/api-gateway/src/app/gateway_chat_service.py`、`packages/python/shared/grounded_answering.py`、`tests/test_backend_infra.py`、`tests/test_chat_workflow_resume_and_budget.py`
+**证据**：`apps/services/api-gateway/src/app/gateway_answering.py`、`apps/services/api-gateway/src/app/gateway_chat_service.py`、`apps/services/api-gateway/src/app/gateway_llm_models.py`、`packages/python/shared/grounded_answering.py`、`tests/test_backend_infra.py`、`tests/test_ai_platform_capabilities.py`、`tests/test_chat_workflow_resume_and_budget.py`、`apps/web/src/views/platform/ModelProviderView.test.ts`
 
 ## STAR 2：最终回答阶段接入受控 Tool Calling
 
@@ -92,5 +93,5 @@
 ## 待补指标
 
 - 真实业务数据集上的准确率、召回率、幻觉率、延迟、吞吐和成本收益。
-- 长时间线上运行的缓存命中率和模型路由收益。
+- 长时间线上运行的缓存命中率、模型路由收益和真实中转站端到端稳定性。
 - 生产环境 SLO、容量规划和事故复盘样本。

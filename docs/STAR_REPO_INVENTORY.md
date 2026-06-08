@@ -14,7 +14,7 @@
 | Web Vue 组件/视图 | 39 |
 | Web TypeScript 文件 | 32 |
 | Python 脚本 | 19 |
-| Markdown 文档 | 15 |
+| Markdown 文档 | 28 |
 
 统计命令示例：
 
@@ -32,6 +32,7 @@ git ls-files tests/test_*.py
 | Knowledge Base FastAPI | `apps/services/knowledge-base/src/app/main.py` | 知识库、检索、治理、视觉资产、同步路由 |
 | Chat 服务 | `apps/services/api-gateway/src/app/gateway_chat_service.py` | 会话准备、检索、生成、持久化、cache 与 trace |
 | Grounded Answer | `apps/services/api-gateway/src/app/gateway_answering.py` | 回答模式、模型路由、最终回答工具调用 |
+| 模型接入 | `apps/services/api-gateway/src/app/gateway_llm_models.py` / `apps/web/src/views/platform/ModelProviderView.vue` | 中转站配置摘要、`/models` 模型发现和配置片段生成 |
 | ToolRegistry | `apps/services/api-gateway/src/app/tool_registry.py` | 工具注册、LangChain schema、执行统计 |
 | Tool Workflow | `apps/services/api-gateway/src/app/tool_workflow.py` | `direct` 与 `plan_reflect_repair` 工具工作流 |
 | MCP adapter | `apps/services/api-gateway/src/app/gateway_mcp_adapter.py` | 本机只读 JSON-RPC adapter |
@@ -77,4 +78,5 @@ git ls-files tests/test_*.py
 | Semantic Cache 命中边界 | `apps/services/api-gateway/src/app/semantic_cache.py` | `tests/test_inference_optimization.py::TestSemanticCache` |
 | Trace 与反馈快照 | `packages/python/shared/tracing.py`、`apps/services/api-gateway/src/app/gateway_sessions.py` | `tests/test_api_error_payloads.py`、`tests/test_backend_infra.py::test_upsert_chat_message_feedback_snapshots_llm_metadata` |
 | 知识库治理与运维聚合 | `apps/services/knowledge-base/src/app/kb_analytics_routes.py`、`apps/web/src/views/kb/KBGovernanceView.vue`、`docs/reference/kb-governance-workbench.md` | `tests/test_backend_infra.py::test_kb_governance_payload_aggregates_enterprise_queues`、`apps/web/src/views/kb/KBGovernanceView.test.ts` |
+| 模型中转站接入 | `apps/services/api-gateway/src/app/gateway_llm_models.py`、`apps/services/api-gateway/src/app/ai_client.py`、`apps/web/src/views/platform/ModelProviderView.vue` | `tests/test_ai_platform_capabilities.py::test_gateway_llm_settings_parses_fallback_route_key_from_env`、`tests/test_ai_platform_capabilities.py::test_discover_openai_compatible_models_parses_models_response`、`apps/web/src/views/platform/ModelProviderView.test.ts` |
 | Docker 构建上下文 | `.dockerignore`、服务级 Dockerfile | `tests/test_container_assets.py` |

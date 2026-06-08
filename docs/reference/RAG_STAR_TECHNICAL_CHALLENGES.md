@@ -1,17 +1,17 @@
 # RAG-QA STAR 技术难点与解决方案
 
 > 面向岗位：AI 应用 / RAG 后端工程师  
-> 更新日期：2026-06-06
+> 更新日期：2026-06-08
 > 使用方式：这份文档是面试时讲“我做了什么、难在哪里、怎么解决、如何验证”的主材料。所有结论必须能回到代码、测试、CI 或评测脚本；没有真实业务报告支撑的指标，只能写“待验证”。
 
 ## 口径边界
 
 | 分类 | 当前口径 |
 |---|---|
-| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、运行时治理指标、模型健康熔断、复杂度驱动路由、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
+| 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、运行时治理指标、模型健康熔断、复杂度驱动路由、模型中转站接入与路由 fallback、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
 | 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
 | 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
-| 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取或财务级结算完成 |
+| 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取、财务级结算完成、真实中转站端到端压测完成或自动保存模型发现凭据 |
 
 ## STAR 1：把 RAG 演示链路从“能跑”打磨成“能解释”
 
@@ -306,6 +306,8 @@
 - 缓存失效：知识库文档更新时主动失效相关缓存、TTL过期自动清理、LRU淘汰
 - `ModelHealthMonitor`：滑动窗口P50/P95/P99延迟追踪、连续失败自动熔断（冷却期30s）、健康评分EMA平滑
 - `ComplexityClassifier`：7维特征快速评估（<1ms），驱动经济/标准/高级三档模型路由
+- `gateway_llm_models` 与模型接入页：展示脱敏 LLM 配置摘要，调用 OpenAI-compatible `/models` 发现 newapi/sub2api 等中转站模型，并生成 `LLM_MODEL_ROUTING_JSON` 配置片段
+- `fallback_route_key`：把主 route 与备线路由串成显式 fallback plan；当前在 5xx、超时等服务端失败时尝试备线，4xx、认证失败和配置错误按原错误返回
 - `RequestCoalescer`：100ms窗口内相同问题合并为单次LLM调用
 
 **Result**：
@@ -313,11 +315,12 @@
 - 回答级缓存已具备精确/可选语义/Prompt Cache 分层与统计能力；真实命中率需要以目标业务数据和压测报告确认
 - 模型故障<3次连续失败自动摘除，恢复后自动重新上线
 - 简单问候类问题可路由到经济模型；综合成本收益不写固定百分比，需以部署环境报告为准
+- 模型中转站接入具备配置摘要、模型发现、route fallback 与前端配置片段生成；真实 newapi/sub2api 端到端稳定性仍需受控环境验证
 - `usage_reconciliation` 可在运营看板里并列展示本地估算成本与导入 provider billing 记录，用作诊断对账；自动账单拉取、完整租户结算和真实节省比例仍保持待验证边界。
 
-**技术难点**：语义缓存的误命中风险（相似但不同的问题返回相同答案）和缓存失效时机。
+**技术难点**：语义缓存的误命中风险（相似但不同的问题返回相同答案）、缓存失效时机，以及模型发现接口既要兼容多类中转站又要避免保存凭据和扩大可访问 Host 面。
 
-**解决方案**：语义命中默认关闭，开启后仍要求同 scope/corpus key；语义阈值可配置（默认0.92），用户反馈点踩时主动失效；知识库更新时按corpus_id批量失效。
+**解决方案**：语义命中默认关闭，开启后仍要求同 scope/corpus key；语义阈值可配置（默认0.92），用户反馈点踩时主动失效；知识库更新时按corpus_id批量失效。模型发现只把凭据用于单次上游 `/models` 请求，成功响应与审计详情不写入密钥；生产环境通过 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS` 约束可访问中转站。
 
 ---
 
@@ -331,6 +334,7 @@
 - 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
 - 构建回答级缓存体系（L1 精确/L2 可选语义命中/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
+- 落地 OpenAI-compatible 模型接入治理，支持 newapi/sub2api 等中转站模型发现、脱敏配置摘要、`fallback_route_key` 备线路由和前端配置片段生成，同时保留凭据不保存与 Host allowlist 的安全边界。
 
 ## 验证命令
 

@@ -567,15 +567,18 @@ Gateway 通过 `metrics-summary` 和 `rag_gateway_governance_*` 指标观察 Too
 
 当前系统不是那种“SDK 自动重试很多次”的风格，而是更偏显式路由和显式 fallback。也就是说，它更愿意把切换模型这件事当成明确策略，而不是藏在 SDK 内部的黑盒重试里。
 
+路由来自 `LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON`。每个 route 可以覆盖 provider、Base URL、API Key、model、temperature、max_tokens、timeout_seconds 和 extra_body，也可以用 `fallback_route_key` 指向备线路由。模型接入页还提供 OpenAI-compatible 中转站的 `/models` 发现能力，用来从 newapi、sub2api 这类中转站拉取模型列表并生成配置片段。
+
 这样做的好处是：
 
 1. 行为更可控
 2. 更容易知道到底是哪个路由失败了
 3. 不容易因为过度自动重试把问题掩盖掉
+4. 中转站切换和模型选择可以通过配置落地，而不是写死在业务代码里
 
 代价是：
 
-如果网络临时抖动，而 fallback 条件又比较保守，你可能会更依赖外围稳定性设计。
+如果网络临时抖动，而 fallback 条件又比较保守，你可能会更依赖外围稳定性设计。当前 fallback 只在 5xx、超时等服务端失败时继续尝试；4xx、认证失败和配置错误会按原错误返回，避免把真实配置问题隐藏掉。模型发现请求不会保存用户输入的 API Key；生产环境应配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS` 限制可访问的中转站 Host。
 
 ### 问题 27：这个项目最真实的 trade-off 是什么？
 

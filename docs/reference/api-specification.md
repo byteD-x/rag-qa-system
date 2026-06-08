@@ -900,7 +900,7 @@ LangGraph 编排版知识库问答接口。
 
 - 返回 Gateway 当前 LLM 配置的脱敏摘要，供 `/workspace/platform/models` 模型接入页展示。
 - 展示默认 provider、Base URL、当前模型、common knowledge 模型和 route 配置。
-- route 配置会保留 `fallback_route_key`、`temperature`、`max_tokens`、`timeout_seconds` 与 `extra_body` 摘要，但密钥只返回 `api_key_configured`，不返回原文。
+- route 配置会保留 `fallback_route_key`、`temperature`、`max_tokens` 与 `timeout_seconds` 摘要，但密钥只返回 `api_key_configured`，不返回原文。
 
 权限：
 
@@ -925,7 +925,7 @@ LangGraph 编排版知识库问答接口。
 
 - 为 newapi、sub2api 或其他 OpenAI-compatible 中转站提供模型发现辅助。
 - 服务端会把输入 Base URL 规范化到 `{base_url}/models`，兼容用户误填 `/chat/completions` 或 `/models` 的情况。
-- 响应只返回模型列表、规范化后的 Base URL 和模型发现 URL；请求凭据只用于本次上游 `/models` 请求，不保存、不写入审计详情、不回显。
+- 成功响应返回 provider、规范化后的 Base URL、模型发现 URL、当前模型摘要、模型列表和数量；请求凭据只用于本次上游 `/models` 请求，不保存、不写入审计详情、不写入成功响应。
 
 权限：
 
@@ -956,7 +956,9 @@ LangGraph 编排版知识库问答接口。
 
 - `base_url` 只允许 `http(s)`。
 - 如配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` 或 `AI_MODEL_DISCOVERY_ALLOWED_HOSTS`，发现请求只允许访问白名单 host 或 host:port。
-- 上游错误体中的 `error.message` 或 `message` 会映射为 `502` detail；非 JSON 或非法模型列表也会返回 `502`。
+- 上游错误体中的 `error.message` 或 `message` 会映射为 `502` detail；生产中转站不应在错误消息中包含敏感凭据。
+- 非 JSON 或非法模型列表会返回 `502`。
+- 未传 `api_key` 且后端未配置可用 `LLM_API_KEY` 时，会返回 `400`。
 
 请求示例：
 

@@ -69,3 +69,11 @@ docker compose config --quiet
 
 - 生产环境若不配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS`，模型发现接口仍会兼容访问任意 OpenAI-compatible 中转站 Host；建议生产环境配置 allowlist。
 - 本轮新增的 completion 契约测试覆盖非流式响应映射和非 SSE JSON 降级，未新增真实中转站集成测试；真实 newapi/sub2api 仍建议在可控环境用 mock server 或测试中转站补充端到端验证。
+
+## 2026-06-08 文档同步补充
+
+- 补齐 README、docs 索引、API 契约、项目亮点和仓库盘点中的模型中转站接入口径。
+- 文档仅描述 OpenAI-compatible/newapi/sub2api 模型发现、脱敏配置摘要、`fallback_route_key` 路由 fallback 和配置片段生成，不承诺自动保存密钥、自动账单拉取或真实中转站端到端压测。
+- 本轮子代理 Harvey 只读审阅用户入口文档覆盖范围；主线程负责整合、验证、提交和推送。
+- 已运行 `rg` 检索模型接入入口、路由 JSON、`fallback_route_key` 与发现接口，命中 README、docs 索引、API 契约和盘点文档。
+- 已运行 `python scripts/quality/check-encoding.py --root .` 与 `git diff --check`，均通过；`docker compose config --quiet` 因当前环境没有 `docker` 命令未通过，需在 Docker CLI 可用环境补跑。
