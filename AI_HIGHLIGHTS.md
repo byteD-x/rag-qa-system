@@ -36,7 +36,7 @@
 
 ### 5. 模型路由与降级
 - 按场景配置不同模型参数
-- 级联降级，主模型失败自动切换
+- 通过 `fallback_route_key` 在本地 5xx、上游不可用、非法响应或空回答等失败后尝试备线路由
 - 支持 OpenAI-compatible 中转站接入、newapi/sub2api 模型发现和 `fallback_route_key` 备线路由
 - 支持流式生成 + Token实时追踪
 

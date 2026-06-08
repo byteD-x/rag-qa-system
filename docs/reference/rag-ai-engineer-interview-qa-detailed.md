@@ -578,7 +578,7 @@ Gateway 通过 `metrics-summary` 和 `rag_gateway_governance_*` 指标观察 Too
 
 代价是：
 
-如果网络临时抖动，而 fallback 条件又比较保守，你可能会更依赖外围稳定性设计。当前 fallback 只在 5xx、超时等服务端失败时继续尝试；4xx、认证失败和配置错误会按原错误返回，避免把真实配置问题隐藏掉。模型发现请求不会保存用户输入的 API Key；生产环境应配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS` 限制可访问的中转站 Host。
+如果网络临时抖动，而 fallback 条件又比较保守，你可能会更依赖外围稳定性设计。当前执行器按本地 `HTTPException` 状态判断：小于 500 的错误直接返回，500 及以上错误继续尝试备线；供应商 4xx 是否进入 fallback 取决于调用层映射后的本地异常状态。模型发现请求不会保存用户输入的 API Key；生产环境应配置 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` / `AI_MODEL_DISCOVERY_ALLOWED_HOSTS` 限制可访问的中转站 Host。
 
 ### 问题 27：这个项目最真实的 trade-off 是什么？
 

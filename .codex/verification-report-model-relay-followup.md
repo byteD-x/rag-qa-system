@@ -77,3 +77,8 @@ docker compose config --quiet
 - 本轮子代理 Harvey 只读审阅用户入口文档覆盖范围；主线程负责整合、验证、提交和推送。
 - 已运行 `rg` 检索模型接入入口、路由 JSON、`fallback_route_key` 与发现接口，命中 README、docs 索引、API 契约和盘点文档。
 - 已运行 `python scripts/quality/check-encoding.py --root .` 与 `git diff --check`，均通过；`docker compose config --quiet` 因当前环境没有 `docker` 命令未通过，需在 Docker CLI 可用环境补跑。
+
+## 2026-06-08 fallback 口径校准
+
+- 对照 `packages/python/shared/model_routing.py` 的 `execute_with_model_route_fallback`，文档统一改为按本地 `HTTPException` 状态描述 fallback：小于 500 的错误直接返回，500 及以上才尝试备线路由。
+- 由于 Gateway 调用层会把上游 HTTP 错误、非法响应和空回答映射为本地 `502`，面试和 README 口径不再承诺“供应商 4xx 一定不 fallback”，而是说明真实行为取决于调用层映射后的本地异常状态。

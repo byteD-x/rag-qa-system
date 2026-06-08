@@ -307,7 +307,7 @@
 - `ModelHealthMonitor`：滑动窗口P50/P95/P99延迟追踪、连续失败自动熔断（冷却期30s）、健康评分EMA平滑
 - `ComplexityClassifier`：7维特征快速评估（<1ms），驱动经济/标准/高级三档模型路由
 - `gateway_llm_models` 与模型接入页：展示脱敏 LLM 配置摘要，调用 OpenAI-compatible `/models` 发现 newapi/sub2api 等中转站模型，并生成 `LLM_MODEL_ROUTING_JSON` 配置片段
-- `fallback_route_key`：把主 route 与备线路由串成显式 fallback plan；当前在 5xx、超时等服务端失败时尝试备线，4xx、认证失败和配置错误按原错误返回
+- `fallback_route_key`：把主 route 与备线路由串成显式 fallback plan；执行器按本地 `HTTPException` 状态判断，小于 500 的错误直接返回，500 及以上错误尝试备线；供应商 4xx 是否进入 fallback 取决于调用层映射后的本地异常状态
 - `RequestCoalescer`：100ms窗口内相同问题合并为单次LLM调用
 
 **Result**：
