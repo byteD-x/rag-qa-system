@@ -5,7 +5,7 @@ from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath
 from shared.text_encoding import detect_text_encoding_from_bytes
-from shared.tracing import ensure_trace_id, trace_headers
+from shared.tracing import current_trace_id, ensure_trace_id, reset_trace_id, set_trace_id, trace_headers
 
 
 def test_query_rewrite_extracts_entity_and_chapter_focus() -> None:
@@ -55,6 +55,24 @@ def test_trace_id_generation_and_headers() -> None:
     headers = trace_headers(trace_id)
     assert trace_id.startswith("gateway-")
     assert headers["X-Trace-Id"] == trace_id
+    assert trace_headers("candidate-trace")["X-Trace-Id"] == "candidate-trace"
+
+
+def test_trace_id_is_cleaned_and_limited() -> None:
+    assert ensure_trace_id("  trace id:/unsafe?ok._-  ") == "traceidunsafeok._-"
+    assert ensure_trace_id("a" * 120) == "a" * 96
+
+
+def test_trace_headers_use_current_trace_id_and_reset_context() -> None:
+    original_trace_id = current_trace_id()
+    trace_context = set_trace_id("context-trace")
+    try:
+        assert current_trace_id() == "context-trace"
+        assert trace_headers() == {"X-Trace-Id": "context-trace"}
+    finally:
+        reset_trace_id(trace_context)
+
+    assert current_trace_id() == original_trace_id
 
 
 def test_detect_text_encoding_prefers_utf8_without_bom() -> None:

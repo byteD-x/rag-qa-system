@@ -279,6 +279,8 @@ def _build_section_and_chunks(
     source_kind: str = "text",
     page_number: int | None = None,
     asset_id: str | None = None,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
 ) -> tuple[KBSection | None, list[KBChunk]]:
     content = raw_text.strip()
     if not content:
@@ -299,7 +301,7 @@ def _build_section_and_chunks(
         asset_id=asset_id,
     )
 
-    chunks = build_section_chunks(section)
+    chunks = build_section_chunks(section, max_tokens=max_tokens, token_overlap=token_overlap)
     return section, chunks
 
 

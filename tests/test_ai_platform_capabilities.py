@@ -629,6 +629,41 @@ def test_kb_worker_reuses_shared_section_chunking() -> None:
     assert chunks[1].section_id == section.id
 
 
+def test_kb_worker_can_forward_token_chunking_options() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    from shared.token_estimation import estimate_tokens
+
+    worker = importlib.import_module("app.worker")
+    raw_text = "policy rule " * 240
+
+    section, chunks = worker._build_section_and_chunks(
+        section_index=2,
+        title="Policy",
+        raw_text=raw_text,
+        char_start=30,
+        source_kind="visual_ocr",
+        page_number=4,
+        asset_id="asset-token-worker",
+        max_tokens=80,
+        token_overlap=10,
+    )
+
+    assert section is not None
+    assert len(chunks) > 1
+    assert all(estimate_tokens(chunk.text) <= 80 for chunk in chunks)
+    assert [chunk.chunk_index for chunk in chunks] == list(range(1, len(chunks) + 1))
+    assert chunks[0].char_start == 30
+    assert chunks[-1].char_end == 30 + len(raw_text.strip())
+    assert chunks[1].char_start < chunks[0].char_end
+    assert all(chunk.section_id == section.id for chunk in chunks)
+    assert chunks[0].source_kind == "visual_ocr"
+    assert chunks[0].page_number == 4
+    assert chunks[0].asset_id == "asset-token-worker"
+
+
 def test_visual_layout_regions_are_promoted_to_region_units() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
     prioritize_service_src(kb_src)

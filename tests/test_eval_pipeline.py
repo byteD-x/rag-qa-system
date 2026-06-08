@@ -607,6 +607,22 @@ def test_fast_test_selector_routes_agent_tooling_to_focused_tests() -> None:
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_business_tools_to_workflow_trace_regression() -> None:
+    selector = _load_script_module(
+        "fast_test_selector_business_tools_trace_test",
+        "scripts/quality/select_fast_tests.py",
+    )
+
+    targets = selector.select_targets(["apps/services/api-gateway/src/app/business_tools.py"])
+
+    assert targets == [
+        "tests/test_agent_capabilities.py::TestToolRegistry::test_business_tools_register_idempotently",
+        "tests/test_agent_capabilities.py::TestToolRegistry::test_workflow_trace_summary_handles_sparse_and_failed_tool_calls",
+        "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_prunes_nodeids_covered_by_class_target() -> None:
     selector = _load_script_module("fast_test_selector_class_prune_test", "scripts/quality/select_fast_tests.py")
 
@@ -861,6 +877,33 @@ def test_fast_test_selector_routes_qdrant_readiness_modules_to_focused_tests() -
         "tests/test_backend_infra.py::test_search_vector_evidence_degrades_when_qdrant_query_fails",
     ]
     assert "tests/test_shared_stack.py" not in targets
+
+
+def test_fast_test_selector_routes_token_estimation_and_kb_chunking_to_focused_tests() -> None:
+    selector = _load_script_module("fast_test_selector_token_kb_chunking_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(
+        [
+            "packages/python/shared/token_estimation.py",
+            "apps/services/knowledge-base/src/app/parsing.py",
+            "apps/services/knowledge-base/src/app/worker.py",
+        ]
+    )
+
+    assert targets == [
+        "tests/test_context_optimization.py::TestEstimateTokens",
+        "tests/test_context_optimization.py::TestContextWindowManager",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_can_limit_estimated_tokens",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_rejects_invalid_token_options",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_advances_with_tiny_token_budget",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_uses_shared_window_and_overlap",
+        "tests/test_ai_platform_capabilities.py::test_kb_worker_reuses_shared_section_chunking",
+        "tests/test_ai_platform_capabilities.py::test_kb_worker_can_forward_token_chunking_options",
+        "tests/test_ai_platform_capabilities.py::test_visual_layout_regions_are_promoted_to_region_units",
+    ]
+    assert "tests/test_shared_stack.py" not in targets
+    assert "tests/test_ai_platform_capabilities.py" not in targets
+    assert "tests/test_backend_infra.py" not in targets
 
 
 def test_fast_test_selector_routes_kb_connector_modules_to_focused_tests() -> None:

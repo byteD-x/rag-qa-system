@@ -29,6 +29,7 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     ],
     "apps/services/api-gateway/src/app/business_tools.py": [
         "tests/test_agent_capabilities.py::TestToolRegistry::test_business_tools_register_idempotently",
+        "tests/test_agent_capabilities.py::TestToolRegistry::test_workflow_trace_summary_handles_sparse_and_failed_tool_calls",
         "tests/test_agent_capabilities.py::TestIntegration::test_business_tools_can_extend_agent_runtime_contract",
     ],
     "apps/services/api-gateway/src/app/api_key_manager.py": [
@@ -177,6 +178,17 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/knowledge-base/src/app/kb_api_support.py": [
         "tests/test_backend_infra.py::test_kb_readiness_checks_require_storage",
     ],
+    "apps/services/knowledge-base/src/app/parsing.py": [
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_uses_shared_window_and_overlap",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_can_limit_estimated_tokens",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_rejects_invalid_token_options",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_advances_with_tiny_token_budget",
+    ],
+    "apps/services/knowledge-base/src/app/worker.py": [
+        "tests/test_ai_platform_capabilities.py::test_kb_worker_reuses_shared_section_chunking",
+        "tests/test_ai_platform_capabilities.py::test_kb_worker_can_forward_token_chunking_options",
+        "tests/test_ai_platform_capabilities.py::test_visual_layout_regions_are_promoted_to_region_units",
+    ],
     "apps/services/knowledge-base/src/app/kb_system_routes.py": [
         "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
     ],
@@ -216,6 +228,13 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_shared_metrics.py",
         "tests/test_backend_infra.py::test_gateway_tool_workflow_route_records_failure_metrics",
         "tests/test_backend_infra.py::test_kb_metrics_route_refreshes_snapshot_and_exports_shared_metrics",
+    ],
+    "packages/python/shared/token_estimation.py": [
+        "tests/test_context_optimization.py::TestEstimateTokens",
+        "tests/test_context_optimization.py::TestContextWindowManager",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_can_limit_estimated_tokens",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_rejects_invalid_token_options",
+        "tests/test_ai_platform_capabilities.py::test_kb_section_chunking_advances_with_tiny_token_budget",
     ],
     "packages/python/shared/qdrant_store.py": [
         "tests/test_backend_infra.py::test_qdrant_runtime_config_uses_safe_defaults",
