@@ -8,6 +8,7 @@ from .tool_registry import tool_registry
 from .tool_workflow import WORKFLOW_MODE_DIRECT, run_tool_workflow
 
 
+MCP_ADAPTER_METHOD_NAMES = frozenset({"initialize", "tools/list", "tools/call"})
 MCP_ADAPTER_TOOL_NAMES = frozenset({"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"})
 MCP_SERVER_NAME = "rag-qa-gateway-readonly"
 MCP_PROTOCOL_FALLBACK_VERSION = "2024-11-05"
@@ -32,20 +33,20 @@ async def handle_mcp_request(message: Any) -> dict[str, Any]:
         return _jsonrpc_result(request_id, {"tools": _list_tools()})
     if method == "tools/call":
         return await _call_tool(request_id, params)
-    return _jsonrpc_error(request_id, -32601, f"Method not found: {method or 'unknown'}")
+    return _jsonrpc_error(request_id, -32601, "Method not found")
 
 
 def mcp_audit_details(message: Any, response: dict[str, Any]) -> dict[str, Any]:
     request = message if isinstance(message, dict) else {}
     error = response.get("error") if isinstance(response.get("error"), dict) else {}
     details: dict[str, Any] = {
-        "method": str(request.get("method") or ""),
+        "method": _audit_method_name(request.get("method")),
         "has_error": bool(error),
     }
     if error:
         details["error_code"] = error.get("code")
     params = request.get("params")
-    if isinstance(params, dict) and str(request.get("method") or "") == "tools/call":
+    if isinstance(params, dict) and str(request.get("method") or "").strip() == "tools/call":
         details["tool_name"] = _audit_tool_name(params.get("name"))
     return details
 
@@ -129,6 +130,15 @@ def _audit_tool_name(value: Any) -> str:
         return ""
     if name in MCP_ADAPTER_TOOL_NAMES:
         return name
+    return "not_allowed"
+
+
+def _audit_method_name(value: Any) -> str:
+    method = str(value or "").strip()
+    if method in MCP_ADAPTER_METHOD_NAMES:
+        return method
+    if not method:
+        return ""
     return "not_allowed"
 
 

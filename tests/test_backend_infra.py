@@ -3604,6 +3604,44 @@ def test_gateway_mcp_route_lists_readonly_tools_and_writes_audit(monkeypatch) ->
     assert audit_events[0]["resource_id"] == "tools/list"
 
 
+def test_gateway_mcp_route_redacts_unknown_method_in_audit(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_mcp_routes = importlib.import_module("app.gateway_mcp_routes")
+    audit_events: list[dict[str, object]] = []
+    monkeypatch.setattr(gateway_mcp_routes, "write_gateway_audit_event", lambda **kwargs: audit_events.append(kwargs))
+    user = auth_module.AuthUser(
+        user_id="member-1",
+        email="member@local",
+        role="kb_editor",
+        permissions=auth_module.permissions_for_role("kb_editor"),
+    )
+    leaked_method = "prompt_preview C:/private/source.txt"
+
+    client = TestClient(gateway_main.app)
+    response = client.post(
+        "/api/v1/mcp",
+        headers=_auth_headers(user),
+        json={"jsonrpc": "2.0", "id": "unknown-1", "method": leaked_method},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"]["code"] == -32601
+    assert payload["error"]["message"] == "Method not found"
+    assert audit_events
+    event = audit_events[0]
+    assert event["outcome"] == "failed"
+    assert event["resource_id"] == "not_allowed"
+    details = dict(event["details"] or {})
+    assert details["method"] == "not_allowed"
+    response_text = str(payload)
+    event_text = str(event)
+    assert "prompt_preview" not in response_text
+    assert "prompt_preview" not in event_text
+    assert "C:/private/source.txt" not in response_text
+    assert "C:/private/source.txt" not in event_text
+
+
 def test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments(monkeypatch) -> None:
     gateway_main = _load_gateway_main(monkeypatch)
     gateway_mcp_routes = importlib.import_module("app.gateway_mcp_routes")

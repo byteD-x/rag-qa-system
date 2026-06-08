@@ -161,9 +161,19 @@ async def test_mcp_audit_details_redacts_non_whitelisted_tool_name(monkeypatch) 
 @pytest.mark.asyncio
 async def test_mcp_unknown_method_returns_jsonrpc_error(monkeypatch) -> None:
     adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+    leaked_method = "prompt_preview C:/private/source.txt"
+    message = {"jsonrpc": "2.0", "id": 9, "method": leaked_method}
 
-    response = await adapter.handle_mcp_request({"jsonrpc": "2.0", "id": 9, "method": "prompts/list"})
+    response = await adapter.handle_mcp_request(message)
+    details = adapter.mcp_audit_details(message, response)
 
     assert response["id"] == 9
     assert response["error"]["code"] == -32601
-    assert "prompts/list" in response["error"]["message"]
+    assert response["error"]["message"] == "Method not found"
+    assert details["method"] == "not_allowed"
+    response_text = str(response)
+    details_text = str(details)
+    assert "prompt_preview" not in response_text
+    assert "prompt_preview" not in details_text
+    assert "C:/private/source.txt" not in response_text
+    assert "C:/private/source.txt" not in details_text
