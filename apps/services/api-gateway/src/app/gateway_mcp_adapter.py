@@ -113,14 +113,52 @@ async def _call_tool(request_id: Any, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _tool_call_result(*, tool_name: str, data: dict[str, Any]) -> dict[str, Any]:
-    keys = sorted(str(key) for key in data.keys())
+    structured_content = _mcp_structured_content(tool_name=tool_name, data=data)
+    keys = sorted(str(key) for key in structured_content.keys())
     summary = f"{tool_name} completed"
     if keys:
         summary = f"{summary}; fields: {', '.join(keys[:8])}"
     return {
         "content": [{"type": "text", "text": summary}],
-        "structuredContent": data,
+        "structuredContent": structured_content,
         "isError": False,
+    }
+
+
+def _mcp_structured_content(*, tool_name: str, data: dict[str, Any]) -> dict[str, Any]:
+    if tool_name != "tool_registry_stats":
+        return data
+
+    tools = dict(data.get("tools") or {})
+    visible_tools = {
+        str(name): _mcp_tool_stats_meta(meta)
+        for name, meta in tools.items()
+        if str(name) in MCP_ADAPTER_TOOL_NAMES and isinstance(meta, dict)
+    }
+    categories = {str(meta.get("category") or "") for meta in visible_tools.values()}
+    categories.discard("")
+    payload = {
+        "registered_tools": int(data.get("registered_tools") or 0),
+        "enabled_tools": int(data.get("enabled_tools") or 0),
+        "categories": int(data.get("categories") or 0),
+        "mcp_servers": int(data.get("mcp_servers") or 0),
+        "cache_entries": int(data.get("cache_entries") or 0),
+    }
+    payload["tools"] = visible_tools
+    payload["registered_tools"] = len(visible_tools)
+    payload["enabled_tools"] = sum(1 for meta in visible_tools.values() if bool(meta.get("enabled")))
+    payload["categories"] = len(categories)
+    return payload
+
+
+def _mcp_tool_stats_meta(value: Any) -> dict[str, Any]:
+    meta = dict(value or {})
+    return {
+        "category": str(meta.get("category") or ""),
+        "enabled": bool(meta.get("enabled")),
+        "total_calls": int(meta.get("total_calls") or 0),
+        "success_rate": float(meta.get("success_rate") or 0.0),
+        "avg_duration_ms": float(meta.get("avg_duration_ms") or 0.0),
     }
 
 

@@ -3668,7 +3668,12 @@ def test_gateway_mcp_route_calls_tool_and_blocks_non_object_arguments(monkeypatc
     success_payload = success.json()
     assert success_payload["result"]["isError"] is False
     assert "structuredContent" in success_payload["result"]
-    assert "prompt_preview" not in str(success_payload)
+    structured_content = success_payload["result"]["structuredContent"]
+    assert set(structured_content["tools"]) == {"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"}
+    success_text = str(success_payload)
+    assert "backup_cleanup_dry_run" not in success_text
+    assert "data_controls_dry_run" not in success_text
+    assert "prompt_preview" not in success_text
 
     invalid = client.post(
         "/api/v1/mcp",

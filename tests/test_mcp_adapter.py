@@ -110,6 +110,38 @@ async def test_mcp_tools_call_returns_summary_and_structured_content(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_mcp_tool_registry_stats_projects_whitelisted_tools_only(monkeypatch) -> None:
+    adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
+    from app.business_tools import ensure_business_tools_registered
+    from app.tool_registry import tool_registry
+
+    tool_registry._tools.clear()
+    tool_registry._category_index.clear()
+    tool_registry._cache.clear()
+    ensure_business_tools_registered()
+
+    response = await adapter.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "id": "stats-1",
+            "method": "tools/call",
+            "params": {"name": "tool_registry_stats", "arguments": {}},
+        }
+    )
+
+    result = response["result"]
+    assert result["isError"] is False
+    content = result["structuredContent"]
+    assert set(content["tools"]) == {"kb_scope_summary", "workflow_trace_summary", "tool_registry_stats"}
+    assert content["registered_tools"] == 3
+    assert content["enabled_tools"] == 3
+    result_text = str(result)
+    assert "backup_cleanup_dry_run" not in result_text
+    assert "data_controls_dry_run" not in result_text
+    assert "prompt_preview" not in result_text
+
+
+@pytest.mark.asyncio
 async def test_mcp_tools_call_rejects_blocked_tools_and_non_object_arguments(monkeypatch) -> None:
     adapter = _load_gateway_module("app.gateway_mcp_adapter", monkeypatch)
 
