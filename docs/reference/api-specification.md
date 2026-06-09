@@ -62,7 +62,7 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 ### `GET /readyz`
 
-- Gateway 会检查数据库、KB Service 与模型配置
+- Gateway 会检查数据库、KB Service 与模型配置，并在 `checks.kb_service.checks` 中透传 KB Service `/readyz` 的依赖检查摘要；上游错误摘要会被截断
 - KB Service 会检查数据库、对象存储、Qdrant 连通性、Qdrant 运行时配置与分块配置摘要
 - `qdrant_runtime_config` 只暴露 endpoint、collection、FastEmbed 参数和 `api_key_configured`，不返回 API key 原文
 - `chunking_config` 只暴露当前分块模式、是否启用 token 预算、`max_tokens` 与 `token_overlap` 摘要；配置非法时该检查会标记为 `failed`

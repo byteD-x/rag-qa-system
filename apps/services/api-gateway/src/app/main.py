@@ -15,7 +15,6 @@ from shared.api_errors import (
 from shared.auth import ensure_auth_configuration_ready
 from shared.tracing import TRACE_ID_HEADER, ensure_trace_id, reset_trace_id, set_trace_id
 
-from .ai_client import load_llm_settings
 from .gateway_admin_routes import router as gateway_admin_router
 from .gateway_analytics_routes import router as gateway_analytics_router
 from .gateway_audit_support import merge_audit_event_lists as _merge_audit_event_lists
@@ -31,13 +30,13 @@ from .gateway_runtime import gateway_db, logger, runtime_settings
 from .gateway_schemas import ChatScopePayload
 from .gateway_scope import fetch_corpora, fetch_corpus_documents, resolve_scope_snapshot
 from .gateway_platform_routes import router as gateway_platform_router
+from .gateway_system_routes import gateway_readiness_checks as _gateway_readiness_checks
 from .gateway_system_routes import router as gateway_system_router
 from .gateway_transport import request_service_json
 
 
 runtime_settings = load_gateway_runtime_settings()
 KB_SERVICE_URL = runtime_settings.kb_service_url
-REQUEST_TIMEOUT_SECONDS = runtime_settings.request_timeout_seconds
 
 
 @asynccontextmanager
@@ -123,28 +122,6 @@ def _estimate_usage_cost(usage: dict[str, Any]) -> dict[str, Any]:
         llm_output_price_per_1k_tokens=runtime_settings.llm_output_price_per_1k_tokens,
         llm_price_currency=runtime_settings.llm_price_currency,
     )
-
-
-async def _gateway_readiness_checks() -> dict[str, Any]:
-    checks: dict[str, Any] = {}
-    try:
-        with gateway_db.connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1 AS ok")
-                cur.fetchone()
-        checks["database"] = {"status": "ok"}
-    except Exception as exc:
-        checks["database"] = {"status": "failed", "detail": str(exc)}
-    timeout = httpx.Timeout(min(REQUEST_TIMEOUT_SECONDS, 5.0))
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"{KB_SERVICE_URL}/readyz")
-        checks["kb_service"] = {"status": "ok"} if response.status_code < 400 else {"status": "failed", "detail": f"kb-service readiness returned {response.status_code}"}
-    except httpx.HTTPError as exc:
-        checks["kb_service"] = {"status": "failed", "detail": str(exc)}
-    settings = load_llm_settings()
-    checks["llm"] = {"status": "fallback" if not settings.configured else "ok", "configured": settings.configured}
-    return checks
 
 
 app.include_router(gateway_auth_router)

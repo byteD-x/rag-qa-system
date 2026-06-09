@@ -2301,6 +2301,21 @@ def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> No
             class _Response:
                 status_code = 200
 
+                def json(self):
+                    return {
+                        "status": "ready",
+                        "checks": {
+                            "database": {"status": "ok"},
+                            "chunking_config": {
+                                "status": "ok",
+                                "enabled": False,
+                                "mode": "character_window",
+                                "max_tokens": None,
+                                "token_overlap": None,
+                            },
+                        },
+                    }
+
             return _Response()
 
     monkeypatch.setattr(gateway_main.gateway_db, "connect", lambda: _Connection())
@@ -2313,7 +2328,23 @@ def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> No
 
     assert checks["database"]["status"] == "ok"
     assert checks["kb_service"]["status"] == "ok"
+    assert checks["kb_service"]["upstream_status"] == "ready"
+    assert checks["kb_service"]["checks"]["chunking_config"]["mode"] == "character_window"
     assert checks["llm"]["status"] == "fallback"
+
+
+def test_gateway_readiness_sanitizes_kb_error_detail(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_system_routes = importlib.import_module("app.gateway_system_routes")
+    long_detail = "qdrant failed\n" + ("x" * 400)
+
+    response = gateway_main.httpx.Response(503, json={"detail": long_detail})
+    check = gateway_system_routes._kb_service_check_from_response(response)
+
+    assert check["status"] == "failed"
+    assert "\n" not in check["detail"]
+    assert len(check["detail"]) <= gateway_system_routes.MAX_UPSTREAM_DETAIL_CHARS
+    assert check["detail"].endswith("...")
 
 
 def test_kb_readiness_checks_require_storage(monkeypatch) -> None:

@@ -519,7 +519,7 @@ make down
 - KB Service `readyz`: `http://localhost:8300/readyz`
 - KB Service `metrics`: `http://localhost:8300/metrics`
 
-Gateway `/metrics` 会暴露运行时治理指标族：`rag_gateway_governance_events_total`、`rag_gateway_governance_event_duration_ms`、`rag_gateway_governance_failure_reasons_total`。这些指标只记录 Tool Workflow 与 Prompt rollback 的聚合计数、耗时和短失败原因，不包含 prompt、payload、工具输出或异常全文。
+Gateway `/readyz` 的 `checks.kb_service` 会透传 KB Service `/readyz` 的 `upstream_status` 与 `checks` 摘要，方便在平台入口直接看到 KB 依赖状态；上游错误摘要会被截断，不返回大段异常全文。Gateway `/metrics` 会暴露运行时治理指标族：`rag_gateway_governance_events_total`、`rag_gateway_governance_event_duration_ms`、`rag_gateway_governance_failure_reasons_total`。这些指标只记录 Tool Workflow 与 Prompt rollback 的聚合计数、耗时和短失败原因，不包含 prompt、payload、工具输出或异常全文。
 
 KB Service `readyz` 的 `checks` 会包含 `database`、`object_storage`、`vector_store`、`qdrant_runtime_config` 与 `chunking_config`。其中 `qdrant_runtime_config` 只返回 Qdrant endpoint、collection、FastEmbed 参数和 `api_key_configured` 布尔值，不返回 API key 原文；`chunking_config` 只返回当前分块模式摘要，配置非法时会标记为 failed。
 
