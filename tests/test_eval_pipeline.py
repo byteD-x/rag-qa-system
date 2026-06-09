@@ -765,6 +765,19 @@ def test_fast_test_selector_routes_gateway_support_modules_to_owned_suites() -> 
     assert "tests/test_backend_infra.py" not in targets
 
 
+def test_fast_test_selector_routes_gateway_transport_to_focused_tests() -> None:
+    selector = _load_script_module("fast_test_selector_gateway_transport_test", "scripts/quality/select_fast_tests.py")
+
+    targets = selector.select_targets(["apps/services/api-gateway/src/app/gateway_transport.py"])
+
+    assert targets == [
+        "tests/test_backend_infra.py::test_downstream_headers_uses_trace_context_and_explicit_override",
+        "tests/test_backend_infra.py::test_request_service_json_preserves_upstream_4xx",
+        "tests/test_backend_infra.py::test_request_service_json_wraps_upstream_5xx_as_502",
+    ]
+    assert "tests/test_backend_infra.py" not in targets
+
+
 def test_fast_test_selector_routes_tool_workflow_and_mcp_modules_to_owned_suites() -> None:
     selector = _load_script_module("fast_test_selector_tool_mcp_test", "scripts/quality/select_fast_tests.py")
 

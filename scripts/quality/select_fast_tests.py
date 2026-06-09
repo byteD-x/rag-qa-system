@@ -83,6 +83,11 @@ _EXACT_TARGETS: dict[str, list[str]] = {
         "tests/test_backend_infra.py",
         "tests/test_chat_workflow_resume_and_budget.py",
     ],
+    "apps/services/api-gateway/src/app/gateway_transport.py": [
+        "tests/test_backend_infra.py::test_downstream_headers_uses_trace_context_and_explicit_override",
+        "tests/test_backend_infra.py::test_request_service_json_preserves_upstream_4xx",
+        "tests/test_backend_infra.py::test_request_service_json_wraps_upstream_5xx_as_502",
+    ],
     "apps/services/api-gateway/src/app/gateway_graph.py": [
         "tests/test_langgraph_runtime.py",
     ],

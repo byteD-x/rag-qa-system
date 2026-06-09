@@ -6281,6 +6281,24 @@ def test_connector_scheduler_manager_runs_only_when_active() -> None:
     asyncio.run(scenario())
 
 
+def test_downstream_headers_uses_trace_context_and_explicit_override() -> None:
+    gateway_transport = _load_gateway_module("app.gateway_transport")
+    from shared.tracing import TRACE_ID_HEADER, reset_trace_id, set_trace_id
+
+    user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
+    trace_context = set_trace_id("context-trace")
+    try:
+        context_headers = gateway_transport.downstream_headers(user)
+        explicit_headers = gateway_transport.downstream_headers(user, trace_id="explicit-trace")
+    finally:
+        reset_trace_id(trace_context)
+
+    assert context_headers[TRACE_ID_HEADER] == "context-trace"
+    assert explicit_headers[TRACE_ID_HEADER] == "explicit-trace"
+    assert context_headers["Content-Type"] == "application/json"
+    assert explicit_headers["Authorization"].startswith("Bearer ")
+
+
 def test_request_service_json_preserves_upstream_4xx() -> None:
     gateway_transport = _load_gateway_module("app.gateway_transport")
 
