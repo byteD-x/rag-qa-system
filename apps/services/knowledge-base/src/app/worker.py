@@ -15,7 +15,7 @@ from shared.text_encoding import detect_text_encoding
 from shared.text_search import build_fts_lexeme_text
 
 from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, build_section_chunks, parse_document
-from .runtime import BLOB_ROOT, db, prepare_runtime, storage
+from .runtime import BLOB_ROOT, db, load_chunking_settings, prepare_runtime, storage
 from .vector_store import (
     delete_document_vectors,
     index_document_chunks,
@@ -33,6 +33,7 @@ LEASE_SECONDS = max(int(os.getenv("KB_WORKER_LEASE_SECONDS", "300")), 30)
 WORKER_METRICS_PORT = max(int(os.getenv("KB_WORKER_METRICS_PORT", "9300")), 0)
 RETRY_DELAYS_SECONDS = (5, 15, 45, 135, 300)
 VISION_SETTINGS = load_vision_settings()
+CHUNKING_SETTINGS = load_chunking_settings()
 
 WORKER_INGEST_ATTEMPTS_TOTAL = Counter("rag_kb_ingest_attempts_total", "KB worker ingest attempt outcomes.", labelnames=("outcome",))
 WORKER_INGEST_PHASE_DURATION_MS = Histogram(
@@ -193,7 +194,7 @@ def _load_document(document_id: str) -> dict[str, Any]:
 
 
 def _index_binary_document(*, document_id: str, path: Path, file_type: str) -> dict[str, Any]:
-    parsed = parse_document(path, file_type)
+    parsed = parse_document(path, file_type, **CHUNKING_SETTINGS.as_kwargs())
     _replace_document_units(document_id, parsed)
     return {"section_count": len(parsed.sections), "chunk_count": len(parsed.chunks), "section_preview": _section_preview_from_sections(parsed.sections)}
 
@@ -215,12 +216,13 @@ def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
     section_index = 1
     cursor = 0
     start = 0
+    chunking_kwargs = CHUNKING_SETTINGS.as_kwargs()
 
     for raw in _iter_text_lines(path):
         stripped = raw.strip()
         is_heading = bool(stripped and TXT_HEADING_RE.match(stripped))
         if is_heading and current_lines:
-            section, chunks = _build_section_and_chunks(section_index=section_index, title=current_title, raw_text="".join(current_lines), char_start=start)
+            section, chunks = _build_section_and_chunks(section_index=section_index, title=current_title, raw_text="".join(current_lines), char_start=start, **chunking_kwargs)
             if section is not None:
                 section_buffer.append(section)
                 chunk_buffer.extend(chunks)
@@ -247,7 +249,7 @@ def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
             chunk_buffer = []
 
     if current_lines:
-        section, chunks = _build_section_and_chunks(section_index=section_index, title=current_title, raw_text="".join(current_lines), char_start=start)
+        section, chunks = _build_section_and_chunks(section_index=section_index, title=current_title, raw_text="".join(current_lines), char_start=start, **chunking_kwargs)
         if section is not None:
             section_buffer.append(section)
             chunk_buffer.extend(chunks)
@@ -344,6 +346,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
     visual_provider = ""
     layout_section_count = 0
     layout_chunk_count = 0
+    chunking_kwargs = CHUNKING_SETTINGS.as_kwargs()
 
     for asset in visual_assets:
         asset_id = asset.id
@@ -397,7 +400,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
         if not ocr_result or not ocr_result.text.strip():
             continue
         layout_prefix = _layout_prefix(ocr_result.layout_hints)
-        section, chunks = _build_section_and_chunks(section_index=section_index, title=f"Page {asset.page_number} screenshot {asset.asset_index}", raw_text=ocr_result.text, char_start=0, source_kind="visual_ocr", page_number=asset.page_number, asset_id=asset_id)
+        section, chunks = _build_section_and_chunks(section_index=section_index, title=f"Page {asset.page_number} screenshot {asset.asset_index}", raw_text=ocr_result.text, char_start=0, source_kind="visual_ocr", page_number=asset.page_number, asset_id=asset_id, **chunking_kwargs)
         if section is None:
             continue
         if layout_prefix:
@@ -421,6 +424,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
             asset=asset,
             ocr_result=ocr_result,
             start_section_index=section_index,
+            **chunking_kwargs,
         )
         region_rows.extend(
             _build_visual_region_rows(
@@ -530,6 +534,8 @@ def _build_visual_region_units(
     asset: Any,
     ocr_result: Any,
     start_section_index: int,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
 ) -> tuple[list[KBSection], list[KBChunk]]:
     regions = list(getattr(ocr_result, "regions", []) or [])
     if not regions:
@@ -560,6 +566,8 @@ def _build_visual_region_units(
             source_kind="visual_region",
             page_number=asset.page_number,
             asset_id=asset.id,
+            max_tokens=max_tokens,
+            token_overlap=token_overlap,
         )
         if section is None:
             continue

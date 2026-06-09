@@ -157,6 +157,8 @@ services:
       <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
       KB_BLOB_ROOT: /data/kb
+      KB_CHUNK_MAX_TOKENS: ${KB_CHUNK_MAX_TOKENS:-}
+      KB_CHUNK_TOKEN_OVERLAP: ${KB_CHUNK_TOKEN_OVERLAP:-}
     volumes:
       - ./data/kb:/data/kb
     ports:
@@ -184,6 +186,8 @@ services:
       <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
       KB_BLOB_ROOT: /data/kb
+      KB_CHUNK_MAX_TOKENS: ${KB_CHUNK_MAX_TOKENS:-}
+      KB_CHUNK_TOKEN_OVERLAP: ${KB_CHUNK_TOKEN_OVERLAP:-}
     volumes:
       - ./data/kb:/data/kb
     depends_on:

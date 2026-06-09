@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from .parsing import parse_text_content
+from .runtime import load_chunking_settings
 
 
 MAX_KNOWLEDGE_BATCH_DOCUMENTS = 20
@@ -23,6 +24,7 @@ FORBIDDEN_DOCUMENT_FIELDS = {
     "source_path",
     "storage_path",
 }
+CHUNKING_SETTINGS = load_chunking_settings()
 
 
 class KnowledgeBatchPayloadError(ValueError):
@@ -81,7 +83,7 @@ def parse_knowledge_batch_payload(raw: Any) -> list[dict[str, Any]]:
 
 
 def build_knowledge_dry_run_payload(document: dict[str, Any]) -> dict[str, Any]:
-    parsed = parse_text_content(str(document["content"]))
+    parsed = parse_text_content(str(document["content"]), **CHUNKING_SETTINGS.as_kwargs())
     chunks_by_section = Counter(int(chunk.section_index) for chunk in parsed.chunks)
     section_summaries = [
         {

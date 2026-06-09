@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .parsing import parse_text_content
-from .runtime import BLOB_ROOT
+from .runtime import BLOB_ROOT, load_chunking_settings
 
 
 AUTO_INDEX_INBOX_DIR = "knowledge_base/inbox"
@@ -14,6 +14,7 @@ AUTO_INDEX_MAX_FILES = 20
 AUTO_INDEX_MAX_FILE_BYTES = 300_000
 AUTO_INDEX_MAX_TOTAL_CHARS = 300_000
 AUTO_INDEX_MAX_SECTION_SUMMARY_ITEMS = 20
+CHUNKING_SETTINGS = load_chunking_settings()
 
 
 def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
@@ -109,7 +110,7 @@ def fixed_auto_index_inbox_path() -> Path:
 
 
 def _build_document_preview(path: Path, *, content: str, size_bytes: int) -> dict[str, Any]:
-    parsed = parse_text_content(content)
+    parsed = parse_text_content(content, **CHUNKING_SETTINGS.as_kwargs())
     chunks_by_section = Counter(int(chunk.section_index) for chunk in parsed.chunks)
     sections = [
         {

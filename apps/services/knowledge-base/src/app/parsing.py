@@ -52,29 +52,40 @@ class ParsedKB:
     chunks: list[KBChunk]
 
 
-def parse_document(path: Path, file_type: str) -> ParsedKB:
+def parse_document(
+    path: Path,
+    file_type: str,
+    *,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
+) -> ParsedKB:
     normalized = file_type.lower()
     if normalized == "txt":
         text = read_text_with_fallback(path)
-        return _parse_text_sections(text)
+        return _parse_text_sections(text, max_tokens=max_tokens, token_overlap=token_overlap)
     if normalized == "pdf":
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
         pages = [page.extract_text() or "" for page in reader.pages]
-        return _parse_text_sections("\n\n".join(pages))
+        return _parse_text_sections("\n\n".join(pages), max_tokens=max_tokens, token_overlap=token_overlap)
     if normalized == "docx":
         from docx import Document as DocxDocument
 
         doc = DocxDocument(str(path))
-        return _parse_docx(doc)
+        return _parse_docx(doc, max_tokens=max_tokens, token_overlap=token_overlap)
     if normalized in {"png", "jpg", "jpeg"}:
         return ParsedKB(sections=[], chunks=[])
     raise ValueError(f"unsupported file type: {file_type}")
 
 
-def parse_text_content(text: str) -> ParsedKB:
-    return _parse_text_sections(text)
+def parse_text_content(
+    text: str,
+    *,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
+) -> ParsedKB:
+    return _parse_text_sections(text, max_tokens=max_tokens, token_overlap=token_overlap)
 
 
 def normalize_text(text: str) -> str:
@@ -166,7 +177,12 @@ def _token_overlap_cursor(text: str, cursor: int, end: int, token_overlap: int) 
     return max(best, cursor + 1)
 
 
-def _parse_docx(doc: Any) -> ParsedKB:
+def _parse_docx(
+    doc: Any,
+    *,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
+) -> ParsedKB:
     sections: list[KBSection] = []
     current_title = "Section 1"
     current_lines: list[str] = []
@@ -212,10 +228,15 @@ def _parse_docx(doc: Any) -> ParsedKB:
             current_lines.append(text)
         cursor += para_len + 1
     flush()
-    return ParsedKB(sections=sections, chunks=_chunk_sections(sections))
+    return ParsedKB(sections=sections, chunks=_chunk_sections(sections, max_tokens=max_tokens, token_overlap=token_overlap))
 
 
-def _parse_text_sections(text: str) -> ParsedKB:
+def _parse_text_sections(
+    text: str,
+    *,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
+) -> ParsedKB:
     lines = text.splitlines(keepends=True)
     sections: list[KBSection] = []
     current_title = "Section 1"
@@ -271,13 +292,18 @@ def _parse_text_sections(text: str) -> ParsedKB:
                 char_end=len(text),
             )
         )
-    return ParsedKB(sections=sections, chunks=_chunk_sections(sections))
+    return ParsedKB(sections=sections, chunks=_chunk_sections(sections, max_tokens=max_tokens, token_overlap=token_overlap))
 
 
-def _chunk_sections(sections: list[KBSection]) -> list[KBChunk]:
+def _chunk_sections(
+    sections: list[KBSection],
+    *,
+    max_tokens: int | None = None,
+    token_overlap: int | None = None,
+) -> list[KBChunk]:
     chunks: list[KBChunk] = []
     for section in sections:
-        chunks.extend(build_section_chunks(section))
+        chunks.extend(build_section_chunks(section, max_tokens=max_tokens, token_overlap=token_overlap))
     return chunks
 
 

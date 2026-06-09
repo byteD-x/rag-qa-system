@@ -14,11 +14,13 @@ from .kb_batch_dry_run import KnowledgeBatchPayloadError, parse_knowledge_batch_
 from .kb_resource_store import ensure_base_exists
 from .kb_runtime import db, logger
 from .parsing import parse_text_content
+from .runtime import load_chunking_settings
 from .vector_store import ensure_vector_store, index_document_chunks, index_document_sections
 from .worker import _insert_chunks, _insert_sections
 
 
 MAX_BATCH_INGEST_TEXT_FIELD_CHARS = 160
+CHUNKING_SETTINGS = load_chunking_settings()
 
 
 class KnowledgeBatchRuntimeError(RuntimeError):
@@ -123,7 +125,7 @@ def build_knowledge_batch_ingest_payload(raw: Any, *, request: Request, user: Cu
 def ingest_inline_knowledge_document(document: dict[str, Any], *, index: int, request: Request, user: CurrentUser) -> dict[str, Any]:
     base_id = str(document["base_id"])
     ensure_base_exists(base_id, user=user, request=request, action="kb.batch_ingest")
-    parsed = parse_text_content(str(document["content"]))
+    parsed = parse_text_content(str(document["content"]), **CHUNKING_SETTINGS.as_kwargs())
     if not parsed.chunks:
         raise ValueError("document contains no extractable text")
 

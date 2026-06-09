@@ -605,6 +605,43 @@ def test_kb_section_chunking_advances_with_tiny_token_budget() -> None:
     assert "".join(chunk.text for chunk in chunks) == text
 
 
+def test_kb_parse_text_content_can_apply_token_chunking_options() -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    from shared.token_estimation import estimate_tokens
+
+    parsing = importlib.import_module("app.parsing")
+    text = "Policy\n" + ("approval rule " * 260)
+
+    default_parsed = parsing.parse_text_content(text)
+    token_parsed = parsing.parse_text_content(text, max_tokens=80, token_overlap=10)
+
+    assert len(default_parsed.sections) == len(token_parsed.sections)
+    assert len(token_parsed.chunks) > len(default_parsed.chunks)
+    assert all(estimate_tokens(chunk.text) <= 80 for chunk in token_parsed.chunks)
+
+
+def test_kb_chunking_settings_parse_env_defaults_and_validation(monkeypatch) -> None:
+    kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
+    prioritize_service_src(kb_src)
+    import importlib
+
+    runtime = importlib.import_module("app.runtime")
+    monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("KB_CHUNK_TOKEN_OVERLAP", raising=False)
+    assert runtime.load_chunking_settings().as_kwargs() == {}
+
+    monkeypatch.setenv("KB_CHUNK_MAX_TOKENS", "90")
+    monkeypatch.setenv("KB_CHUNK_TOKEN_OVERLAP", "12")
+    assert runtime.load_chunking_settings().as_kwargs() == {"max_tokens": 90, "token_overlap": 12}
+
+    monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
+    with pytest.raises(ValueError, match="requires KB_CHUNK_MAX_TOKENS"):
+        runtime.load_chunking_settings()
+
+
 def test_kb_worker_reuses_shared_section_chunking() -> None:
     kb_src = REPO_ROOT / "apps/services/knowledge-base/src"
     prioritize_service_src(kb_src)
