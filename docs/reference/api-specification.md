@@ -66,7 +66,7 @@ Authorization: Bearer <ACCESS_TOKEN>
 - KB Service 会检查数据库、对象存储、Qdrant 连通性、Qdrant 运行时配置与分块配置摘要
 - `qdrant_runtime_config` 只暴露 endpoint、collection、FastEmbed 参数和 `api_key_configured`，不返回 API key 原文
 - `chunking_config` 只暴露当前分块模式、是否启用 token 预算、`max_tokens` 与 `token_overlap` 摘要；配置非法时该检查会标记为 `failed`
-- 关键依赖未就绪时返回 `503`
+- 关键依赖未就绪时返回 `503`，响应仍携带 `trace_id`、`status=not_ready` 与已计算的 `checks` 诊断摘要
 
 ### `GET /metrics`
 

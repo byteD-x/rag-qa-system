@@ -523,6 +523,8 @@ Gateway `/readyz` 的 `checks.kb_service` 会透传 KB Service `/readyz` 的 `up
 
 KB Service `readyz` 的 `checks` 会包含 `database`、`object_storage`、`vector_store`、`qdrant_runtime_config` 与 `chunking_config`。其中 `qdrant_runtime_config` 只返回 Qdrant endpoint、collection、FastEmbed 参数和 `api_key_configured` 布尔值，不返回 API key 原文；`chunking_config` 只返回当前分块模式摘要，配置非法时会标记为 failed。
 
+Gateway 与 KB Service `/readyz` 在关键依赖未就绪时返回 `503`，响应仍包含 `trace_id`、`status=not_ready` 与已计算的 `checks`，便于调用方在失败响应中直接读取诊断摘要。
+
 ### 本地默认账号
 
 默认账号来自 [`.env.example`](.env.example)。

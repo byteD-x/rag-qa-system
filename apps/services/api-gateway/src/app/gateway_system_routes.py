@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Response
 
-from shared.api_errors import raise_api_error
+from shared.api_errors import json_error_response
 from shared.metrics import CONTENT_TYPE_LATEST, generate_latest
 from shared.tracing import trace_headers
 
@@ -93,12 +93,17 @@ async def gateway_readiness_checks() -> dict[str, Any]:
     return checks
 
 
-@router.get("/readyz")
-async def readyz() -> dict[str, Any]:
+@router.get("/readyz", response_model=None)
+async def readyz() -> dict[str, Any] | Response:
     checks = await gateway_readiness_checks()
     failed = [name for name, item in checks.items() if item.get("status") == "failed"]
     if failed:
-        raise_api_error(503, "gateway_not_ready", f"gateway dependencies are not ready: {', '.join(failed)}")
+        return json_error_response(
+            status_code=503,
+            detail=f"gateway dependencies are not ready: {', '.join(failed)}",
+            code="gateway_not_ready",
+            extra={"status": "not_ready", "checks": checks},
+        )
     return {"status": "ready", "checks": checks}
 
 

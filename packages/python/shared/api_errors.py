@@ -37,6 +37,7 @@ def json_error_response(
     detail: str,
     code: str,
     errors: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     payload: dict[str, Any] = {
@@ -46,6 +47,10 @@ def json_error_response(
     }
     if errors:
         payload["errors"] = errors
+    if extra:
+        for key, value in extra.items():
+            if key not in {"detail", "code", "trace_id", "errors"}:
+                payload[str(key)] = value
     return JSONResponse(status_code=status_code, content=payload, headers=headers)
 
 

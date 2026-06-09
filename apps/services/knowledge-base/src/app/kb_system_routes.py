@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response
 
+from shared.api_errors import json_error_response
 from shared.auth import CurrentUser
 from shared.metrics import CONTENT_TYPE_LATEST, generate_latest
 
@@ -19,14 +20,17 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/readyz")
-def readyz() -> dict[str, Any]:
+@router.get("/readyz", response_model=None)
+def readyz() -> dict[str, Any] | Response:
     checks = check_readiness()
     failed = [name for name, item in checks.items() if item.get("status") == "failed"]
     if failed:
-        from shared.api_errors import raise_api_error
-
-        raise_api_error(503, "kb_service_not_ready", f"kb-service dependencies are not ready: {', '.join(failed)}")
+        return json_error_response(
+            status_code=503,
+            detail=f"kb-service dependencies are not ready: {', '.join(failed)}",
+            code="kb_service_not_ready",
+            extra={"status": "not_ready", "checks": checks},
+        )
     return {"status": "ready", "checks": checks}
 
 

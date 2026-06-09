@@ -2357,6 +2357,35 @@ def test_gateway_readiness_sanitizes_kb_error_detail(monkeypatch) -> None:
     assert check["detail"].endswith("...")
 
 
+def test_gateway_readyz_failure_response_includes_checks(monkeypatch) -> None:
+    gateway_main = _load_gateway_main(monkeypatch)
+    gateway_system_routes = importlib.import_module("app.gateway_system_routes")
+
+    async def fake_readiness_checks():
+        return {
+            "database": {"status": "ok"},
+            "kb_service": {
+                "status": "failed",
+                "detail": "kb-service readiness returned 503",
+                "checks": {"chunking_config": {"status": "failed", "detail": "invalid chunk overlap"}},
+            },
+            "llm": {"status": "fallback", "configured": False},
+        }
+
+    monkeypatch.setattr(gateway_system_routes, "gateway_readiness_checks", fake_readiness_checks)
+    client = TestClient(gateway_main.app)
+
+    response = client.get("/readyz", headers={"X-Trace-Id": "gateway-readyz-failed"})
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "gateway_not_ready"
+    assert payload["status"] == "not_ready"
+    assert payload["trace_id"] == "gateway-readyz-failed"
+    assert payload["checks"]["kb_service"]["status"] == "failed"
+    assert payload["checks"]["kb_service"]["checks"]["chunking_config"]["detail"] == "invalid chunk overlap"
+
+
 def test_kb_readiness_checks_require_storage(monkeypatch) -> None:
     monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
     monkeypatch.delenv("KB_CHUNK_TOKEN_OVERLAP", raising=False)
@@ -2414,6 +2443,32 @@ def test_kb_readiness_checks_require_storage(monkeypatch) -> None:
 
     assert checks["chunking_config"]["status"] == "failed"
     assert "requires KB_CHUNK_MAX_TOKENS" in checks["chunking_config"]["detail"]
+
+
+def test_kb_readyz_failure_response_includes_checks(monkeypatch) -> None:
+    kb_main = _load_kb_module("app.main")
+    kb_system_routes = importlib.import_module("app.kb_system_routes")
+
+    monkeypatch.setattr(
+        kb_system_routes,
+        "check_readiness",
+        lambda: {
+            "database": {"status": "ok"},
+            "object_storage": {"status": "failed", "detail": "bucket missing"},
+            "chunking_config": {"status": "ok", "mode": "character_window"},
+        },
+    )
+    client = TestClient(kb_main.app)
+
+    response = client.get("/readyz", headers={"X-Trace-Id": "kb-readyz-failed"})
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["code"] == "kb_service_not_ready"
+    assert payload["status"] == "not_ready"
+    assert payload["trace_id"] == "kb-readyz-failed"
+    assert payload["checks"]["object_storage"]["detail"] == "bucket missing"
+    assert payload["checks"]["chunking_config"]["mode"] == "character_window"
 
 
 def test_qdrant_runtime_config_uses_safe_defaults(monkeypatch) -> None:
