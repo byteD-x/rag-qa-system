@@ -22,6 +22,10 @@ class KBChunkingSettings:
     max_tokens: int | None = None
     token_overlap: int | None = None
 
+    @property
+    def enabled(self) -> bool:
+        return self.max_tokens is not None
+
     def as_kwargs(self) -> dict[str, int]:
         if self.max_tokens is None:
             return {}
@@ -30,6 +34,14 @@ class KBChunkingSettings:
             kwargs["token_overlap"] = self.token_overlap
         return kwargs
 
+    def summary(self) -> dict[str, int | str | bool | None]:
+        return {
+            "enabled": self.enabled,
+            "mode": "token_budget" if self.enabled else "character_window",
+            "max_tokens": self.max_tokens,
+            "token_overlap": self.token_overlap,
+        }
+
 
 def load_chunking_settings() -> KBChunkingSettings:
     max_tokens = _optional_int_env("KB_CHUNK_MAX_TOKENS", minimum=1)
@@ -37,6 +49,10 @@ def load_chunking_settings() -> KBChunkingSettings:
     if max_tokens is None and token_overlap is not None:
         raise ValueError("KB_CHUNK_TOKEN_OVERLAP requires KB_CHUNK_MAX_TOKENS")
     return KBChunkingSettings(max_tokens=max_tokens, token_overlap=token_overlap)
+
+
+def load_chunking_summary() -> dict[str, int | str | bool | None]:
+    return load_chunking_settings().summary()
 
 
 def prepare_runtime() -> None:

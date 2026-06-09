@@ -521,7 +521,7 @@ make down
 
 Gateway `/metrics` 会暴露运行时治理指标族：`rag_gateway_governance_events_total`、`rag_gateway_governance_event_duration_ms`、`rag_gateway_governance_failure_reasons_total`。这些指标只记录 Tool Workflow 与 Prompt rollback 的聚合计数、耗时和短失败原因，不包含 prompt、payload、工具输出或异常全文。
 
-KB Service `readyz` 的 `checks` 会包含 `database`、`object_storage`、`vector_store` 与 `qdrant_runtime_config`。其中 `qdrant_runtime_config` 只返回 Qdrant endpoint、collection、FastEmbed 参数和 `api_key_configured` 布尔值，不返回 API key 原文。
+KB Service `readyz` 的 `checks` 会包含 `database`、`object_storage`、`vector_store`、`qdrant_runtime_config` 与 `chunking_config`。其中 `qdrant_runtime_config` 只返回 Qdrant endpoint、collection、FastEmbed 参数和 `api_key_configured` 布尔值，不返回 API key 原文；`chunking_config` 只返回当前分块模式摘要，配置非法时会标记为 failed。
 
 ### 本地默认账号
 
@@ -1381,10 +1381,10 @@ curl -X POST http://localhost:8300/api/v1/kb/connectors \
 - `/workspace/kb/governance` 已开放单文档受控 rebuild 操作：必须先对当前文档 payload 执行 dry-run，且本地签名与当前 payload 一致后才会调用固定 `POST /api/knowledge_base/rebuild`
 - rebuild 入口只消费已选中的文档 ID，只基于服务端已有 section/chunk 重建向量索引，不提供文件上传、目录扫描、任意路径读取或手工输入 `source_path`
 - `/workspace/kb/governance` 也提供批量 JSON 面板：用户显式粘贴 `{ "documents": [...] }` 后，必须先预览当前 JSON，签名匹配后才可调用固定 batch 写入；写入成功后可对返回的服务端 `document_id` 逐个触发受控 rebuild
-- `POST /api/knowledge_base/batch-dry-run` 仅对请求体内联 `documents[].content` 做多文档分块预览摘要，返回文档数、字符数、section/chunk 计数和脱敏文件名；不会读取本机路径、上传文件、写入向量库或触发批量 rebuild
-- `POST /api/knowledge_base/batch-ingest` 仅批量写入请求体内联 `documents[].content`，按顺序创建文档并索引 section/chunk；不会读取本机路径、上传文件或执行批量 delete
+- `POST /api/knowledge_base/batch-dry-run` 仅对请求体内联 `documents[].content` 做多文档分块预览摘要，返回文档数、字符数、section/chunk 计数、脱敏文件名和 `chunking` 策略摘要；不会读取本机路径、上传文件、写入向量库或触发批量 rebuild
+- `POST /api/knowledge_base/batch-ingest` 仅批量写入请求体内联 `documents[].content`，按顺序创建文档并索引 section/chunk，响应和文档 `stats_json` 会记录 `chunking` 策略摘要；不会读取本机路径、上传文件或执行批量 delete
 - `POST /api/knowledge_base/jobs` 可把同样的内联 ingest/rebuild 请求放入进程内串行后台队列，`GET /api/knowledge_base/jobs/{job_id}` 和 `GET /api/knowledge_base/status` 只返回任务摘要、计数和脱敏文件名；队列不持久化、不扫描目录、不读取 `source_file` / `source_path`
-- `GET /api/knowledge_base/auto-index/preview` 只读预览固定 `KB_BLOB_ROOT/knowledge_base/inbox` 下的一层文本/Markdown 文件，返回分块摘要、跳过原因和脱敏 inbox 名；不会接收任意路径参数、不会递归扫描、不会自动入库或写向量
+- `GET /api/knowledge_base/auto-index/preview` 只读预览固定 `KB_BLOB_ROOT/knowledge_base/inbox` 下的一层文本/Markdown 文件，返回分块摘要、`chunking` 策略摘要、跳过原因和脱敏 inbox 名；不会接收任意路径参数、不会递归扫描、不会自动入库或写向量
 - 可选 token-aware 分块配置通过 `KB_CHUNK_MAX_TOKENS` / `KB_CHUNK_TOKEN_OVERLAP` 控制，默认留空时仍使用字符滑窗；显式配置后，worker、batch-dry-run、batch-ingest 与 auto-index preview 生成 chunk 时会按估算 token 预算收窄单个 chunk
 - `GET /api/knowledge_base/index` 返回已入库文档 metadata 摘要，包括文档数、chunk 数、脱敏文件名、版本与来源摘要；它不是文件系统索引，不扫描目录、不读取正文、embedding 或完整路径
 - 可以通过 `POST /api/v1/kb/retrieve/debug` 只看召回和 rerank 结果，不触发 LLM

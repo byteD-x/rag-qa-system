@@ -31,6 +31,7 @@ from .kb_support import (
     refresh_kb_metrics_snapshot,
     require_permission,
 )
+from .runtime import load_chunking_summary
 
 
 def check_readiness() -> dict[str, Any]:
@@ -39,6 +40,7 @@ def check_readiness() -> dict[str, Any]:
         storage=storage,
         vector_store_checker=check_vector_store,
         vector_runtime_config_checker=check_vector_runtime_config,
+        chunking_config_checker=load_chunking_summary,
     )
 
 

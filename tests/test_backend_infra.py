@@ -323,6 +323,9 @@ def _load_kb_module(module_name: str):
         "app.kb_batch_dry_run_routes",
         "app.kb_batch_ingest",
         "app.kb_batch_ingest_routes",
+        "app.kb_api_support",
+        "app.kb_support",
+        "app.kb_runtime",
         "app.kb_index",
         "app.kb_index_routes",
         "app.kb_job_queue",
@@ -2314,6 +2317,8 @@ def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> No
 
 
 def test_kb_readiness_checks_require_storage(monkeypatch) -> None:
+    monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("KB_CHUNK_TOKEN_OVERLAP", raising=False)
     kb_main = _load_kb_module("app.main")
 
     class _Cursor:
@@ -2355,6 +2360,19 @@ def test_kb_readiness_checks_require_storage(monkeypatch) -> None:
     assert checks["vector_store"]["status"] == "ok"
     assert checks["qdrant_runtime_config"]["status"] == "ok"
     assert checks["qdrant_runtime_config"]["api_key_configured"] is False
+    assert checks["chunking_config"] == {
+        "status": "ok",
+        "enabled": False,
+        "mode": "character_window",
+        "max_tokens": None,
+        "token_overlap": None,
+    }
+
+    monkeypatch.setenv("KB_CHUNK_TOKEN_OVERLAP", "5")
+    checks = kb_main._kb_readiness_checks()
+
+    assert checks["chunking_config"]["status"] == "failed"
+    assert "requires KB_CHUNK_MAX_TOKENS" in checks["chunking_config"]["detail"]
 
 
 def test_qdrant_runtime_config_uses_safe_defaults(monkeypatch) -> None:
@@ -4667,6 +4685,12 @@ def test_knowledge_batch_dry_run_builds_sanitized_summary() -> None:
     assert payload["document_count"] == 2
     assert payload["total_chunks"] == sum(item["chunk_count"] for item in payload["documents"])
     assert payload["total_content_chars"] == sum(item["content_chars"] for item in payload["documents"])
+    assert payload["chunking"] == {
+        "enabled": False,
+        "mode": "character_window",
+        "max_tokens": None,
+        "token_overlap": None,
+    }
     assert payload["documents"][0]["doc_id"] == "doc-1"
     assert payload["documents"][0]["file_name"] == "expense-policy.txt"
     assert payload["documents"][0]["chunk_count"] >= 2
@@ -4836,6 +4860,12 @@ def test_knowledge_auto_index_preview_summarizes_fixed_inbox_without_raw_content
     assert payload["skipped_count"] == 3
     assert payload["chunk_count"] == sum(item["chunk_count"] for item in payload["documents"])
     assert payload["char_count"] == sum(item["content_chars"] for item in payload["documents"])
+    assert payload["chunking"] == {
+        "enabled": False,
+        "mode": "character_window",
+        "max_tokens": None,
+        "token_overlap": None,
+    }
     assert [item["file_name"] for item in payload["documents"]] == ["notes.txt", "runbook.md"]
     assert {item["reason"] for item in payload["skipped"]} == {"unsupported_extension", "utf8_decode_failed", "directory_ignored"}
     assert payload["documents"][0]["sections"][0]["chunk_count"] >= 1
@@ -4862,6 +4892,12 @@ def test_knowledge_auto_index_preview_reports_missing_inbox_without_path_leak(tm
         "skipped_count": 0,
         "chunk_count": 0,
         "char_count": 0,
+        "chunking": {
+            "enabled": False,
+            "mode": "character_window",
+            "max_tokens": None,
+            "token_overlap": None,
+        },
         "documents": [],
         "skipped": [],
         "limits": {
@@ -5020,6 +5056,12 @@ def test_knowledge_batch_ingest_route_writes_inline_documents_without_raw_conten
     assert payload["failed_documents"] == 0
     assert payload["chunk_count"] >= 2
     assert payload["indexed_chunks"] == 4
+    assert payload["chunking"] == {
+        "enabled": False,
+        "mode": "character_window",
+        "max_tokens": None,
+        "token_overlap": None,
+    }
     assert payload["documents"][0]["input_doc_id"] == "doc-1"
     assert payload["documents"][0]["file_name"] == "expense-policy.txt"
     assert payload["documents"][1]["file_name"] == "handbook.txt"
@@ -5029,6 +5071,13 @@ def test_knowledge_batch_ingest_route_writes_inline_documents_without_raw_conten
     assert "/private/legal" not in response_text
     assert "chunk_text" not in response_text
     assert "embedding" not in response_text
+    document_stats_payloads = [
+        json.loads(params[6])
+        for query, params in executed
+        if "INSERT INTO kb_documents" in query and isinstance(params, tuple)
+    ]
+    assert document_stats_payloads
+    assert document_stats_payloads[0]["chunking"] == payload["chunking"]
     assert any("INSERT INTO kb_documents" in query for query, _params in executed)
     assert any("INSERT INTO kb_sections" in query for query, _params in executed)
     assert any("INSERT INTO kb_chunks" in query for query, _params in executed)

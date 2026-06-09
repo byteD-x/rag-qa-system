@@ -15,7 +15,7 @@ from shared.text_encoding import detect_text_encoding
 from shared.text_search import build_fts_lexeme_text
 
 from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, build_section_chunks, parse_document
-from .runtime import BLOB_ROOT, db, load_chunking_settings, prepare_runtime, storage
+from .runtime import BLOB_ROOT, KBChunkingSettings, db, load_chunking_settings, prepare_runtime, storage
 from .vector_store import (
     delete_document_vectors,
     index_document_chunks,
@@ -33,7 +33,6 @@ LEASE_SECONDS = max(int(os.getenv("KB_WORKER_LEASE_SECONDS", "300")), 30)
 WORKER_METRICS_PORT = max(int(os.getenv("KB_WORKER_METRICS_PORT", "9300")), 0)
 RETRY_DELAYS_SECONDS = (5, 15, 45, 135, 300)
 VISION_SETTINGS = load_vision_settings()
-CHUNKING_SETTINGS = load_chunking_settings()
 
 WORKER_INGEST_ATTEMPTS_TOTAL = Counter("rag_kb_ingest_attempts_total", "KB worker ingest attempt outcomes.", labelnames=("outcome",))
 WORKER_INGEST_PHASE_DURATION_MS = Histogram(
@@ -111,17 +110,27 @@ def _process_job(job: dict[str, Any]) -> None:
     target_dir = BLOB_ROOT / document_id
     target_dir.mkdir(parents=True, exist_ok=True)
     source_path = target_dir / (document.get("file_name") or "source.bin")
+    chunking_settings = load_chunking_settings()
 
     storage.download_file(str(document["storage_key"]), source_path)
     _append_event(document_id, "uploaded", "object storage download complete", {"trace_id": trace_id})
-    _update_job(str(job["id"]), phase="parsing_fast", checkpoint={"downloaded": True})
+    _update_job(str(job["id"]), phase="parsing_fast", checkpoint={"downloaded": True, "chunking": chunking_settings.summary()})
     _update_document(document_id, status="parsing_fast", query_ready=False, enhancement_status="fts_pending")
     _cleanup_visual_assets(document_id)
     delete_document_vectors(document_id)
 
     parse_started = time.perf_counter()
     file_type = str(document.get("file_type") or "").lower()
-    text_stats = _index_txt_document(document_id=document_id, path=source_path) if file_type == "txt" else _index_binary_document(document_id=document_id, path=source_path, file_type=file_type)
+    text_stats = (
+        _index_txt_document(document_id=document_id, path=source_path, chunking_settings=chunking_settings)
+        if file_type == "txt"
+        else _index_binary_document(
+            document_id=document_id,
+            path=source_path,
+            file_type=file_type,
+            chunking_settings=chunking_settings,
+        )
+    )
     text_stats["parse_ms"] = round((time.perf_counter() - parse_started) * 1000.0, 3)
     WORKER_INGEST_PHASE_DURATION_MS.labels("parse").observe(float(text_stats["parse_ms"]))
 
@@ -145,7 +154,12 @@ def _process_job(job: dict[str, Any]) -> None:
     )
 
     visual_started = time.perf_counter()
-    visual_stats = _index_visual_assets(document_id=document_id, path=source_path, file_type=file_type)
+    visual_stats = _index_visual_assets(
+        document_id=document_id,
+        path=source_path,
+        file_type=file_type,
+        chunking_settings=chunking_settings,
+    )
     visual_stats["visual_ms"] = round((time.perf_counter() - visual_started) * 1000.0, 3)
     WORKER_INGEST_PHASE_DURATION_MS.labels("visual").observe(float(visual_stats["visual_ms"]))
     combined_stats = _merge_ingest_stats(text_stats, visual_stats)
@@ -193,13 +207,30 @@ def _load_document(document_id: str) -> dict[str, Any]:
     return row
 
 
-def _index_binary_document(*, document_id: str, path: Path, file_type: str) -> dict[str, Any]:
-    parsed = parse_document(path, file_type, **CHUNKING_SETTINGS.as_kwargs())
+def _index_binary_document(
+    *,
+    document_id: str,
+    path: Path,
+    file_type: str,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
+    chunking_settings = chunking_settings or load_chunking_settings()
+    parsed = parse_document(path, file_type, **chunking_settings.as_kwargs())
     _replace_document_units(document_id, parsed)
-    return {"section_count": len(parsed.sections), "chunk_count": len(parsed.chunks), "section_preview": _section_preview_from_sections(parsed.sections)}
+    return {
+        "section_count": len(parsed.sections),
+        "chunk_count": len(parsed.chunks),
+        "section_preview": _section_preview_from_sections(parsed.sections),
+        "chunking": chunking_settings.summary(),
+    }
 
 
-def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
+def _index_txt_document(
+    *,
+    document_id: str,
+    path: Path,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM kb_chunks WHERE document_id = %s", (document_id,))
@@ -216,7 +247,9 @@ def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
     section_index = 1
     cursor = 0
     start = 0
-    chunking_kwargs = CHUNKING_SETTINGS.as_kwargs()
+    chunking_settings = chunking_settings or load_chunking_settings()
+    chunking_kwargs = chunking_settings.as_kwargs()
+    chunking_summary = chunking_settings.summary()
 
     for raw in _iter_text_lines(path):
         stripped = raw.strip()
@@ -244,7 +277,10 @@ def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
                 query_opened = True
                 _update_document(document_id, query_ready=True, query_ready_at=True)
                 _append_event(document_id, "query_window_open", f"queryable after {section_total} sections")
-            _update_job(_job_id_for_document(document_id), checkpoint={"section_count": section_total, "chunk_count": chunk_total})
+            _update_job(
+                _job_id_for_document(document_id),
+                checkpoint={"section_count": section_total, "chunk_count": chunk_total, "chunking": chunking_summary},
+            )
             section_buffer = []
             chunk_buffer = []
 
@@ -262,7 +298,12 @@ def _index_txt_document(*, document_id: str, path: Path) -> dict[str, Any]:
             _update_document(document_id, query_ready=True, query_ready_at=True)
             _append_event(document_id, "query_window_open", f"queryable after {section_total} sections")
 
-    return {"section_count": section_total, "chunk_count": chunk_total, "section_preview": _fetch_section_preview(document_id)}
+    return {
+        "section_count": section_total,
+        "chunk_count": chunk_total,
+        "section_preview": _fetch_section_preview(document_id),
+        "chunking": chunking_summary,
+    }
 
 
 def _iter_text_lines(path: Path):
@@ -325,7 +366,15 @@ def _replace_document_units(document_id: str, parsed: ParsedKB) -> None:
         conn.commit()
 
 
-def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dict[str, Any]:
+def _index_visual_assets(
+    *,
+    document_id: str,
+    path: Path,
+    file_type: str,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
+    chunking_settings = chunking_settings or load_chunking_settings()
+    chunking_summary = chunking_settings.summary()
     visual_assets = extract_visual_assets(path, file_type, max_assets=VISION_SETTINGS.max_assets_per_document)
     if not visual_assets:
         return {
@@ -336,6 +385,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
             "visual_layout_section_count": 0,
             "visual_provider": "",
             "section_preview": _fetch_section_preview(document_id),
+            "chunking": chunking_summary,
         }
 
     asset_rows: list[dict[str, Any]] = []
@@ -346,7 +396,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
     visual_provider = ""
     layout_section_count = 0
     layout_chunk_count = 0
-    chunking_kwargs = CHUNKING_SETTINGS.as_kwargs()
+    chunking_kwargs = chunking_settings.as_kwargs()
 
     for asset in visual_assets:
         asset_id = asset.id
@@ -521,6 +571,7 @@ def _index_visual_assets(*, document_id: str, path: Path, file_type: str) -> dic
         "visual_region_low_confidence_count": len([item for item in region_rows if item.get("confidence") is not None and float(item.get("confidence") or 0.0) < 0.8]),
         "visual_provider": visual_provider,
         "section_preview": _fetch_section_preview(document_id),
+        "chunking": chunking_summary,
     }
 
 

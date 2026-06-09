@@ -631,11 +631,25 @@ def test_kb_chunking_settings_parse_env_defaults_and_validation(monkeypatch) -> 
     runtime = importlib.import_module("app.runtime")
     monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
     monkeypatch.delenv("KB_CHUNK_TOKEN_OVERLAP", raising=False)
-    assert runtime.load_chunking_settings().as_kwargs() == {}
+    default_settings = runtime.load_chunking_settings()
+    assert default_settings.as_kwargs() == {}
+    assert default_settings.summary() == {
+        "enabled": False,
+        "mode": "character_window",
+        "max_tokens": None,
+        "token_overlap": None,
+    }
 
     monkeypatch.setenv("KB_CHUNK_MAX_TOKENS", "90")
     monkeypatch.setenv("KB_CHUNK_TOKEN_OVERLAP", "12")
-    assert runtime.load_chunking_settings().as_kwargs() == {"max_tokens": 90, "token_overlap": 12}
+    token_settings = runtime.load_chunking_settings()
+    assert token_settings.as_kwargs() == {"max_tokens": 90, "token_overlap": 12}
+    assert token_settings.summary() == {
+        "enabled": True,
+        "mode": "token_budget",
+        "max_tokens": 90,
+        "token_overlap": 12,
+    }
 
     monkeypatch.delenv("KB_CHUNK_MAX_TOKENS", raising=False)
     with pytest.raises(ValueError, match="requires KB_CHUNK_MAX_TOKENS"):

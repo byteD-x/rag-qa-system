@@ -5,7 +5,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from .parsing import parse_text_content
-from .runtime import load_chunking_settings
+from .runtime import KBChunkingSettings, load_chunking_settings
 
 
 MAX_KNOWLEDGE_BATCH_DOCUMENTS = 20
@@ -24,7 +24,6 @@ FORBIDDEN_DOCUMENT_FIELDS = {
     "source_path",
     "storage_path",
 }
-CHUNKING_SETTINGS = load_chunking_settings()
 
 
 class KnowledgeBatchPayloadError(ValueError):
@@ -82,8 +81,13 @@ def parse_knowledge_batch_payload(raw: Any) -> list[dict[str, Any]]:
     return parsed
 
 
-def build_knowledge_dry_run_payload(document: dict[str, Any]) -> dict[str, Any]:
-    parsed = parse_text_content(str(document["content"]), **CHUNKING_SETTINGS.as_kwargs())
+def build_knowledge_dry_run_payload(
+    document: dict[str, Any],
+    *,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
+    chunking_settings = chunking_settings or load_chunking_settings()
+    parsed = parse_text_content(str(document["content"]), **chunking_settings.as_kwargs())
     chunks_by_section = Counter(int(chunk.section_index) for chunk in parsed.chunks)
     section_summaries = [
         {
@@ -109,13 +113,18 @@ def build_knowledge_dry_run_payload(document: dict[str, Any]) -> dict[str, Any]:
 
 def build_knowledge_batch_dry_run_payload(raw: Any) -> dict[str, Any]:
     documents = parse_knowledge_batch_payload(raw)
-    document_summaries = [build_knowledge_dry_run_payload(document) for document in documents]
+    chunking_settings = load_chunking_settings()
+    document_summaries = [
+        build_knowledge_dry_run_payload(document, chunking_settings=chunking_settings)
+        for document in documents
+    ]
     return {
         "dry_run": True,
         "document_count": len(document_summaries),
         "total_content_chars": sum(int(item["content_chars"]) for item in document_summaries),
         "total_sections": sum(int(item["section_count"]) for item in document_summaries),
         "total_chunks": sum(int(item["chunk_count"]) for item in document_summaries),
+        "chunking": chunking_settings.summary(),
         "documents": document_summaries,
         "limits": {
             "max_documents": MAX_KNOWLEDGE_BATCH_DOCUMENTS,

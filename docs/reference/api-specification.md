@@ -63,8 +63,9 @@ Authorization: Bearer <ACCESS_TOKEN>
 ### `GET /readyz`
 
 - Gateway 会检查数据库、KB Service 与模型配置
-- KB Service 会检查数据库、对象存储、Qdrant 连通性与 Qdrant 运行时配置
+- KB Service 会检查数据库、对象存储、Qdrant 连通性、Qdrant 运行时配置与分块配置摘要
 - `qdrant_runtime_config` 只暴露 endpoint、collection、FastEmbed 参数和 `api_key_configured`，不返回 API key 原文
+- `chunking_config` 只暴露当前分块模式、是否启用 token 预算、`max_tokens` 与 `token_overlap` 摘要；配置非法时该检查会标记为 `failed`
 - 关键依赖未就绪时返回 `503`
 
 ### `GET /metrics`
@@ -460,7 +461,7 @@ SSE 流式回答，事件顺序：
 - `documents` 必须是非空数组，最多 20 篇。
 - 所有 `documents[].content` 合计最多 300000 字符。
 - 每个文档只接收内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
-- 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
+- 响应只包含 `document_count`、`total_content_chars`、`total_sections`、`total_chunks`、`chunking` 策略摘要、`documents[].section_count`、`documents[].chunk_count`、字符范围和脱敏后的叶子文件名；不会返回正文、chunk text、embedding 或完整路径。
 - Web 治理页的批量 JSON 面板复用该接口做门禁预览；textarea 内容变化后，写入按钮会重新锁定，直到当前 JSON 再次 dry-run 通过。
 
 ### `GET /api/knowledge_base/auto-index/preview`
@@ -473,7 +474,7 @@ SSE 流式回答，事件顺序：
 - inbox 路径固定由服务端 `KB_BLOB_ROOT` 推导，接口不接收路径参数。
 - 只扫描 inbox 目录一层，不递归子目录；符号链接、子目录、非文本/Markdown 扩展名会被跳过。
 - 当前支持 `.txt`、`.md`、`.markdown`，只按 UTF-8 / UTF-8 BOM 读取；非法 UTF-8 文件会被跳过。
-- 响应只返回 `dry_run`、`source=fixed_inbox`、脱敏 `inbox`、存在性、文档/跳过/字符/chunk 计数、每个文档的分块摘要和跳过原因。
+- 响应只返回 `dry_run`、`source=fixed_inbox`、脱敏 `inbox`、存在性、文档/跳过/字符/chunk 计数、`chunking` 策略摘要、每个文档的分块摘要和跳过原因。
 - 响应不返回正文、chunk text、embedding、`storage_path` 或完整本机路径。
 
 响应关键字段：
@@ -488,6 +489,12 @@ SSE 流式回答，事件顺序：
   "skipped_count": 0,
   "chunk_count": 2,
   "char_count": 1200,
+  "chunking": {
+    "enabled": false,
+    "mode": "character_window",
+    "max_tokens": null,
+    "token_overlap": null
+  },
   "documents": [
     {
       "doc_id": "runbook",
@@ -528,7 +535,7 @@ SSE 流式回答，事件顺序：
 - 每个文档必须提供 `base_id` 和内联 `content`；`source_file`、`source_path`、`path`、`storage_path`、`chunks`、`chunk_text`、`embedding` 等字段会被拒绝。
 - 服务端生成真实 `document_id`，客户端传入的 `doc_id` / `document_id` 仅作为脱敏后的输入标识回显。
 - 全部成功返回 HTTP 200；非法 payload 返回 HTTP 400；向量运行时不可用返回 HTTP 409；任一文档业务失败返回 HTTP 400 的聚合摘要。
-- 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、脱敏文件名和服务端生成的文档 ID；不会返回正文、chunk text、embedding 或完整路径。Web 治理页只会使用成功项的服务端 `document_id` 触发逐文档受控 rebuild。
+- 响应只包含批次状态、成功/失败数量、section/chunk 与向量索引计数、`chunking` 策略摘要、脱敏文件名和服务端生成的文档 ID；写入文档的 `stats_json` 也会记录同一份 `chunking` 摘要。响应不会返回正文、chunk text、embedding 或完整路径。Web 治理页只会使用成功项的服务端 `document_id` 触发逐文档受控 rebuild。
 
 ### `POST /api/knowledge_base/jobs`
 

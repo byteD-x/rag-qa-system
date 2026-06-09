@@ -5,7 +5,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .parsing import parse_text_content
-from .runtime import BLOB_ROOT, load_chunking_settings
+from .runtime import BLOB_ROOT, KBChunkingSettings, load_chunking_settings
 
 
 AUTO_INDEX_INBOX_DIR = "knowledge_base/inbox"
@@ -14,10 +14,11 @@ AUTO_INDEX_MAX_FILES = 20
 AUTO_INDEX_MAX_FILE_BYTES = 300_000
 AUTO_INDEX_MAX_TOTAL_CHARS = 300_000
 AUTO_INDEX_MAX_SECTION_SUMMARY_ITEMS = 20
-CHUNKING_SETTINGS = load_chunking_settings()
 
 
 def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
+    chunking_settings = load_chunking_settings()
+    chunking_summary = chunking_settings.summary()
     inbox = fixed_auto_index_inbox_path()
     if not inbox.exists():
         return {
@@ -29,6 +30,7 @@ def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
             "skipped_count": 0,
             "chunk_count": 0,
             "char_count": 0,
+            "chunking": chunking_summary,
             "documents": [],
             "skipped": [],
             "limits": _limits_payload(),
@@ -43,6 +45,7 @@ def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
             "skipped_count": 1,
             "chunk_count": 0,
             "char_count": 0,
+            "chunking": chunking_summary,
             "documents": [],
             "skipped": [{"file_name": _safe_leaf_name(inbox.name, fallback="inbox"), "reason": "inbox_not_directory"}],
             "limits": _limits_payload(),
@@ -87,7 +90,14 @@ def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
             skipped.append({"file_name": _safe_leaf_name(path.name, fallback="file"), "reason": "total_content_too_large"})
             continue
 
-        documents.append(_build_document_preview(path, content=content, size_bytes=size_bytes))
+        documents.append(
+            _build_document_preview(
+                path,
+                content=content,
+                size_bytes=size_bytes,
+                chunking_settings=chunking_settings,
+            )
+        )
         total_chars += len(content)
 
     return {
@@ -99,6 +109,7 @@ def build_knowledge_auto_index_preview_payload() -> dict[str, Any]:
         "skipped_count": len(skipped),
         "chunk_count": sum(int(item["chunk_count"]) for item in documents),
         "char_count": total_chars,
+        "chunking": chunking_summary,
         "documents": documents,
         "skipped": skipped,
         "limits": _limits_payload(),
@@ -109,8 +120,15 @@ def fixed_auto_index_inbox_path() -> Path:
     return (BLOB_ROOT / AUTO_INDEX_INBOX_DIR).resolve()
 
 
-def _build_document_preview(path: Path, *, content: str, size_bytes: int) -> dict[str, Any]:
-    parsed = parse_text_content(content, **CHUNKING_SETTINGS.as_kwargs())
+def _build_document_preview(
+    path: Path,
+    *,
+    content: str,
+    size_bytes: int,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
+    chunking_settings = chunking_settings or load_chunking_settings()
+    parsed = parse_text_content(content, **chunking_settings.as_kwargs())
     chunks_by_section = Counter(int(chunk.section_index) for chunk in parsed.chunks)
     sections = [
         {

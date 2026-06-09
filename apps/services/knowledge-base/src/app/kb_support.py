@@ -29,6 +29,7 @@ def kb_readiness_checks(
     storage: Any,
     vector_store_checker: Any | None = None,
     vector_runtime_config_checker: Any | None = None,
+    chunking_config_checker: Any | None = None,
 ) -> dict[str, Any]:
     checks: dict[str, Any] = {}
     try:
@@ -57,6 +58,12 @@ def kb_readiness_checks(
             checks["qdrant_runtime_config"] = {"status": "ok", **dict(vector_runtime_config_checker() or {})}
         except Exception as exc:
             checks["qdrant_runtime_config"] = {"status": "failed", "detail": str(exc)}
+
+    if chunking_config_checker is not None:
+        try:
+            checks["chunking_config"] = {"status": "ok", **dict(chunking_config_checker() or {})}
+        except Exception as exc:
+            checks["chunking_config"] = {"status": "failed", "detail": str(exc)}
 
     return checks
 

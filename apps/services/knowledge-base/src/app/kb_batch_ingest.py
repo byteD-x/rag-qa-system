@@ -14,13 +14,12 @@ from .kb_batch_dry_run import KnowledgeBatchPayloadError, parse_knowledge_batch_
 from .kb_resource_store import ensure_base_exists
 from .kb_runtime import db, logger
 from .parsing import parse_text_content
-from .runtime import load_chunking_settings
+from .runtime import KBChunkingSettings, load_chunking_settings
 from .vector_store import ensure_vector_store, index_document_chunks, index_document_sections
 from .worker import _insert_chunks, _insert_sections
 
 
 MAX_BATCH_INGEST_TEXT_FIELD_CHARS = 160
-CHUNKING_SETTINGS = load_chunking_settings()
 
 
 class KnowledgeBatchRuntimeError(RuntimeError):
@@ -51,6 +50,7 @@ def parse_knowledge_batch_ingest_payload(raw: Any) -> list[dict[str, Any]]:
 
 def build_knowledge_batch_ingest_payload(raw: Any, *, request: Request, user: CurrentUser) -> dict[str, Any]:
     documents = parse_knowledge_batch_ingest_payload(raw)
+    chunking_settings = load_chunking_settings()
     try:
         ensure_vector_store()
     except Exception as exc:  # pragma: no cover - exercised through route tests with monkeypatching
@@ -68,7 +68,13 @@ def build_knowledge_batch_ingest_payload(raw: Any, *, request: Request, user: Cu
     failed_status = 0
     for index, document in enumerate(documents):
         try:
-            item = ingest_inline_knowledge_document(document, index=index, request=request, user=user)
+            item = ingest_inline_knowledge_document(
+                document,
+                index=index,
+                request=request,
+                user=user,
+                chunking_settings=chunking_settings,
+            )
         except KnowledgeBatchRuntimeError:
             raise
         except Exception as exc:
@@ -99,6 +105,7 @@ def build_knowledge_batch_ingest_payload(raw: Any, *, request: Request, user: Cu
         "succeeded_documents": len(items) - failed_documents,
         "failed_documents": failed_documents,
         **totals,
+        "chunking": chunking_settings.summary(),
         "documents": items,
     }
     if failed_status:
@@ -122,10 +129,19 @@ def build_knowledge_batch_ingest_payload(raw: Any, *, request: Request, user: Cu
     return result
 
 
-def ingest_inline_knowledge_document(document: dict[str, Any], *, index: int, request: Request, user: CurrentUser) -> dict[str, Any]:
+def ingest_inline_knowledge_document(
+    document: dict[str, Any],
+    *,
+    index: int,
+    request: Request,
+    user: CurrentUser,
+    chunking_settings: KBChunkingSettings | None = None,
+) -> dict[str, Any]:
     base_id = str(document["base_id"])
     ensure_base_exists(base_id, user=user, request=request, action="kb.batch_ingest")
-    parsed = parse_text_content(str(document["content"]), **CHUNKING_SETTINGS.as_kwargs())
+    chunking_settings = chunking_settings or load_chunking_settings()
+    chunking_summary = chunking_settings.summary()
+    parsed = parse_text_content(str(document["content"]), **chunking_settings.as_kwargs())
     if not parsed.chunks:
         raise ValueError("document contains no extractable text")
 
@@ -139,6 +155,7 @@ def ingest_inline_knowledge_document(document: dict[str, Any], *, index: int, re
         "input_doc_id": str(document.get("doc_id") or ""),
         "section_count": len(parsed.sections),
         "chunk_count": len(parsed.chunks),
+        "chunking": chunking_summary,
     }
     with db.connect() as conn:
         with conn.cursor() as cur:
