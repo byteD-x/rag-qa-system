@@ -2262,7 +2262,10 @@ def test_search_vector_evidence_degrades_when_qdrant_query_fails(monkeypatch) ->
 
 
 def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> None:
+    from shared.tracing import TRACE_ID_HEADER, reset_trace_id, set_trace_id
+
     gateway_main = _load_gateway_main(monkeypatch)
+    captured_headers: dict[str, str] = {}
 
     class _Cursor:
         def execute(self, query):
@@ -2297,7 +2300,9 @@ def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> No
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def get(self, url):
+        async def get(self, url, headers=None):
+            captured_headers.update(headers or {})
+
             class _Response:
                 status_code = 200
 
@@ -2324,12 +2329,17 @@ def test_gateway_readiness_checks_degrade_llm_without_failing(monkeypatch) -> No
     monkeypatch.setenv("LLM_BASE_URL", "")
     monkeypatch.setenv("LLM_MODEL", "")
 
-    checks = asyncio.run(gateway_main._gateway_readiness_checks())
+    trace_context = set_trace_id("gateway-readyz-trace")
+    try:
+        checks = asyncio.run(gateway_main._gateway_readiness_checks())
+    finally:
+        reset_trace_id(trace_context)
 
     assert checks["database"]["status"] == "ok"
     assert checks["kb_service"]["status"] == "ok"
     assert checks["kb_service"]["upstream_status"] == "ready"
     assert checks["kb_service"]["checks"]["chunking_config"]["mode"] == "character_window"
+    assert captured_headers[TRACE_ID_HEADER] == "gateway-readyz-trace"
     assert checks["llm"]["status"] == "fallback"
 
 

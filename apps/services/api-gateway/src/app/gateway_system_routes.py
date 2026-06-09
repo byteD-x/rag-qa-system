@@ -7,6 +7,7 @@ from fastapi import APIRouter, Response
 
 from shared.api_errors import raise_api_error
 from shared.metrics import CONTENT_TYPE_LATEST, generate_latest
+from shared.tracing import trace_headers
 
 from .ai_client import load_llm_settings
 from .gateway_runtime import gateway_db, runtime_settings
@@ -83,7 +84,7 @@ async def gateway_readiness_checks() -> dict[str, Any]:
     timeout = httpx.Timeout(min(runtime_settings.request_timeout_seconds, 5.0))
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"{runtime_settings.kb_service_url}/readyz")
+            response = await client.get(f"{runtime_settings.kb_service_url}/readyz", headers=trace_headers())
         checks["kb_service"] = _kb_service_check_from_response(response)
     except httpx.HTTPError as exc:
         checks["kb_service"] = {"status": "failed", "detail": _short_upstream_detail(exc, fallback="kb-service readiness request failed")}
