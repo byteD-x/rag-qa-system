@@ -630,7 +630,7 @@ LLM_MODEL_ROUTING_JSON='{
 
 `api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。`fallback_route_key` 会被 Gateway 的回答生成链路用于本地调用抛出 5xx、上游不可用、非法响应或空回答等失败后的备线路由尝试；是否对供应商 4xx 继续尝试取决于调用层映射后的本地异常状态。平台配置摘要只返回 `api_key_configured`，不会返回密钥原文。
 
-平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，前端会调用 `POST /api/v1/platform/llm/models/discover`，后端会规范化 Base URL 并请求 `{base_url}/models` 拉取模型列表，返回可选择的模型 ID 与配置片段。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入成功响应或审计详情；上游错误消息会作为 `502` 摘要返回，因此生产中转站不应在错误体中包含敏感凭据。生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容，生产环境建议显式配置 allowlist。
+平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，前端会调用 `POST /api/v1/platform/llm/models/discover`，后端会规范化 Base URL 并请求 `{base_url}/models` 拉取模型列表，返回可选择的模型 ID 与配置片段。现在配置片段还能生成主/备路由示例，方便演示 `fallback_route_key` 的降级闭环。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入成功响应或审计详情；上游错误消息会作为 `502` 摘要返回，因此生产中转站不应在错误体中包含敏感凭据。生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容，生产环境建议显式配置 allowlist。
 
 ### Vercel 展示型 `.env` 模板
 

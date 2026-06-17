@@ -141,14 +141,17 @@ describe('ModelProviderView', () => {
     const baseUrlInput = inputs.find((input) => input.attributes('placeholder') === 'https://relay.example.com/v1');
     const credentialInput = inputs.find((input) => {
       const placeholder = input.attributes('placeholder');
-      return placeholder !== 'https://relay.example.com/v1' && placeholder !== 'grounded' && input.attributes('type') !== 'number';
+      return placeholder !== 'https://relay.example.com/v1' && placeholder !== 'grounded' && placeholder !== 'grounded_backup' && input.attributes('type') !== 'number';
     });
+    const fallbackRouteInput = inputs.find((input) => input.attributes('placeholder') === 'grounded_backup');
 
     expect(baseUrlInput).toBeTruthy();
     expect(credentialInput).toBeTruthy();
+    expect(fallbackRouteInput).toBeTruthy();
 
     await baseUrlInput!.setValue('https://relay.example.test/v1');
     await credentialInput!.setValue(relayCredential);
+    await fallbackRouteInput!.setValue('grounded_backup');
     const discoverButton = wrapper.findAll('button')[1];
     expect(discoverButton).toBeTruthy();
     await discoverButton!.trigger('click');
@@ -168,10 +171,17 @@ describe('ModelProviderView', () => {
     expect(snippet).toContain('LLM_PROVIDER=newapi');
     expect(snippet).toContain('LLM_BASE_URL=https://relay.example.test/v1');
     expect(snippet).toContain('LLM_MODEL=gpt-4.1-mini');
+    expect(snippet).toContain('"fallback_route_key": "grounded_backup"');
 
     const routing = extractRoutingJson(snippet);
-    expect(Object.keys(routing)).toEqual(['grounded']);
+    expect(Object.keys(routing)).toEqual(['grounded', 'grounded_backup']);
     expect(routing.grounded).toMatchObject({
+      provider: 'newapi',
+      base_url: 'https://relay.example.test/v1',
+      model: 'gpt-4.1-mini',
+      fallback_route_key: 'grounded_backup',
+    });
+    expect(routing.grounded_backup).toMatchObject({
       provider: 'newapi',
       base_url: 'https://relay.example.test/v1',
       model: 'gpt-4.1-mini',

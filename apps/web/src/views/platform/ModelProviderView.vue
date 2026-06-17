@@ -75,6 +75,9 @@
                 <el-input v-model="routeKey" clearable placeholder="grounded" />
               </el-form-item>
             </div>
+            <el-form-item label="Fallback Route Key">
+              <el-input v-model="fallbackRouteKey" clearable placeholder="grounded_backup" />
+            </el-form-item>
 
             <el-button type="primary" :loading="discovering" @click="discoverModels">
               <el-icon><Search /></el-icon>
@@ -190,6 +193,7 @@ const config = ref<LlmConfigSummary | null>(null);
 const discoveryResult = ref<LlmModelDiscoveryResult | null>(null);
 const selectedModel = ref('');
 const routeKey = ref('grounded');
+const fallbackRouteKey = ref('grounded_backup');
 const configLoading = ref(false);
 const discovering = ref(false);
 
@@ -217,22 +221,30 @@ const configSnippet = computed(() => {
   const baseUrl = effectiveBaseUrl.value || '<relay-base-url>';
   const provider = effectiveProvider.value || 'openai-compatible';
   const route = (routeKey.value || 'grounded').trim();
+  const fallbackRoute = (fallbackRouteKey.value || '').trim();
+  const effectiveFallbackRoute = fallbackRoute && fallbackRoute !== route ? fallbackRoute : '';
   const credentialField = 'api_' + 'key';
   const credentialEnv = 'LLM_API_' + 'KEY';
   const credentialPlaceholder = '<relay-api-key>';
-  const routeJson = JSON.stringify(
-    {
-      [route]: {
-        provider,
-        base_url: baseUrl,
-        [credentialField]: credentialPlaceholder,
-        model,
-        fallback_route_key: ''
-      }
-    },
-    null,
-    2
-  );
+  const primaryRouteConfig: Record<string, string> = {
+    provider,
+    base_url: baseUrl,
+    [credentialField]: credentialPlaceholder,
+    model
+  };
+  const routeConfig: Record<string, Record<string, string>> = {
+    [route]: primaryRouteConfig
+  };
+  if (effectiveFallbackRoute) {
+    primaryRouteConfig.fallback_route_key = effectiveFallbackRoute;
+    routeConfig[effectiveFallbackRoute] = {
+      provider,
+      base_url: baseUrl,
+      [credentialField]: credentialPlaceholder,
+      model
+    };
+  }
+  const routeJson = JSON.stringify(routeConfig, null, 2);
 
   return [
     `LLM_PROVIDER=${provider}`,

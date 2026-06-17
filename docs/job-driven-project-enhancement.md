@@ -87,7 +87,7 @@
 | P0 | 补最小演示闭环 | RAG、Agent、评测 | `scripts/dev/smoke_eval.py`、README 演示章节、fixtures | 明确“上传/入库/提问/引用/拒答/评测”的 10 分钟演示路径 | 面试展示成本低 | 复用现有 smoke eval，不新增平台 | smoke eval + regression gate | 能讲端到端闭环 | 0.5-1 天 | 依赖本地 Docker 环境 |
 | P1 | 强化评测与 badcase 报告 | RAG eval、回归测试 | `scripts/evaluation/*`、`artifacts/reports`、docs | 增加固定 badcase 清单和报告模板 | 对 25-40K 岗位有区分度 | 不追求大数据集 | pytest + eval scripts | 能讲 Recall@K、faithfulness、citation alignment | 1-2 天 | 指标只代表 fixture |
 | P1 | 梳理 step events 与 trace 展示 | Agent 可观测 | Gateway 工作流、前端 Agent Monitor、聊天 Trace Drawer、文档 | 把工具调用、失败原因、恢复动作串成可读事件 | Agent 岗位高频追问 | 先做展示和测试，不改深层编排 | 现有 tests + 截图/接口响应 | 能讲多步骤可观测 | 1-2 天 | 前端改动需视觉回归 |
-| P1 | 模型服务化演示配置 | AI平台/模型服务化 | README、ModelProviderView、测试 | 给 newapi/sub2api、fallback、成本估算准备一套脱敏示例 | 主投进阶岗位常问 | 不接真实密钥，不做账单拉取 | 单测 + 配置片段校验 | 能讲 provider、路由、降级和成本 | 1 天 | 真实中转站稳定性待测 |
+| P1 | 模型服务化演示配置 | AI平台/模型服务化 | README、ModelProviderView、测试 | 给 newapi/sub2api、fallback、成本估算准备一套脱敏示例；模型接入页已能生成主/备 route 配置片段 | 主投进阶岗位常问 | 不接真实密钥，不做账单拉取 | 单测 + 配置片段校验 | 能讲 provider、路由、降级和成本 | 1 天 | 真实中转站稳定性待测 |
 | P2 | Dify/Coze/MCP 对照 demo | 工作流/MCP | docs/reference 或独立 demo 文档 | 用现有 Tool Workflow/MCP 对照 Dify/Coze 概念 | 覆盖 11.7% 扩展关键词岗位 | 不引入完整低代码平台 | 文档 + MCP adapter 测试 | 回答“会不会 Dify/Coze” | 1-2 天 | 不是直接 Dify 经验 |
 | P2 | 行业场景样例包 | 行业AI解决方案 | `tests/fixtures`、docs | 准备制度问答、客服查单、财务知识库三个场景 | 方便投行业落地岗 | 不编造客户数据 | fixture eval | 能讲业务对象和验收 | 2-3 天 | 需要真实业务样本会更强 |
 
