@@ -61,6 +61,25 @@ def _status_for_port(port: int) -> CheckResult:
     return CheckResult(name=f"port:{port}", status="ok", detail="free")
 
 
+def _build_next_steps(errors: list[CheckResult], warnings: list[CheckResult]) -> list[str]:
+    if errors:
+        return [
+            "先修复上面的 Errors，再重新运行 `make doctor`。",
+        ]
+
+    next_steps = []
+    warning_names = {item.name for item in warnings}
+    if "command:docker" in warning_names:
+        next_steps.append("如果暂时没有 Docker CLI，先运行 `make demo-offline` 验证离线证据链。")
+    if "env:.env" in warning_names or "env:recommended_keys" in warning_names:
+        next_steps.append("补齐 `.env` 配置，优先从 `.env.example` 复制后再检查关键变量。")
+    if any(item.name.startswith("port:") for item in warnings):
+        next_steps.append("处理占用端口后，再继续完整本地栈、`make preflight` 或 `make up`。")
+    if not next_steps:
+        next_steps.append("如果只是想先确认项目可用，继续跑 `make demo-offline`。")
+    return next_steps
+
+
 def _parse_env_keys(path: Path) -> set[str]:
     keys: set[str] = set()
     if not path.exists():
@@ -119,12 +138,14 @@ def build_report() -> dict[str, Any]:
 
     errors = [item for item in results if item.status == "error"]
     warnings = [item for item in results if item.status == "warn"]
+    next_steps = _build_next_steps(errors, warnings)
 
     return {
         "repo_root": str(REPO_ROOT),
         "status": "failed" if errors else "passed_with_warnings" if warnings else "passed",
         "errors": [asdict(item) for item in errors],
         "warnings": [asdict(item) for item in warnings],
+        "next_steps": next_steps,
         "checks": [asdict(item) for item in results],
     }
 
@@ -141,6 +162,11 @@ def write_human_report(report: dict[str, Any]) -> None:
         print("Warnings:")
         for item in report["warnings"]:
             print(f"- {item['name']}: {item['detail']}")
+    if report.get("next_steps"):
+        print("")
+        print("Next steps:")
+        for step in report["next_steps"]:
+            print(f"- {step}")
     if report["errors"]:
         print("")
         print("Errors:")
