@@ -360,6 +360,10 @@ class TestToolRegistry:
                             "hallucination": {"passed": True},
                         }
                     },
+                    "workflow_events": [
+                        {"stage": "retrieval_completed", "status": "running", "evidence_count": 2, "retrieval_ms": 18.5},
+                        {"stage": "persisted", "status": "completed", "evidence_count": 2, "retrieval_ms": 18.5},
+                    ],
                     "tool_calls": [{"tool": "search", "success": True}],
                 }
             },
@@ -367,6 +371,8 @@ class TestToolRegistry:
         assert trace_result.success
         assert trace_result.data["trace_completeness"] >= 0.8
         assert trace_result.data["tool_success_rate"] == 1.0
+        assert trace_result.data["timeline"][0]["stage"] == "retrieval_completed"
+        assert trace_result.data["failure_summary"]["failed"] is False
 
         backup_result = await tr.execute(
             "backup_cleanup_dry_run",
@@ -451,6 +457,9 @@ class TestToolRegistry:
         assert empty_result.data["fallback_used"] is False
         assert empty_result.data["cache_hit"] is False
         assert empty_result.data["hallucination_passed"] is None
+        assert empty_result.data["timeline"] == []
+        assert empty_result.data["failure_summary"]["failed"] is False
+        assert empty_result.data["resume_summary"]["can_resume"] is False
 
         partial_state_result = await tr.execute(
             "workflow_trace_summary",
@@ -459,7 +468,10 @@ class TestToolRegistry:
                     "llm_trace": {
                         "model": "test-model-lite",
                         "fallback_used": True,
-                    }
+                    },
+                    "stage": "generation_completed",
+                    "resume_target": "persist_message",
+                    "resume": {"resumed": True, "source_stage": "generation_completed", "source_run_id": "run-1"},
                 },
                 "tool_calls": [],
             },
@@ -472,11 +484,16 @@ class TestToolRegistry:
         assert partial_state_result.data["fallback_used"] is True
         assert partial_state_result.data["cache_hit"] is False
         assert partial_state_result.data["hallucination_passed"] is None
+        assert partial_state_result.data["timeline"][0]["stage"] == "generation_completed"
+        assert partial_state_result.data["resume_summary"]["can_resume"] is True
+        assert partial_state_result.data["resume_summary"]["resume_target"] == "persist_message"
 
         failed_call_result = await tr.execute(
             "workflow_trace_summary",
             {
                 "workflow_state": {
+                    "stage": "failed",
+                    "error": {"type": "RuntimeError", "detail": "answer generation failed"},
                     "response": {
                         "llm_trace": {
                             "route": "quality",
@@ -486,6 +503,16 @@ class TestToolRegistry:
                         "hallucination": {"passed": False},
                     }
                 },
+                "workflow_events": [
+                    {"stage": "retrieval_completed", "status": "running", "evidence_count": 3, "retrieval_ms": 10.0},
+                    {
+                        "stage": "failed",
+                        "status": "failed",
+                        "evidence_count": 3,
+                        "retrieval_ms": 10.0,
+                        "error": {"type": "RuntimeError", "class": "runtime", "detail": "answer generation failed"},
+                    },
+                ],
                 "tool_calls": [
                     {"tool": "search", "error": "upstream unavailable"},
                     {"tool": "summarize", "success": True},
@@ -501,6 +528,11 @@ class TestToolRegistry:
         assert failed_call_result.data["fallback_used"] is True
         assert failed_call_result.data["cache_hit"] is False
         assert failed_call_result.data["hallucination_passed"] is False
+        assert failed_call_result.data["timeline"][1]["stage"] == "failed"
+        assert failed_call_result.data["timeline"][-1]["stage"] == "tool_calls"
+        assert failed_call_result.data["failure_summary"]["failed"] is True
+        assert failed_call_result.data["failure_summary"]["failed_tool_call_count"] == 2
+        assert "RuntimeError" in failed_call_result.data["failure_summary"]["reasons"]
 
         tr._tools.clear()
         tr._category_index.clear()

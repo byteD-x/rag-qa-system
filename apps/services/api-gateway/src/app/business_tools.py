@@ -89,6 +89,7 @@ def _register_workflow_trace_summary() -> None:
             "properties": {
                 "workflow_run": {"type": "object"},
                 "workflow_state": {"type": "object"},
+                "workflow_events": {"type": "array", "items": {"type": "object"}},
                 "tool_calls": {"type": "array", "items": {"type": "object"}},
             },
         },
@@ -97,6 +98,7 @@ def _register_workflow_trace_summary() -> None:
     async def workflow_trace_summary(
         workflow_run: dict[str, Any] | None = None,
         workflow_state: dict[str, Any] | None = None,
+        workflow_events: list[dict[str, Any]] | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         run = dict(workflow_run or {})
@@ -106,10 +108,12 @@ def _register_workflow_trace_summary() -> None:
         cache = dict(response.get("semantic_cache") or state.get("semantic_cache") or {})
         hallucination = dict(response.get("hallucination") or state.get("hallucination") or {})
         calls = list(tool_calls if tool_calls is not None else run.get("tool_calls") or state.get("tool_calls") or [])
+        events = list(workflow_events if workflow_events is not None else run.get("workflow_events") or state.get("workflow_events") or [])
         successful_calls = [
             call for call in calls
             if bool(call.get("success", call.get("error") in (None, "")))
         ]
+        failed_calls = [call for call in calls if call not in successful_calls]
         return {
             "trace_completeness": _trace_completeness(trace=trace, cache=cache, hallucination=hallucination, tool_calls=calls),
             "tool_call_count": len(calls),
@@ -118,6 +122,9 @@ def _register_workflow_trace_summary() -> None:
             "fallback_used": bool(trace.get("fallback_used") or trace.get("fallback_model")),
             "cache_hit": bool(cache.get("hit") or cache.get("cache_hit")),
             "hallucination_passed": hallucination.get("passed"),
+            "timeline": _workflow_timeline(events=events, state=state, tool_calls=calls),
+            "failure_summary": _workflow_failure_summary(state=state, events=events, failed_calls=failed_calls),
+            "resume_summary": _workflow_resume_summary(state=state, events=events),
         }
 
 
@@ -284,6 +291,111 @@ def _trace_completeness(
         len(tool_calls) > 0,
     ]
     return round(sum(1 for item in checks if item) / len(checks), 4)
+
+
+def _workflow_timeline(
+    *,
+    events: list[dict[str, Any]],
+    state: dict[str, Any],
+    tool_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+    for index, event in enumerate(events[:12], start=1):
+        item = {
+            "index": index,
+            "stage": str(event.get("stage") or "unknown"),
+            "status": str(event.get("status") or "unknown"),
+            "answer_mode": str(event.get("answer_mode") or ""),
+            "evidence_count": _safe_int(event.get("evidence_count")),
+            "retrieval_ms": _safe_float(event.get("retrieval_ms")),
+        }
+        if event.get("error"):
+            error = dict(event.get("error") or {})
+            item["error_type"] = str(error.get("type") or "")
+            item["error_class"] = str(error.get("class") or "")
+        timeline.append(item)
+    if not timeline and state:
+        timeline.append(
+            {
+                "index": 1,
+                "stage": str(state.get("stage") or "unknown"),
+                "status": str(state.get("status") or ""),
+                "answer_mode": str(state.get("answer_mode") or ""),
+                "evidence_count": _safe_int(state.get("evidence_count")),
+                "retrieval_ms": _safe_float((state.get("timing") or {}).get("retrieval_ms") if isinstance(state.get("timing"), dict) else 0),
+            }
+        )
+    if tool_calls:
+        timeline.append(
+            {
+                "index": len(timeline) + 1,
+                "stage": "tool_calls",
+                "status": "completed",
+                "tool_call_count": len(tool_calls),
+                "failed_tool_call_count": sum(1 for call in tool_calls if bool(call.get("error")) or call.get("success") is False),
+            }
+        )
+    return timeline
+
+
+def _workflow_failure_summary(
+    *,
+    state: dict[str, Any],
+    events: list[dict[str, Any]],
+    failed_calls: list[dict[str, Any]],
+) -> dict[str, Any]:
+    error = dict(state.get("error") or {})
+    event_errors = [dict(event.get("error") or {}) for event in events if event.get("error")]
+    reasons: list[str] = []
+    if error:
+        reasons.append(str(error.get("type") or error.get("detail") or "workflow_error"))
+    for item in event_errors:
+        reason = str(item.get("type") or item.get("detail") or "").strip()
+        if reason:
+            reasons.append(reason)
+    for call in failed_calls:
+        reason = str(call.get("error") or call.get("reason") or "tool_call_failed").strip()
+        if reason:
+            reasons.append(reason)
+    return {
+        "failed": bool(error or event_errors or failed_calls),
+        "reason_count": len(reasons),
+        "reasons": reasons[:6],
+        "failed_tool_call_count": len(failed_calls),
+        "last_error": dict(error or (event_errors[-1] if event_errors else {})),
+    }
+
+
+def _workflow_resume_summary(
+    *,
+    state: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    resume = dict(state.get("resume") or {})
+    event_resumes = [dict(event.get("resume") or {}) for event in events if event.get("resume")]
+    latest_resume = event_resumes[-1] if event_resumes else resume
+    return {
+        "can_resume": bool(state.get("can_resume") or state.get("resume_target") or latest_resume),
+        "resume_target": str(state.get("resume_target") or latest_resume.get("resume_target") or ""),
+        "resumed": bool(latest_resume.get("resumed")),
+        "source_stage": str(latest_resume.get("source_stage") or ""),
+        "source_run_id": str(latest_resume.get("source_run_id") or ""),
+        "event_count": len(event_resumes),
+    }
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return round(float(value or 0.0), 3)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _string_list(value: Any) -> list[str]:
