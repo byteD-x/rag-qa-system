@@ -1911,6 +1911,7 @@ make smoke-eval
 | `make build` | 构建 Docker 镜像 |
 | `make encoding` | 检查文本编码 |
 | `make smoke-eval` | 跑本地 smoke 评测 |
+| `make demo-offline` | 无 Docker 生成岗位演示证据链 |
 | `make job-readiness` | 聚合岗位证据和评测报告 |
 | `make job-evidence` | 离线生成岗位证据并聚合就绪度 |
 
