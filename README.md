@@ -40,13 +40,15 @@
 
 ## 最快验证路径
 
-如果你只想先确认项目是否“真能用”，先跑这一条：
+| 路径 | 依赖 | 命令 | 产物 |
+|---|---|---|---|
+| 离线证据链 | 无需 Docker / 模型 | `make job-evidence` | 岗位证据包、检索消融、就绪度汇总 |
+| 启动前检查 | 需要本机 Python / Node / compose 配置 | `make preflight` | 编码、构建、编译与配置检查 |
+| 完整本地闭环 | 需要 Docker 和完整本地栈 | `make init` / `make up` / `make smoke-eval` | 可运行服务、smoke 评测和回归门禁 |
 
-```powershell
-make job-evidence
-```
+如果你只想先确认项目是否“真能用”，先跑 `make job-evidence`。
 
-如果你想看完整本地闭环，再跑这一条：
+如果你想看完整本地闭环，再跑：
 
 ```powershell
 make preflight
