@@ -2,10 +2,11 @@ POWERSHELL ?= powershell
 PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
 PREFLIGHT_ARGS ?=
 
-.PHONY: help preflight init up down logs logs-follow export-logs ci test build encoding smoke-eval job-readiness job-evidence
+.PHONY: help doctor preflight init up down logs logs-follow export-logs ci test build encoding smoke-eval job-readiness job-evidence
 
 help:
 	@echo Available targets:
+	@echo   make doctor       - 诊断本机依赖、配置文件和常用端口
 	@echo   make preflight    - 运行启动前的基线检查
 	@echo   make init         - 初始化数据库、对象存储和 Qdrant
 	@echo   make up           - 启动本地完整项目
@@ -20,6 +21,9 @@ help:
 	@echo   make smoke-eval   - 运行本地 smoke 上传和 agent 评测
 	@echo   make job-readiness - 聚合岗位证据和评测报告
 	@echo   make job-evidence  - 离线生成岗位证据并聚合就绪度
+
+doctor:
+	python scripts/quality/doctor.py
 
 preflight:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/preflight.ps1 $(PREFLIGHT_ARGS)

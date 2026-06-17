@@ -42,11 +42,12 @@
 
 | 路径 | 依赖 | 命令 | 产物 |
 |---|---|---|---|
+| 环境诊断 | 无需启动服务 | `make doctor` | 本机命令、配置文件和端口状态 |
 | 离线证据链 | 无需 Docker / 模型 | `make job-evidence` | 岗位证据包、检索消融、就绪度汇总 |
 | 启动前检查 | 需要本机 Python / Node / compose 配置 | `make preflight` | 编码、构建、编译与配置检查 |
 | 完整本地闭环 | 需要 Docker 和完整本地栈 | `make init` / `make up` / `make smoke-eval` | 可运行服务、smoke 评测和回归门禁 |
 
-如果你只想先确认项目是否“真能用”，先跑 `make job-evidence`。
+如果你只想先确认本机环境是否齐，先跑 `make doctor`；如果你只想先确认项目是否“真能用”，再跑 `make job-evidence`。
 
 如果你想看完整本地闭环，再跑：
 
@@ -1894,6 +1895,7 @@ make smoke-eval
 | 命令 | 用途 |
 | --- | --- |
 | `make preflight` | 启动前基线检查 |
+| `make doctor` | 诊断本机依赖、配置文件和常用端口 |
 | `make init` | 初始化数据库、对象存储和 Qdrant |
 | `make up` | 启动完整项目 |
 | `make down` | 停止本地环境 |
