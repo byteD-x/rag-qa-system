@@ -53,7 +53,7 @@ EVIDENCE_CHECKS = (
     ),
     EvidenceCheck(
         "README.md",
-        ("企业级 AI 问答平台", "RAG", "Agent", "make job-evidence"),
+        ("企业级 AI 问答平台", "RAG", "Agent", "最快验证路径", "make job-evidence"),
     ),
     EvidenceCheck(
         "AI_HIGHLIGHTS.md",
