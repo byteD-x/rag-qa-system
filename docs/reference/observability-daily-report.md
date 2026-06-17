@@ -15,6 +15,7 @@
 | `eval_suite_report.json` | grounded / agent / refusal 在线评测结果 | 否 |
 | `eval_regression_gate.json` | 通用评测回归门禁 | 否 |
 | `agent_smoke_regression_gate.json` | smoke eval 回归门禁 | 否 |
+| `safety_regression_report.json` | prompt safety / badcase 回归结果 | 否 |
 | `multipart_resume_report.json` | 分片上传恢复验证 | 否 |
 | `pytest-groups-summary.json` | pytest 分组执行摘要、并发度、慢组、失败/超时组和日志路径 | 否 |
 
@@ -42,6 +43,7 @@ JSON 输出包含：
 - `metrics.evidence_pack`：smoke eval 证据包版本、case 数和语料数
 - `metrics.eval_suite`：在线评测 job 的 accuracy、correctness、faithfulness、p95 latency
 - `metrics.regression_gate` / `metrics.agent_smoke_regression_gate`：门禁状态与失败原因
+- `metrics.safety_regression`：安全回归总 case、通过数、失败数、动作分布与延迟摘要
 - `metrics.multipart_resume`：分片上传恢复是否通过
 - `metrics.pytest_groups`：pytest 分组状态、完成组数、未执行组数/名称、并发度、失败/超时组数和最慢组日志路径
 
@@ -52,6 +54,7 @@ python scripts/evaluation/benchmark-local-ingest.py --kb-path tests/fixtures/eva
 python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/compare-embedding-providers.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/verify-agent-smoke-evidence.py
+python scripts/evaluation/run-safety-regression.py --password <pwd>
 .venv\Scripts\python.exe scripts/quality/run_pytest_groups.py --timeout-seconds 90 --heartbeat-seconds 10 --summary-output artifacts/reports/pytest-groups-summary.json tests/test_eval_pipeline.py tests/test_observability_report.py
 .venv\Scripts\python.exe scripts/quality/run_pytest_groups.py --timeout-seconds 90 --heartbeat-seconds 10 --max-workers 2 --summary-output artifacts/reports/pytest-groups-summary.json tests/test_eval_pipeline.py tests/test_observability_report.py
 python scripts/observability/rag-daily-report.py --output artifacts/reports/rag_daily_report.md --json-output artifacts/reports/rag_daily_report.json --strict

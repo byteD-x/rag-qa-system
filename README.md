@@ -1816,7 +1816,7 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 
 离线证据包校验见 [`docs/reference/evaluation-evidence-pack.md`](docs/reference/evaluation-evidence-pack.md)，用于在不启动服务的情况下确认 smoke eval baseline、fixture、语料和 dataset version 仍然一致。
 
-可观测日报见 [`docs/reference/observability-daily-report.md`](docs/reference/observability-daily-report.md)，用于把 ingest、retrieval、embedding、evidence pack、eval suite 与 regression gate 报告汇总成 Markdown/JSON。
+可观测日报见 [`docs/reference/observability-daily-report.md`](docs/reference/observability-daily-report.md)，用于把 ingest、retrieval、embedding、evidence pack、eval suite、safety regression 与 regression gate 报告汇总成 Markdown/JSON。
 
 ### smoke-eval 会做什么
 

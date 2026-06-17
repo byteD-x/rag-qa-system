@@ -20,6 +20,7 @@ REPORT_SPECS = {
     "eval_suite": {"file": "eval_suite_report.json", "required": False},
     "regression_gate": {"file": "eval_regression_gate.json", "required": False},
     "agent_smoke_regression_gate": {"file": "agent_smoke_regression_gate.json", "required": False},
+    "safety_regression": {"file": "safety_regression_report.json", "required": False},
     "multipart_resume": {"file": "multipart_resume_report.json", "required": False},
     "pytest_groups": {"file": "pytest-groups-summary.json", "required": False},
 }
@@ -28,7 +29,7 @@ REPORT_SPECS = {
 def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def resolve_reports_dir(value: str | None) -> Path:
@@ -72,6 +73,9 @@ def _status_from_payload(key: str, payload: dict[str, Any]) -> str:
         return "missing"
     if key in {"evidence_pack", "regression_gate", "agent_smoke_regression_gate"}:
         return str(payload.get("status") or "unknown")
+    if key == "safety_regression":
+        summary = dict(payload.get("summary") or {})
+        return "failed" if _int(summary.get("failed_cases")) > 0 else "passed"
     if key == "multipart_resume":
         return "passed" if bool(payload.get("resume_verified")) else "failed"
     if key == "pytest_groups":
@@ -165,6 +169,34 @@ def _summarize_regression_gate(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _summarize_safety_regression(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = dict(payload.get("summary") or {})
+    action_counts: dict[str, int] = {}
+    failed_case_names: list[str] = []
+    for item in list(payload.get("results") or []):
+        safety = dict(item.get("safety") or {})
+        action = str(safety.get("action") or item.get("outcome") or "unknown")
+        action_counts[action] = action_counts.get(action, 0) + 1
+        if not bool(item.get("passed")):
+            failed_case_names.append(str(item.get("name") or "unknown"))
+    return {
+        "status": "failed" if _int(summary.get("failed_cases")) > 0 else "passed",
+        "total_cases": _int(summary.get("total_cases")),
+        "passed_cases": _int(summary.get("passed_cases")),
+        "failed_cases": _int(summary.get("failed_cases")),
+        "outcomes": {
+            "allowed": _int(summary.get("allowed")),
+            "warned": _int(summary.get("warned")),
+            "blocked": _int(summary.get("blocked")),
+            "error": _int(summary.get("error")),
+        },
+        "action_counts": action_counts,
+        "max_latency_ms": round(_float(summary.get("max_latency_ms")), 3),
+        "mean_latency_ms": round(_float(summary.get("mean_latency_ms")), 3),
+        "failed_case_names": failed_case_names[:10],
+    }
+
+
 def _summarize_multipart_resume(payload: dict[str, Any]) -> dict[str, Any]:
     timings = dict(payload.get("timings_seconds") or {})
     return {
@@ -242,6 +274,8 @@ def build_daily_report(reports_dir: Path) -> dict[str, Any]:
         metrics["regression_gate"] = _summarize_regression_gate(reports["regression_gate"])
     if reports["agent_smoke_regression_gate"]:
         metrics["agent_smoke_regression_gate"] = _summarize_regression_gate(reports["agent_smoke_regression_gate"])
+    if reports["safety_regression"]:
+        metrics["safety_regression"] = _summarize_safety_regression(reports["safety_regression"])
     if reports["multipart_resume"]:
         metrics["multipart_resume"] = _summarize_multipart_resume(reports["multipart_resume"])
     if reports["pytest_groups"]:
@@ -367,6 +401,28 @@ def render_markdown_report(report: dict[str, Any]) -> str:
                 "",
             ]
         )
+
+    safety_regression = dict(metrics.get("safety_regression") or {})
+    if safety_regression:
+        outcomes = dict(safety_regression.get("outcomes") or {})
+        action_counts = dict(safety_regression.get("action_counts") or {})
+        action_preview = ", ".join(f"{key}={value}" for key, value in sorted(action_counts.items())) or "none"
+        lines.extend(
+            [
+                "## Safety Regression",
+                "",
+                f"- Status: `{safety_regression.get('status') or 'unknown'}`",
+                f"- Cases: `{_int(safety_regression.get('passed_cases'))}/{_int(safety_regression.get('total_cases'))}` passed",
+                f"- Failed cases: `{_int(safety_regression.get('failed_cases'))}`",
+                f"- Outcomes allowed/warned/blocked/error: `{_int(outcomes.get('allowed'))} / {_int(outcomes.get('warned'))} / {_int(outcomes.get('blocked'))} / {_int(outcomes.get('error'))}`",
+                f"- Actions: `{action_preview}`",
+                f"- Mean / max latency ms: `{_float(safety_regression.get('mean_latency_ms')):.2f} / {_float(safety_regression.get('max_latency_ms')):.2f}`",
+                "",
+            ]
+        )
+        failed_case_names = list(safety_regression.get("failed_case_names") or [])
+        if failed_case_names:
+            lines.extend([f"- Failed case names: {', '.join(f'`{item}`' for item in failed_case_names)}", ""])
 
     multipart_resume = dict(metrics.get("multipart_resume") or {})
     if multipart_resume:

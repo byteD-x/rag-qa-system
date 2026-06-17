@@ -105,6 +105,31 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
         },
     )
     _write_json(
+        reports_dir / "safety_regression_report.json",
+        {
+            "config": {
+                "query_url": "http://localhost:8300/api/v1/kb/query",
+                "fixture": "scripts/evaluation/fixtures/safety_regression_cases.json",
+            },
+            "summary": {
+                "total_cases": 3,
+                "passed_cases": 3,
+                "failed_cases": 0,
+                "allowed": 1,
+                "warned": 0,
+                "blocked": 2,
+                "error": 0,
+                "max_latency_ms": 18.5,
+                "mean_latency_ms": 12.25,
+            },
+            "results": [
+                {"name": "normal_grounded_question", "passed": True, "outcome": "allowed", "safety": {"action": "allow"}},
+                {"name": "user_prompt_injection", "passed": True, "outcome": "blocked", "safety": {"action": "block"}},
+                {"name": "evidence_prompt_injection", "passed": True, "outcome": "blocked", "safety": {"action": "block"}},
+            ],
+        },
+    )
+    _write_json(
         reports_dir / "pytest-groups-summary.json",
         {
             "status": "passed",
@@ -136,6 +161,10 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
     assert report["metrics"]["retrieval"]["best_config"] == "rewrite_plus_fusion"
     assert report["metrics"]["evidence_pack"]["eval_case_count"] == 3
     assert report["metrics"]["eval_suite"]["jobs"][0]["p95_latency_ms"] == 42.0
+    assert report["metrics"]["safety_regression"]["status"] == "passed"
+    assert report["metrics"]["safety_regression"]["passed_cases"] == 3
+    assert report["metrics"]["safety_regression"]["action_counts"]["allow"] == 1
+    assert report["metrics"]["safety_regression"]["action_counts"]["block"] == 2
     assert report["metrics"]["pytest_groups"]["status"] == "passed"
     assert report["metrics"]["pytest_groups"]["completed_groups"] == 2
     assert report["metrics"]["pytest_groups"]["skipped_groups"] == 0
@@ -143,6 +172,7 @@ def test_rag_daily_report_builds_status_and_metrics(tmp_path: Path) -> None:
     assert "# RAG Daily Report" in markdown
     assert "## Report Inventory" in markdown
     assert "## Evidence Pack" in markdown
+    assert "## Safety Regression" in markdown
     assert "## Pytest Groups" in markdown
     assert "Max workers: `2`" in markdown
 
@@ -222,6 +252,71 @@ def test_rag_daily_report_marks_incomplete_pytest_groups_as_failed(tmp_path: Pat
     assert "Skipped groups: `1`" in markdown
     assert "`tests/test_missing.py`" in markdown
     assert "pytest-groups-summary.json: status incomplete" in markdown
+
+
+def test_rag_daily_report_marks_safety_regression_failures_as_failed(tmp_path: Path) -> None:
+    report_module = _load_report_module()
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+
+    _write_json(
+        reports_dir / "local_ingest_benchmark.json",
+        {"kb": {"file_count": 1, "throughput_mib_per_s": 0.5, "chunks": 1, "sections": 1}},
+    )
+    _write_json(
+        reports_dir / "retrieval_ablation_report.json",
+        {"summary": {"baseline": {"recall_at_1": 1.0, "recall_at_3": 1.0, "mrr": 1.0}}},
+    )
+    _write_json(
+        reports_dir / "embedding_retrieval_benchmark.json",
+        {"backends": [{"label": "local-projection", "summary": {"recall_at_1": 1.0, "mrr": 1.0}}]},
+    )
+    _write_json(
+        reports_dir / "agent_smoke_evidence_pack.json",
+        {
+            "suite_name": "agent_smoke",
+            "suite_version": "smoke-eval-2026-03-10",
+            "status": "passed",
+            "failures": [],
+            "eval_fixtures": [{"case_count": 1}],
+            "corpus_fixtures": [{}],
+        },
+    )
+    _write_json(
+        reports_dir / "safety_regression_report.json",
+        {
+            "config": {
+                "query_url": "http://localhost:8300/api/v1/kb/query",
+                "fixture": "scripts/evaluation/fixtures/safety_regression_cases.json",
+            },
+            "summary": {
+                "total_cases": 3,
+                "passed_cases": 2,
+                "failed_cases": 1,
+                "allowed": 1,
+                "warned": 0,
+                "blocked": 1,
+                "error": 1,
+                "max_latency_ms": 21.0,
+                "mean_latency_ms": 14.0,
+            },
+            "results": [
+                {"name": "normal_grounded_question", "passed": True, "outcome": "allowed", "safety": {"action": "allow"}},
+                {"name": "user_prompt_injection", "passed": False, "outcome": "error", "safety": {"action": "block"}},
+                {"name": "evidence_prompt_injection", "passed": True, "outcome": "blocked", "safety": {"action": "block"}},
+            ],
+        },
+    )
+
+    report = report_module.build_daily_report(reports_dir)
+    markdown = report_module.render_markdown_report(report)
+
+    assert report["status"] == "failed"
+    assert "safety_regression_report.json: status failed" in report["failures"]
+    assert report["metrics"]["safety_regression"]["status"] == "failed"
+    assert report["metrics"]["safety_regression"]["failed_cases"] == 1
+    assert "## Safety Regression" in markdown
+    assert "Failed case names: `user_prompt_injection`" in markdown
 
 
 def test_rag_daily_report_cli_writes_markdown_and_json(monkeypatch, tmp_path: Path) -> None:
