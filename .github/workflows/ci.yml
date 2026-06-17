@@ -33,6 +33,9 @@ jobs:
       - name: Python compile
         run: python -m compileall packages/python apps/services/api-gateway apps/services/knowledge-base
 
+      - name: Job readiness evidence
+        run: python scripts/quality/generate-job-readiness-evidence.py
+
       - name: Pytest
         run: python scripts/quality/run_pytest_groups.py --timeout-seconds 900 --heartbeat-seconds 30 --summary-output artifacts/reports/ci_pytest_groups_summary.json tests
 

@@ -113,7 +113,7 @@ EVIDENCE_CHECKS = (
     ),
     EvidenceCheck(
         ".github/workflows/ci.yml",
-        ("Retrieval ablation smoke", "Embedding benchmark smoke", "Docker compose config"),
+        ("Job readiness evidence", "generate-job-readiness-evidence.py", "Docker compose config"),
     ),
     EvidenceCheck(
         "docker-compose.yml",

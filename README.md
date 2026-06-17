@@ -2132,6 +2132,7 @@ make job-evidence
 ```
 
 它会离线生成 smoke 证据包、检索消融和就绪度汇总；如果已经有报告，也可以只跑 `make job-readiness` 聚合现有结果。缺少必需报告时会给出 `partial`，出现坏 JSON 或失败状态时会直接返回 `failed`。
+GitHub Actions 的 `Job readiness evidence` 步骤会运行同一条离线证据链；在线服务级 smoke 仍由 `backend-smoke` job 负责。
 
 `run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，结束时会在控制台列出已计划/已完成/未执行分组数、未执行组名和最慢 3 个分组，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
 默认串行执行以保持稳定的 fail-fast 语义；本地需要缩短整套回归时间时，可显式加 `--max-workers 2` 或更高并发度，让多个测试文件分批并行执行。如果怀疑测试进程卡住但没有产生日志，可加 `--idle-timeout-seconds 180 --tail-lines-on-failure 40` 快速失败并打印最近日志。`scripts/quality/ci-check.ps1` 同步支持 `-PytestHeartbeatSeconds`、`-PytestMaxWorkers`、`-PytestIdleTimeoutSeconds`、`-PytestTailLinesOnFailure`、`-PytestArg`、`-PytestSummaryOutput` 和 `-PytestTargets` 透传到该执行器。

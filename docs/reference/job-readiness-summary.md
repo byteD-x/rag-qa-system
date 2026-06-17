@@ -18,6 +18,7 @@ python scripts/quality/check-job-readiness.py
 
 `make job-evidence` 内部会顺序执行 smoke 证据生成、检索消融和就绪度聚合；`make job-readiness` 只负责检查现有报告。
 在线 smoke 回归门禁仍需要本地 Docker 栈和服务就绪，不属于这个离线命令的默认范围。
+GitHub Actions 中的 `Job readiness evidence` 步骤会运行同一条离线证据链，用来防止岗位材料和可复现报告脱节。
 
 默认输出：
 
