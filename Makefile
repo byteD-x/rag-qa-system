@@ -2,7 +2,7 @@ POWERSHELL ?= powershell
 PS_FLAGS ?= -NoProfile -ExecutionPolicy Bypass
 PREFLIGHT_ARGS ?=
 
-.PHONY: help preflight init up down logs logs-follow export-logs ci test build encoding smoke-eval job-readiness
+.PHONY: help preflight init up down logs logs-follow export-logs ci test build encoding smoke-eval job-readiness job-evidence
 
 help:
 	@echo Available targets:
@@ -19,6 +19,7 @@ help:
 	@echo   make encoding     - 检查文本文件编码
 	@echo   make smoke-eval   - 运行本地 smoke 上传和 agent 评测
 	@echo   make job-readiness - 聚合岗位证据和评测报告
+	@echo   make job-evidence  - 离线生成岗位证据并聚合就绪度
 
 preflight:
 	$(POWERSHELL) $(PS_FLAGS) -File scripts/dev/preflight.ps1 $(PREFLIGHT_ARGS)
@@ -60,3 +61,6 @@ smoke-eval:
 
 job-readiness:
 	python scripts/quality/check-job-readiness.py
+
+job-evidence:
+	python scripts/quality/generate-job-readiness-evidence.py

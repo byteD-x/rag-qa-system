@@ -1773,6 +1773,7 @@ python scripts/evaluation/eval-long-rag.py --password <pwd> --eval-file <eval.js
 python scripts/evaluation/run-eval-suite.py --password <pwd> --config <suite.json>
 python scripts/evaluation/check-eval-regression.py --report <suite-report.json>
 python scripts/evaluation/verify-agent-smoke-evidence.py
+python scripts/quality/generate-job-readiness-evidence.py
 python scripts/quality/check-job-readiness.py
 python scripts/observability/rag-daily-report.py --output artifacts/reports/rag_daily_report.md --json-output artifacts/reports/rag_daily_report.json
 python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
@@ -1787,6 +1788,7 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 - `run-retrieval-ablation.py`：产出 `recall@1`、`recall@3`、`MRR`、`NDCG@3`
 - `compare-embedding-providers.py`：对比本地 embedding backend 的检索排序效果
 - `benchmark-local-ingest.py`：产出本地解析 sections、chunks、parse ms 和 throughput
+- `generate-job-readiness-evidence.py`：离线生成 smoke 证据包、检索消融和就绪度汇总
 - `check-job-readiness.py`：聚合岗位证据包、检索消融和回归摘要，生成投递前就绪度报告
 
 没有真实业务压测报告前，不建议把“延迟降低多少”“吞吐提升几倍”写成确定指标；面试中可以说“已有脚本和 fixture 能复现评测闭环，业务数据指标待补充”。
@@ -1884,6 +1886,7 @@ make smoke-eval
 | `make encoding` | 检查文本编码 |
 | `make smoke-eval` | 跑本地 smoke 评测 |
 | `make job-readiness` | 聚合岗位证据和评测报告 |
+| `make job-evidence` | 离线生成岗位证据并聚合就绪度 |
 
 ### 常见排障思路
 
@@ -2125,10 +2128,10 @@ docker compose config --quiet
 如果要做投递前的快速自检，可以额外跑：
 
 ```powershell
-make job-readiness
+make job-evidence
 ```
 
-它会聚合本地的岗位证据包、检索消融和回归摘要；缺少必需报告时会给出 `partial`，出现坏 JSON 或失败状态时会直接返回 `failed`。
+它会离线生成 smoke 证据包、检索消融和就绪度汇总；如果已经有报告，也可以只跑 `make job-readiness` 聚合现有结果。缺少必需报告时会给出 `partial`，出现坏 JSON 或失败状态时会直接返回 `failed`。
 
 `run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，结束时会在控制台列出已计划/已完成/未执行分组数、未执行组名和最慢 3 个分组，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
 默认串行执行以保持稳定的 fail-fast 语义；本地需要缩短整套回归时间时，可显式加 `--max-workers 2` 或更高并发度，让多个测试文件分批并行执行。如果怀疑测试进程卡住但没有产生日志，可加 `--idle-timeout-seconds 180 --tail-lines-on-failure 40` 快速失败并打印最近日志。`scripts/quality/ci-check.ps1` 同步支持 `-PytestHeartbeatSeconds`、`-PytestMaxWorkers`、`-PytestIdleTimeoutSeconds`、`-PytestTailLinesOnFailure`、`-PytestArg`、`-PytestSummaryOutput` 和 `-PytestTargets` 透传到该执行器。

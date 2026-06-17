@@ -4,19 +4,20 @@
 
 ## 1. 使用方式
 
-先生成或准备相关报告：
+如果你想一次性离线生成必需报告，先跑：
 
 ```powershell
-python scripts/evaluation/verify-agent-smoke-evidence.py
-python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/job_retrieval_ablation.json --summary-output artifacts/reports/job_retrieval_ablation.md
-.venv\Scripts\python.exe -m pytest -q tests/test_eval_pipeline.py
+make job-evidence
 ```
 
-再运行聚合检查：
+如果已经有这些报告，也可以只聚合：
 
 ```powershell
 python scripts/quality/check-job-readiness.py
 ```
+
+`make job-evidence` 内部会顺序执行 smoke 证据生成、检索消融和就绪度聚合；`make job-readiness` 只负责检查现有报告。
+在线 smoke 回归门禁仍需要本地 Docker 栈和服务就绪，不属于这个离线命令的默认范围。
 
 默认输出：
 
@@ -52,4 +53,3 @@ python scripts/quality/check-job-readiness.py --no-write
 - `partial` 不是通过，只表示还缺证据。
 - 检索指标来自内置 fixture，不代表真实线上准确率。
 - 在线 smoke eval 仍需要本地 Docker 栈和服务就绪。
-

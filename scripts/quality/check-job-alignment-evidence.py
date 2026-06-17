@@ -48,8 +48,12 @@ EVIDENCE_CHECKS = (
         ("build_job_readiness_report", "job_retrieval_ablation.json", "agent_smoke_evidence_pack.json"),
     ),
     EvidenceCheck(
+        "scripts/quality/generate-job-readiness-evidence.py",
+        ("build_steps", "verify-agent-smoke-evidence.py", "check-job-readiness.py"),
+    ),
+    EvidenceCheck(
         "README.md",
-        ("企业级 AI 问答平台", "RAG", "Agent", "评测"),
+        ("企业级 AI 问答平台", "RAG", "Agent", "make job-evidence"),
     ),
     EvidenceCheck(
         "AI_HIGHLIGHTS.md",
