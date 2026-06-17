@@ -22,6 +22,7 @@
 python scripts/evaluation/verify-agent-smoke-evidence.py
 python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json
 python scripts/evaluation/check-eval-regression.py --help
+make demo-offline
 ```
 
 预期结果：
@@ -29,6 +30,7 @@ python scripts/evaluation/check-eval-regression.py --help
 - `verify-agent-smoke-evidence.py` 生成 `artifacts/reports/agent_smoke_evidence_pack.json` 与 `.md`。
 - `run-retrieval-ablation.py` 输出 `recall@1`、`recall@3`、`MRR`、`NDCG@3` 等检索指标。
 - `check-eval-regression.py --help` 能展示回归门禁参数。
+- `make demo-offline` 会串起离线证据包、检索消融和就绪度聚合；`make job-evidence` 保留为兼容入口。
 
 这组命令证明的是：仓库内置评测资产完整、检索消融脚本可运行、回归门禁入口存在。它不等同于在线服务已经启动。
 
@@ -92,8 +94,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/smoke-eval.ps1
 
 | 现象 | 处理方式 |
 |---|---|
-| `docker` 命令不存在 | 先只跑轻量离线验证，并说明当前机器未安装或未暴露 Docker CLI |
+| `docker` 命令不存在 | 先跑 `make demo-offline` 做轻量离线验证，并说明当前机器未安装或未暴露 Docker CLI |
 | smoke eval 等待服务超时 | 查看 `docker compose ps` 和 `docker compose logs --no-color gateway kb-service kb-worker` |
 | 回归门禁失败 | 打开 `agent_smoke_regression_gate.md`，确认是 correctness、faithfulness、citation alignment 还是 refusal 指标失败 |
 | 检索指标下降 | 先跑 `run-retrieval-ablation.py`，再用 `/api/v1/kb/retrieve/debug` 检查候选和 rerank |
-
