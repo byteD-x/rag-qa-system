@@ -19,6 +19,10 @@
 | 准备项目展示 | [../AI_HIGHLIGHTS.md](../AI_HIGHLIGHTS.md) | AI 能力亮点、工程边界与作品集表达 |
 | 快速校准面试口径 | [interview-playbook.md](interview-playbook.md) | 最新 Tool Calling、MCP、缓存、Docker 与 trace 边界 |
 | 查看一页式亮点 | [PROJECT_HIGHLIGHTS_SUMMARY.md](PROJECT_HIGHLIGHTS_SUMMARY.md) | 简历可写能力、证据路径和边界说明 |
+| 基于岗位画像优化项目 | [job-driven-project-enhancement.md](job-driven-project-enhancement.md) | 岗位数据画像、项目差距、增强路线、简历与面试包装 |
+| 面试演示手册 | [reference/job-interview-demo-runbook.md](reference/job-interview-demo-runbook.md) | 10 分钟演示闭环、离线/在线验证、岗位讲法 |
+| 生产边界说明 | [reference/job-production-boundary.md](reference/job-production-boundary.md) | 已有能力、可演示边界、生产仍需补强 |
+| 检索消融报告 | [reference/job-retrieval-ablation-report.md](reference/job-retrieval-ablation-report.md) | 岗位包装可复现的 Recall@K、MRR、NDCG 证据 |
 | 查看仓库盘点 | [STAR_REPO_INVENTORY.md](STAR_REPO_INVENTORY.md) | tracked source、入口点、文档和质量门禁 |
 | 查看 STAR 主材料 | [STAR_REPO_STAR.md](STAR_REPO_STAR.md) | 当前仓库 STAR 条目、Action/Result 与证据 |
 | 准备 STAR 面试 | [reference/RAG_STAR_TECHNICAL_CHALLENGES.md](reference/RAG_STAR_TECHNICAL_CHALLENGES.md) | 技术难点、解决方案、证据路径、验证命令 |
