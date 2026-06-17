@@ -49,7 +49,7 @@ EVIDENCE_CHECKS = (
     ),
     EvidenceCheck(
         "scripts/quality/generate-job-readiness-evidence.py",
-        ("build_steps", "verify-agent-smoke-evidence.py", "check-job-readiness.py"),
+        ("build_steps", "build_completion_summary", "verify-agent-smoke-evidence.py", "check-job-readiness.py"),
     ),
     EvidenceCheck(
         "scripts/quality/ci-check.ps1",

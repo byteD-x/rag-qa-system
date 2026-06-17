@@ -2153,7 +2153,7 @@ docker compose config --quiet
 make job-evidence
 ```
 
-它会离线生成 smoke 证据包、检索消融和就绪度汇总；如果已经有报告，也可以只跑 `make job-readiness` 聚合现有结果。缺少必需报告时会给出 `partial`，出现坏 JSON 或失败状态时会直接返回 `failed`。
+它会离线生成 smoke 证据包、检索消融和就绪度汇总，并在结束时打印 `agent_smoke_evidence_pack.md`、`job_retrieval_ablation.md`、`job_readiness_summary.md` 三个关键报告路径；如果已经有报告，也可以只跑 `make job-readiness` 聚合现有结果。缺少必需报告时会给出 `partial`，出现坏 JSON 或失败状态时会直接返回 `failed`。
 GitHub Actions 的 `Job readiness evidence` 步骤会运行同一条离线证据链；在线服务级 smoke 仍由 `backend-smoke` job 负责。
 
 `run_pytest_groups.py` 会按测试文件分组执行 pytest，默认禁用第三方插件自动加载，并把每组 stdout/stderr 与 `logs/quality/pytest-groups-summary.json` 摘要落盘；heartbeat 会显示 stdout/stderr 字节数和 idle 秒数，结束时会在控制台列出已计划/已完成/未执行分组数、未执行组名和最慢 3 个分组，失败或超时时会输出有限日志尾部，便于定位慢组、失败组和日志路径。
