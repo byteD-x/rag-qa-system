@@ -99,6 +99,10 @@ def build_completion_summary(reports_dir: Path) -> list[str]:
             f"  - {_display_path(reports_dir / 'agent_smoke_evidence_pack.md')}",
             f"  - {_display_path(reports_dir / 'job_retrieval_ablation.md')}",
             f"  - {_display_path(summary_path)}",
+            "[job-evidence] interview next steps:",
+            f"  - {_display_path(REPO_ROOT / 'docs/reference/job-interview-demo-runbook.md')}",
+            f"  - {_display_path(REPO_ROOT / 'docs/reference/job-production-boundary.md')}",
+            f"  - {_display_path(REPO_ROOT / 'README.md')}#最快验证路径",
         ]
     )
     return lines

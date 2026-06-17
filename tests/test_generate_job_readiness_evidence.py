@@ -51,6 +51,10 @@ def test_build_completion_summary_reports_key_artifacts(tmp_path: Path) -> None:
     assert any("readiness status: passed" in line for line in lines)
     assert any("job_readiness_summary.md" in line for line in lines)
     assert any("agent_smoke_evidence_pack.md" in line for line in lines)
+    assert any("interview next steps" in line for line in lines)
+    assert any("job-interview-demo-runbook.md" in line for line in lines)
+    assert any("job-production-boundary.md" in line for line in lines)
+    assert any("README.md#最快验证路径" in line for line in lines)
 
 
 def test_run_steps_stops_on_first_failure(monkeypatch) -> None:
