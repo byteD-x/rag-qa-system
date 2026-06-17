@@ -181,6 +181,42 @@ def run_regression_gate(report_path: Path, *, timeout_seconds: int = DEFAULT_SUB
     return output_path, summary_path
 
 
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def build_completion_summary(report_path: Path, gate_path: Path) -> list[str]:
+    lines = ["[smoke-eval] completed online smoke evaluation"]
+    if gate_path.exists():
+        try:
+            payload = json.loads(gate_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            lines.append(f"[smoke-eval] regression gate unreadable: {_display_path(gate_path)} ({exc.msg})")
+        else:
+            lines.append(f"[smoke-eval] regression status: {payload.get('status') or 'unknown'}")
+            lines.append(f"[smoke-eval] failures: {len(list(payload.get('failures') or []))}")
+            metrics = dict(payload.get("overall_metrics") or {})
+            if metrics:
+                metrics_text = ", ".join(f"{key}={float(value):.4f}" for key, value in sorted(metrics.items()))
+                lines.append(f"[smoke-eval] overall metrics: {metrics_text}")
+    else:
+        lines.append(f"[smoke-eval] regression gate missing: {_display_path(gate_path)}")
+
+    lines.extend(
+        [
+            "[smoke-eval] key reports:",
+            f"  - {_display_path(report_path)}",
+            f"  - {_display_path(REPORT_DIR / 'agent_smoke_report.md')}",
+            f"  - {_display_path(gate_path)}",
+            f"  - {_display_path(REPORT_DIR / 'agent_smoke_regression_gate.md')}",
+        ]
+    )
+    return lines
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run smoke upload + agent evaluation against the local project.")
     parser.add_argument("--base-url", default="http://localhost:8080/api/v1")
@@ -260,7 +296,9 @@ def main() -> int:
         runtime_suite_path,
         timeout_seconds=args.subprocess_timeout_seconds,
     )
-    run_regression_gate(report_path, timeout_seconds=args.subprocess_timeout_seconds)
+    gate_path, _gate_summary_path = run_regression_gate(report_path, timeout_seconds=args.subprocess_timeout_seconds)
+    for line in build_completion_summary(report_path, gate_path):
+        print(line, flush=True)
     return 0
 
 

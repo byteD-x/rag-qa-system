@@ -1833,6 +1833,8 @@ python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 
 ### 输出产物
 
+命令完成后会在控制台打印 regression 状态、关键指标和以下报告路径，便于快速打开结果：
+
 - `artifacts/reports/agent_smoke_report.json`
 - `artifacts/reports/agent_smoke_report.md`
 - `artifacts/reports/agent_smoke_regression_gate.json`

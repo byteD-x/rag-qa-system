@@ -376,6 +376,31 @@ def test_smoke_eval_runs_regression_gate_with_repo_baseline(monkeypatch, tmp_pat
     ]
 
 
+def test_smoke_eval_completion_summary_reports_key_artifacts(tmp_path: Path) -> None:
+    smoke_eval = _load_script_module("smoke_eval_completion_summary_test", "scripts/dev/smoke_eval.py")
+    smoke_eval.REPORT_DIR = tmp_path
+    gate_path = tmp_path / "agent_smoke_regression_gate.json"
+    gate_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "failures": [],
+                "overall_metrics": {"correctness": 0.9123, "faithfulness": 0.8432},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    lines = smoke_eval.build_completion_summary(tmp_path / "agent_smoke_report.json", gate_path)
+
+    assert lines[0] == "[smoke-eval] completed online smoke evaluation"
+    assert any("regression status: passed" in line for line in lines)
+    assert any("overall metrics: correctness=0.9123" in line for line in lines)
+    assert any("agent_smoke_report.json" in line for line in lines)
+    assert any("agent_smoke_regression_gate.md" in line for line in lines)
+
+
 def _write_smoke_evidence_pack(fixture_dir: Path, *, include_agent_fixture: bool = True) -> Path:
     fixture_dir.mkdir(parents=True, exist_ok=True)
     baseline = {
