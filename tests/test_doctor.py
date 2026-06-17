@@ -45,7 +45,8 @@ def test_doctor_report_passes_with_warnings(monkeypatch) -> None:
 
     assert report["status"] == "passed_with_warnings"
     assert report["errors"] == []
-    assert any(item["name"] == "command:docker" for item in report["warnings"])
+    docker_warning = next(item for item in report["warnings"] if item["name"] == "command:docker")
+    assert "make demo-offline" in docker_warning["detail"]
     json.dumps(report, ensure_ascii=False)
 
 
@@ -72,8 +73,20 @@ def test_doctor_strict_returns_nonzero_for_warnings(monkeypatch, capsys) -> None
             "repo_root": str(REPO_ROOT),
             "status": "passed_with_warnings",
             "errors": [],
-            "warnings": [{"name": "command:docker", "status": "warn", "detail": "not found"}],
-            "checks": [{"name": "command:docker", "status": "warn", "detail": "not found"}],
+            "warnings": [
+                {
+                    "name": "command:docker",
+                    "status": "warn",
+                    "detail": "not found; run `make demo-offline` for offline evidence before full Docker stack checks",
+                }
+            ],
+            "checks": [
+                {
+                    "name": "command:docker",
+                    "status": "warn",
+                    "detail": "not found; run `make demo-offline` for offline evidence before full Docker stack checks",
+                }
+            ],
         },
     )
 

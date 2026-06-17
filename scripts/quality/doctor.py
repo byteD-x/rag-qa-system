@@ -32,6 +32,12 @@ def _status_for_command(name: str, required: bool = True) -> CheckResult:
     if shutil.which(name):
         return CheckResult(name=f"command:{name}", status="ok", detail="available")
     level = "error" if required else "warn"
+    if name == "docker" and not required:
+        return CheckResult(
+            name=f"command:{name}",
+            status=level,
+            detail="not found; run `make demo-offline` for offline evidence before full Docker stack checks",
+        )
     return CheckResult(name=f"command:{name}", status=level, detail="not found")
 
 
