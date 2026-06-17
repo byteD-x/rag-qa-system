@@ -52,6 +52,10 @@ EVIDENCE_CHECKS = (
         ("build_steps", "verify-agent-smoke-evidence.py", "check-job-readiness.py"),
     ),
     EvidenceCheck(
+        "scripts/quality/ci-check.ps1",
+        ("Environment Doctor", "scripts/quality/doctor.py", "SkipDoctor"),
+    ),
+    EvidenceCheck(
         "README.md",
         ("企业级 AI 问答平台", "RAG", "Agent", "最快验证路径", "环境诊断", "离线证据链", "完整本地闭环", "make doctor", "make job-evidence"),
     ),

@@ -974,9 +974,12 @@ def test_fast_test_selector_routes_quality_powershell_script_to_eval_pipeline() 
 def test_quality_ci_check_streams_and_forwards_pytest_runner_options() -> None:
     script = (REPO_ROOT / "scripts/quality/ci-check.ps1").read_text(encoding="utf-8")
 
+    assert "[switch]$SkipDoctor" in script
     assert "[int]$PytestHeartbeatSeconds = 30" in script
     assert "[string[]]$PytestArg = @()" in script
     assert '[string]$PytestSummaryOutput = ""' in script
+    assert 'Invoke-Check "Environment Doctor"' in script
+    assert '"scripts/quality/doctor.py"' in script
     assert "Start-Process" in script
     assert "$process.Handle" in script
     assert "Write-NewLogContent" in script

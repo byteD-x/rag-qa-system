@@ -1,6 +1,7 @@
 #!/usr/bin/env pwsh
 [CmdletBinding()]
 param(
+    [switch]$SkipDoctor,
     [switch]$SkipEncodingCheck,
     [switch]$SkipBackendCompile,
     [switch]$SkipFrontendUnitTests,
@@ -188,6 +189,13 @@ function Convert-ToProcessArgumentLine {
         }
     }
     return ($quoted -join " ")
+}
+
+if (-not $SkipDoctor) {
+    Invoke-Check "Environment Doctor" {
+        $args = @($python.BaseArguments) + @("scripts/quality/doctor.py")
+        Invoke-RepoTool -Command $python.Command -Arguments $args
+    }
 }
 
 if (-not $SkipEncodingCheck) {
