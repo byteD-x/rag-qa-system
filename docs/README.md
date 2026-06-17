@@ -23,6 +23,7 @@
 | 面试演示手册 | [reference/job-interview-demo-runbook.md](reference/job-interview-demo-runbook.md) | 10 分钟演示闭环、离线/在线验证、岗位讲法 |
 | 生产边界说明 | [reference/job-production-boundary.md](reference/job-production-boundary.md) | 已有能力、可演示边界、生产仍需补强 |
 | 检索消融报告 | [reference/job-retrieval-ablation-report.md](reference/job-retrieval-ablation-report.md) | 岗位包装可复现的 Recall@K、MRR、NDCG 证据 |
+| 岗位就绪度聚合 | [reference/job-readiness-summary.md](reference/job-readiness-summary.md) | 一键聚合证据门禁、评测资产和回归摘要 |
 | 查看仓库盘点 | [STAR_REPO_INVENTORY.md](STAR_REPO_INVENTORY.md) | tracked source、入口点、文档和质量门禁 |
 | 查看 STAR 主材料 | [STAR_REPO_STAR.md](STAR_REPO_STAR.md) | 当前仓库 STAR 条目、Action/Result 与证据 |
 | 准备 STAR 面试 | [reference/RAG_STAR_TECHNICAL_CHALLENGES.md](reference/RAG_STAR_TECHNICAL_CHALLENGES.md) | 技术难点、解决方案、证据路径、验证命令 |

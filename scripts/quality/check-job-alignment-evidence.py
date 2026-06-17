@@ -40,6 +40,14 @@ EVIDENCE_CHECKS = (
         ("recall@1", "recall@3", "mrr", "ndcg@3"),
     ),
     EvidenceCheck(
+        "docs/reference/job-readiness-summary.md",
+        ("check-job-readiness.py", "passed", "partial", "failed"),
+    ),
+    EvidenceCheck(
+        "scripts/quality/check-job-readiness.py",
+        ("build_job_readiness_report", "job_retrieval_ablation.json", "agent_smoke_evidence_pack.json"),
+    ),
+    EvidenceCheck(
         "README.md",
         ("企业级 AI 问答平台", "RAG", "Agent", "评测"),
     ),
