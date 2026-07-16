@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id UUID PRIMARY KEY,
     user_id TEXT NOT NULL,
