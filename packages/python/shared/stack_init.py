@@ -11,7 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from .qdrant_store import ensure_qdrant_collection
-from .storage import ObjectStorageClient
+from .storage import create_object_storage_client
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -151,7 +151,7 @@ def main() -> int:
     kb_migrations = _apply_migrations(KB_DATABASE_DSN, KB_MIGRATIONS_DIR)
 
     KB_BLOB_ROOT.mkdir(parents=True, exist_ok=True)
-    storage = ObjectStorageClient()
+    storage = create_object_storage_client()
     storage.ensure_bucket()
     vector_store = _wait_for_vector_store()
 

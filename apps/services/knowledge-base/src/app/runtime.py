@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from shared.storage import ObjectStorageClient
+from shared.storage import create_object_storage_client
 
 from .db import KBDatabase
 
@@ -14,7 +14,7 @@ BLOB_ROOT = Path(os.getenv("KB_BLOB_ROOT", "/data/kb")).resolve()
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "database" / "migrations"
 
 db = KBDatabase(POSTGRES_DSN, MIGRATIONS_DIR)
-storage = ObjectStorageClient()
+storage = create_object_storage_client()
 
 
 @dataclass(frozen=True)
