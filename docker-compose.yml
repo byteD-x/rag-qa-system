@@ -83,24 +83,6 @@ services:
       retries: 20
     logging: *default-logging
 
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_KEY:-minioadmin}
-    ports:
-      - "${OBJECT_STORAGE_HOST_PORT:-9000}:9000"
-      - "${OBJECT_STORAGE_CONSOLE_HOST_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    logging: *default-logging
-
   qdrant:
     image: qdrant/qdrant:v1.13.3
     ports:
@@ -118,6 +100,7 @@ services:
     command: ["python", "-m", "shared.stack_init"]
     environment:
       <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
+      OBJECT_STORAGE_PROVIDER: ${OBJECT_STORAGE_PROVIDER:-filesystem}
       GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/gateway_app}
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
       KB_BLOB_ROOT: /data/kb
@@ -125,8 +108,6 @@ services:
       - ./data/kb:/data/kb
     depends_on:
       postgres:
-        condition: service_healthy
-      minio:
         condition: service_healthy
       qdrant:
         condition: service_started
@@ -139,8 +120,10 @@ services:
       dockerfile: apps/services/knowledge-base/Dockerfile
     environment:
       <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
+      OBJECT_STORAGE_PROVIDER: ${OBJECT_STORAGE_PROVIDER:-filesystem}
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
       KB_BLOB_ROOT: /data/kb
+      KB_RUN_WORKER: ${KB_RUN_WORKER:-true}
       KB_CHUNK_MAX_TOKENS: ${KB_CHUNK_MAX_TOKENS:-}
       KB_CHUNK_TOKEN_OVERLAP: ${KB_CHUNK_TOKEN_OVERLAP:-}
     volumes:
@@ -150,33 +133,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
       qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/healthz', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/readyz', timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 20
-    logging: *default-logging
-
-  kb-worker:
-    build:
-      context: .
-      dockerfile: apps/services/knowledge-base/Dockerfile
-    command: ["python", "-m", "app.worker"]
-    environment:
-      <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
-      KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
-      KB_BLOB_ROOT: /data/kb
-      KB_CHUNK_MAX_TOKENS: ${KB_CHUNK_MAX_TOKENS:-}
-      KB_CHUNK_TOKEN_OVERLAP: ${KB_CHUNK_TOKEN_OVERLAP:-}
-    volumes:
-      - ./data/kb:/data/kb
-    depends_on:
-      kb-service:
-        condition: service_healthy
     logging: *default-logging
 
   gateway:
@@ -198,7 +161,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -206,5 +169,4 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
   qdrant_data:
