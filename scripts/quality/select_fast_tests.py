@@ -268,6 +268,24 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "scripts/observability/rag-daily-report.py": [
         "tests/test_observability_report.py",
     ],
+    "scripts/evaluation/run-enterprise-policy-poc.py": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "docs/reference/enterprise-policy-poc.md": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "tests/fixtures/evals/enterprise-policy-poc-corpus.txt": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "tests/fixtures/evals/enterprise-policy-poc-retrieval.json": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "tests/fixtures/evals/enterprise-policy-poc-online.json": [
+        "tests/test_eval_pipeline.py",
+    ],
+    "tests/fixtures/evals/enterprise-policy-poc-badcases.jsonl": [
+        "tests/test_eval_pipeline.py",
+    ],
     "scripts/dev/common.ps1": [
         "tests/test_eval_pipeline.py",
     ],

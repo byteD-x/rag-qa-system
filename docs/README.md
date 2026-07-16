@@ -21,6 +21,7 @@
 | 查看一页式亮点 | [PROJECT_HIGHLIGHTS_SUMMARY.md](PROJECT_HIGHLIGHTS_SUMMARY.md) | 简历可写能力、证据路径和边界说明 |
 | 基于岗位画像优化项目 | [job-driven-project-enhancement.md](job-driven-project-enhancement.md) | 岗位数据画像、项目差距、增强路线、简历与面试包装 |
 | 面试演示手册 | [reference/job-interview-demo-runbook.md](reference/job-interview-demo-runbook.md) | 10 分钟演示闭环、离线/在线验证、岗位讲法 |
+| 企业制度 PoC | [reference/enterprise-policy-poc.md](reference/enterprise-policy-poc.md) | 中文企业制度/流程可信问答样例语料、离线检索消融和在线评测手册 |
 | 生产边界说明 | [reference/job-production-boundary.md](reference/job-production-boundary.md) | 已有能力、可演示边界、生产仍需补强 |
 | 检索消融报告 | [reference/job-retrieval-ablation-report.md](reference/job-retrieval-ablation-report.md) | 岗位包装可复现的 Recall@K、MRR、NDCG 证据 |
 | 岗位就绪度聚合 | [reference/job-readiness-summary.md](reference/job-readiness-summary.md) | 一键聚合证据门禁、评测资产和回归摘要 |

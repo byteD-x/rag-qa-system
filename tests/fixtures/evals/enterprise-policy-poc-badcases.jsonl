@@ -1,0 +1,2 @@
+{"case_id":"example-retrieval-miss","question":"远程办公一个月能申请几天？","expected_behavior":"answer_with_citation","expected_evidence":"HR-001 请假与销假制度 / 远程办公申请 / 每月最多申请四天","actual_answer":"","actual_citations":[],"failure_type":"召回失败","next_action":"补充 query rewrite 同义词：远程办公、居家办公；检查 chunk 是否包含完整段落","status":"todo"}
+{"case_id":"example-refusal-miss","question":"公司股票期权的归属周期是多少？","expected_behavior":"refuse_without_evidence","expected_evidence":"","actual_answer":"","actual_citations":[],"failure_type":"未拒答","next_action":"检查 evidence_status 与 answer_mode，确保无依据问题进入拒答路径","status":"todo"}

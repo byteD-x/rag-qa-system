@@ -1,0 +1,279 @@
+[
+  {
+    "id": "poc-annual-leave-advance-days",
+    "question": "年假要提前几天申请？",
+    "expected_unit_ids": ["unit-hr-annual-leave-advance"],
+    "candidates": [
+      {
+        "unit_id": "unit-hr-annual-leave-advance",
+        "document_title": "HR-001 请假与销假制度",
+        "section_title": "年假申请时限",
+        "chapter_title": "请假管理",
+        "quote": "员工申请年假时，应至少提前三个工作日在考勤系统提交申请。",
+        "raw_text": "员工申请年假时，应至少提前三个工作日在考勤系统提交申请。连续年假超过五个工作日的，还需要直属主管和部门负责人共同审批。",
+        "signal_scores": {
+          "structure": 1.0,
+          "fts": 0.91,
+          "vector": 0.83
+        }
+      },
+      {
+        "unit_id": "unit-hr-sick-leave-proof",
+        "document_title": "HR-001 请假与销假制度",
+        "section_title": "病假材料要求",
+        "chapter_title": "请假管理",
+        "quote": "病假连续两天及以上时，员工应在返岗后三个工作日内补交医院诊断证明或线上问诊记录。",
+        "raw_text": "病假连续两天及以上时，员工应在返岗后三个工作日内补交医院诊断证明或线上问诊记录。无法提供证明的，按事假流程补办。",
+        "signal_scores": {
+          "structure": 0.32,
+          "fts": 0.47,
+          "vector": 0.42
+        }
+      },
+      {
+        "unit_id": "unit-ops-software-renewal",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "软件订阅续费",
+        "chapter_title": "采购管理",
+        "quote": "软件订阅续费应至少提前十五个自然日发起申请。",
+        "raw_text": "软件订阅续费应至少提前十五个自然日发起申请。申请人需要提供当前使用人数、续费周期、预算归属和替代方案评估。",
+        "signal_scores": {
+          "structure": 0.12,
+          "fts": 0.38,
+          "vector": 0.35
+        }
+      }
+    ]
+  },
+  {
+    "id": "poc-expense-approval-threshold",
+    "question": "报销超过三千元需要谁审批？",
+    "expected_unit_ids": ["unit-fin-expense-approval"],
+    "candidates": [
+      {
+        "unit_id": "unit-fin-expense-approval",
+        "document_title": "FIN-001 报销与付款制度",
+        "section_title": "报销审批签字",
+        "chapter_title": "费用报销",
+        "quote": "单笔报销金额超过三千元时，还需要部门负责人追加审批。",
+        "raw_text": "单笔报销金额不超过三千元时，需要直属主管审批和财务复核。单笔报销金额超过三千元时，还需要部门负责人追加审批。",
+        "signal_scores": {
+          "structure": 1.0,
+          "fts": 0.94,
+          "vector": 0.86
+        }
+      },
+      {
+        "unit_id": "unit-fin-entertainment-threshold",
+        "document_title": "FIN-001 报销与付款制度",
+        "section_title": "招待费标准",
+        "chapter_title": "费用报销",
+        "quote": "单次招待费用超过一千元时，需要业务负责人审批；超过五千元时，需要总经理审批。",
+        "raw_text": "客户招待费应在事前完成申请。单次招待费用超过一千元时，需要业务负责人审批；超过五千元时，需要总经理审批。",
+        "signal_scores": {
+          "structure": 0.26,
+          "fts": 0.58,
+          "vector": 0.51
+        }
+      },
+      {
+        "unit_id": "unit-ops-procurement-initiation",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "采购立项",
+        "chapter_title": "采购管理",
+        "quote": "单次采购预算超过一万元时，必须先提交采购立项申请。",
+        "raw_text": "单次采购预算超过一万元时，必须先提交采购立项申请。立项申请应包含采购原因、预算来源、预期交付时间和验收标准。",
+        "signal_scores": {
+          "structure": 0.08,
+          "fts": 0.31,
+          "vector": 0.33
+        }
+      }
+    ]
+  },
+  {
+    "id": "poc-vpn-password-rotation",
+    "question": "VPN 密码多久换一次？",
+    "expected_unit_ids": ["unit-it-vpn-rotation"],
+    "candidates": [
+      {
+        "unit_id": "unit-it-vpn-rotation",
+        "document_title": "IT-001 信息安全与账号制度",
+        "section_title": "VPN 口令轮换",
+        "chapter_title": "账号安全",
+        "quote": "VPN 口令必须每九十天轮换一次，且不得重复最近五次使用过的口令。",
+        "raw_text": "VPN 口令必须每九十天轮换一次，且不得重复最近五次使用过的口令。连续三次输入错误后，账号会被临时锁定三十分钟。",
+        "signal_scores": {
+          "structure": 1.0,
+          "fts": 0.89,
+          "vector": 0.82
+        }
+      },
+      {
+        "unit_id": "unit-it-shared-account",
+        "document_title": "IT-001 信息安全与账号制度",
+        "section_title": "共享账号禁用",
+        "chapter_title": "账号安全",
+        "quote": "禁止多人共用同一个系统账号。",
+        "raw_text": "禁止多人共用同一个系统账号。确需临时协作时，应通过授权委托功能完成，不得直接共享密码或验证码。",
+        "signal_scores": {
+          "structure": 0.35,
+          "fts": 0.42,
+          "vector": 0.47
+        }
+      },
+      {
+        "unit_id": "unit-fin-supplier-payment",
+        "document_title": "FIN-001 报销与付款制度",
+        "section_title": "供应商付款资料",
+        "chapter_title": "付款管理",
+        "quote": "首次向供应商付款前，申请人必须上传合同、验收记录、发票和供应商收款账户确认函。",
+        "raw_text": "首次向供应商付款前，申请人必须上传合同、验收记录、发票和供应商收款账户确认函。缺少任一资料时，财务不得发起付款。",
+        "signal_scores": {
+          "structure": 0.04,
+          "fts": 0.19,
+          "vector": 0.24
+        }
+      }
+    ]
+  },
+  {
+    "id": "poc-device-loss-security-escalation",
+    "question": "设备丢了并且里面有客户资料，要补什么报告？",
+    "expected_unit_ids": ["unit-it-device-loss"],
+    "candidates": [
+      {
+        "unit_id": "unit-it-device-loss",
+        "document_title": "IT-001 信息安全与账号制度",
+        "section_title": "设备丢失上报",
+        "chapter_title": "终端安全",
+        "quote": "设备包含客户资料或源代码时，还必须追加信息安全事件报告。",
+        "raw_text": "员工发现公司设备遗失后，应在二十四小时内向 IT 服务台登记，并同步直属主管。设备包含客户资料或源代码时，还必须追加信息安全事件报告。",
+        "signal_scores": {
+          "structure": 0.98,
+          "fts": 0.87,
+          "vector": 0.84
+        }
+      },
+      {
+        "unit_id": "unit-it-external-storage",
+        "document_title": "IT-001 信息安全与账号制度",
+        "section_title": "外部存储介质",
+        "chapter_title": "数据安全",
+        "quote": "未经审批，不得将客户资料、合同、源代码或财务数据复制到个人 U 盘、移动硬盘或私人网盘。",
+        "raw_text": "未经审批，不得将客户资料、合同、源代码或财务数据复制到个人 U 盘、移动硬盘或私人网盘。",
+        "signal_scores": {
+          "structure": 0.22,
+          "fts": 0.55,
+          "vector": 0.5
+        }
+      },
+      {
+        "unit_id": "unit-ops-asset-acceptance",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "固定资产验收",
+        "chapter_title": "资产管理",
+        "quote": "验收通过后，资产管理员应登记资产编号、使用人、存放地点和保修期限。",
+        "raw_text": "固定资产到货后，申请部门应在三个工作日内完成验收。验收通过后，资产管理员应登记资产编号、使用人、存放地点和保修期限。",
+        "signal_scores": {
+          "structure": 0.1,
+          "fts": 0.28,
+          "vector": 0.31
+        }
+      }
+    ]
+  },
+  {
+    "id": "poc-software-renewal-lead-time",
+    "question": "软件订阅续费要提前多久发起？",
+    "expected_unit_ids": ["unit-ops-software-renewal"],
+    "candidates": [
+      {
+        "unit_id": "unit-ops-software-renewal",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "软件订阅续费",
+        "chapter_title": "采购管理",
+        "quote": "软件订阅续费应至少提前十五个自然日发起申请。",
+        "raw_text": "软件订阅续费应至少提前十五个自然日发起申请。申请人需要提供当前使用人数、续费周期、预算归属和替代方案评估。",
+        "signal_scores": {
+          "structure": 1.0,
+          "fts": 0.9,
+          "vector": 0.83
+        }
+      },
+      {
+        "unit_id": "unit-hr-annual-leave-advance",
+        "document_title": "HR-001 请假与销假制度",
+        "section_title": "年假申请时限",
+        "chapter_title": "请假管理",
+        "quote": "员工申请年假时，应至少提前三个工作日在考勤系统提交申请。",
+        "raw_text": "员工申请年假时，应至少提前三个工作日在考勤系统提交申请。连续年假超过五个工作日的，还需要直属主管和部门负责人共同审批。",
+        "signal_scores": {
+          "structure": 0.13,
+          "fts": 0.41,
+          "vector": 0.38
+        }
+      },
+      {
+        "unit_id": "unit-ops-emergency-procurement",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "紧急采购",
+        "chapter_title": "采购管理",
+        "quote": "紧急采购完成后两个工作日内，申请人必须补齐审批记录和验收材料。",
+        "raw_text": "紧急采购仅适用于生产事故、客户交付阻断或安全事件响应。紧急采购完成后两个工作日内，申请人必须补齐审批记录和验收材料。",
+        "signal_scores": {
+          "structure": 0.21,
+          "fts": 0.39,
+          "vector": 0.37
+        }
+      }
+    ]
+  },
+  {
+    "id": "poc-emergency-procurement-followup",
+    "question": "紧急采购完成后几天内要补齐审批和验收材料？",
+    "expected_unit_ids": ["unit-ops-emergency-procurement"],
+    "candidates": [
+      {
+        "unit_id": "unit-ops-emergency-procurement",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "紧急采购",
+        "chapter_title": "采购管理",
+        "quote": "紧急采购完成后两个工作日内，申请人必须补齐审批记录和验收材料。",
+        "raw_text": "紧急采购仅适用于生产事故、客户交付阻断或安全事件响应。紧急采购完成后两个工作日内，申请人必须补齐审批记录和验收材料。",
+        "signal_scores": {
+          "structure": 0.99,
+          "fts": 0.92,
+          "vector": 0.85
+        }
+      },
+      {
+        "unit_id": "unit-ops-asset-acceptance",
+        "document_title": "OPS-001 采购与资产制度",
+        "section_title": "固定资产验收",
+        "chapter_title": "资产管理",
+        "quote": "固定资产到货后，申请部门应在三个工作日内完成验收。",
+        "raw_text": "固定资产到货后，申请部门应在三个工作日内完成验收。验收通过后，资产管理员应登记资产编号、使用人、存放地点和保修期限。",
+        "signal_scores": {
+          "structure": 0.17,
+          "fts": 0.48,
+          "vector": 0.43
+        }
+      },
+      {
+        "unit_id": "unit-fin-travel-invoice",
+        "document_title": "FIN-001 报销与付款制度",
+        "section_title": "差旅发票提交时限",
+        "chapter_title": "费用报销",
+        "quote": "差旅结束后五个工作日内必须提交发票、行程单和审批单。",
+        "raw_text": "差旅结束后五个工作日内必须提交发票、行程单和审批单。逾期提交时，需要在报销系统中补充书面说明，并由部门负责人确认。",
+        "signal_scores": {
+          "structure": 0.12,
+          "fts": 0.36,
+          "vector": 0.34
+        }
+      }
+    ]
+  }
+]
+

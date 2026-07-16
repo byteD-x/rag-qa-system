@@ -1,0 +1,92 @@
+[
+  {
+    "id": "poc-online-annual-leave-advance-days",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "年假要提前几天申请？",
+    "expected_sections": ["年假申请时限"],
+    "expected_quote_terms": ["提前三个工作日", "考勤系统"],
+    "expected_answer_terms": ["三个工作日", "考勤系统"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-expense-approval-threshold",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "报销超过三千元需要谁审批？",
+    "expected_sections": ["报销审批签字"],
+    "expected_quote_terms": ["超过三千元", "部门负责人"],
+    "expected_answer_terms": ["部门负责人", "追加审批"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-vpn-password-rotation",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "VPN 密码多久换一次？",
+    "expected_sections": ["VPN 口令轮换"],
+    "expected_quote_terms": ["每九十天", "最近五次"],
+    "expected_answer_terms": ["九十天", "最近五次"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-device-loss-security-escalation",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "设备丢了并且里面有客户资料，要补什么报告？",
+    "expected_sections": ["设备丢失上报"],
+    "expected_quote_terms": ["客户资料", "信息安全事件报告"],
+    "expected_answer_terms": ["信息安全事件报告"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-software-renewal-lead-time",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "软件订阅续费要提前多久发起？",
+    "expected_sections": ["软件订阅续费"],
+    "expected_quote_terms": ["提前十五个自然日"],
+    "expected_answer_terms": ["十五个自然日"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-stock-option-refusal",
+    "category": "enterprise_policy_refusal",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "公司股票期权的归属周期是多少？",
+    "expected_sections": [],
+    "expected_quote_terms": [],
+    "expected_answer_terms": [],
+    "forbidden_answer_terms": ["归属周期", "四年", "一年 cliff"],
+    "min_citations": 0,
+    "must_refuse_without_evidence": true
+  },
+  {
+    "id": "poc-online-remote-work-limit",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "远程办公每个月最多能申请几天？",
+    "expected_sections": ["远程办公申请"],
+    "expected_quote_terms": ["每月最多申请四天"],
+    "expected_answer_terms": ["四天"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  },
+  {
+    "id": "poc-online-supplier-payment-materials",
+    "category": "enterprise_policy_poc",
+    "dataset_version": "enterprise-policy-poc-2026-07-08",
+    "question": "首次给供应商付款前要上传哪些资料？",
+    "expected_sections": ["供应商付款资料"],
+    "expected_quote_terms": ["合同", "验收记录", "发票", "收款账户确认函"],
+    "expected_answer_terms": ["合同", "验收记录", "发票", "收款账户确认函"],
+    "min_citations": 1,
+    "must_refuse_without_evidence": false
+  }
+]
+

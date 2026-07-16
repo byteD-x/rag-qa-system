@@ -156,6 +156,102 @@ def test_smoke_eval_runtime_suite_is_versioned(monkeypatch, tmp_path: Path) -> N
     assert payload["jobs"][2]["execution_mode"] == "grounded"
 
 
+def test_enterprise_policy_poc_assets_are_complete() -> None:
+    corpus_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-poc-corpus.txt"
+    retrieval_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-poc-retrieval.json"
+    online_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-poc-online.json"
+
+    corpus = corpus_path.read_text(encoding="utf-8")
+    retrieval_cases = json.loads(retrieval_path.read_text(encoding="utf-8"))
+    online_cases = json.loads(online_path.read_text(encoding="utf-8"))
+
+    for marker in ("HR-001", "FIN-001", "IT-001", "OPS-001"):
+        assert marker in corpus
+
+    assert len(retrieval_cases) >= 6
+    for case in retrieval_cases:
+        assert case["id"].startswith("poc-")
+        assert case["question"].strip()
+        assert case["expected_unit_ids"]
+        assert len(case["candidates"]) >= 3
+        candidate_ids = {candidate["unit_id"] for candidate in case["candidates"]}
+        assert set(case["expected_unit_ids"]).issubset(candidate_ids)
+        for candidate in case["candidates"]:
+            assert candidate["document_title"].strip()
+            assert candidate["section_title"].strip()
+            assert candidate["quote"].strip()
+            assert candidate["raw_text"].strip()
+            assert {"structure", "fts", "vector"}.issubset(candidate["signal_scores"])
+
+    categories = {case["category"] for case in online_cases}
+    assert categories == {"enterprise_policy_poc", "enterprise_policy_refusal"}
+    assert any(case["must_refuse_without_evidence"] for case in online_cases)
+    assert all(case["dataset_version"] == "enterprise-policy-poc-2026-07-08" for case in online_cases)
+
+
+def test_enterprise_policy_poc_retrieval_fixture_runs_ablation() -> None:
+    retrieval_ablation = _load_script_module(
+        "retrieval_ablation_enterprise_policy_poc_test",
+        "scripts/evaluation/run-retrieval-ablation.py",
+    )
+    fixture_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-poc-retrieval.json"
+    cases = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    for case in cases:
+        ranked = retrieval_ablation.rank_case(case, enable_rewrite=True, enable_rerank=True)
+        metrics = retrieval_ablation.score_ranking(case, ranked)
+
+        assert ranked
+        assert metrics["recall_at_3"] == 1.0
+        assert metrics["mrr"] > 0
+
+
+def test_enterprise_policy_poc_runner_writes_offline_reports(tmp_path: Path) -> None:
+    runner = _load_script_module(
+        "enterprise_policy_poc_runner_test",
+        "scripts/evaluation/run-enterprise-policy-poc.py",
+    )
+
+    exit_code = runner.main(["--report-dir", str(tmp_path)])
+
+    summary = (tmp_path / "enterprise_policy_poc_summary.md").read_text(encoding="utf-8")
+    retrieval_report = json.loads((tmp_path / "enterprise_policy_poc_retrieval.json").read_text(encoding="utf-8"))
+
+    assert exit_code == 0
+    assert "Offline Retrieval" in summary
+    assert "Online Grounded Eval" in summary
+    assert "Status: `skipped`" in summary
+    assert retrieval_report["summary"]["rewrite_plus_fusion_plus_rerank"]["recall_at_3"] == 1.0
+
+
+def test_enterprise_policy_poc_runner_requires_online_inputs(tmp_path: Path) -> None:
+    runner = _load_script_module(
+        "enterprise_policy_poc_runner_online_guard_test",
+        "scripts/evaluation/run-enterprise-policy-poc.py",
+    )
+
+    try:
+        runner.main(["--report-dir", str(tmp_path), "--online"])
+    except RuntimeError as exc:
+        assert "--password is required" in str(exc)
+    else:
+        raise AssertionError("expected --online without password to fail")
+
+
+def test_enterprise_policy_poc_badcase_template_is_jsonl() -> None:
+    badcase_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-poc-badcases.jsonl"
+    rows = [json.loads(line) for line in badcase_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert rows
+    for row in rows:
+        assert row["case_id"].startswith("example-")
+        assert row["question"].strip()
+        assert row["expected_behavior"] in {"answer_with_citation", "refuse_without_evidence", "ask_clarifying_question"}
+        assert row["failure_type"].strip()
+        assert row["next_action"].strip()
+        assert row["status"] in {"todo", "in_progress", "done"}
+
+
 def test_eval_regression_gate_passes_for_expected_versions_and_thresholds() -> None:
     regression_gate = _load_script_module(
         "eval_regression_gate_pass_test",
