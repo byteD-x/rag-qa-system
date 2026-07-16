@@ -30,6 +30,7 @@
 - `apps/services/knowledge-base/src/app/kb_index_routes.py`
 - `apps/services/knowledge-base/src/app/kb_ingest_routes.py`
 - `apps/services/knowledge-base/src/app/kb_job_queue_routes.py`
+- `apps/services/knowledge-base/src/app/kb_object_store_routes.py`
 - `apps/services/knowledge-base/src/app/kb_query_routes.py`
 - `apps/services/knowledge-base/src/app/kb_rebuild_routes.py`
 - `apps/services/knowledge-base/src/app/kb_sync_routes.py`
@@ -38,7 +39,7 @@
 - `apps/services/knowledge-base/src/app/kb_visual_routes.py`
 - `apps/services/knowledge-base/src/app/main.py`
 
-## 路由总览（114 条）
+## 路由总览（116 条）
 
 | service | methods | path | handler | source |
 |---|---|---|---|---|
@@ -116,6 +117,8 @@
 | knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/visual-assets` | `get_document_visual_assets` | `apps/services/knowledge-base/src/app/kb_base_routes.py:652` |
 | knowledge-base | `GET` | `/api/v1/kb/ingest-jobs/{job_id}` | `get_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:17` |
 | knowledge-base | `POST` | `/api/v1/kb/ingest-jobs/{job_id}/retry` | `retry_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:26` |
+| knowledge-base | `GET` | `/api/v1/kb/object-store/object` | `read_object` | `apps/services/knowledge-base/src/app/kb_object_store_routes.py:52` |
+| knowledge-base | `PUT` | `/api/v1/kb/object-store/parts` | `upload_object_part` | `apps/services/knowledge-base/src/app/kb_object_store_routes.py:32` |
 | knowledge-base | `POST` | `/api/v1/kb/query` | `query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:146` |
 | knowledge-base | `POST` | `/api/v1/kb/query/stream` | `stream_query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:193` |
 | knowledge-base | `POST` | `/api/v1/kb/retrieve` | `retrieve_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:64` |

@@ -40,6 +40,7 @@ from .kb_runtime import db, logger, prepare_runtime, storage
 from .kb_sync_routes import router as kb_sync_router
 from .kb_system_routes import router as kb_system_router
 from .kb_upload_routes import router as kb_upload_router
+from .kb_object_store_routes import router as kb_object_store_router
 from .kb_visual_routes import router as kb_visual_router
 from .worker import run_worker_loop
 
@@ -141,6 +142,7 @@ app.include_router(kb_upload_router)
 app.include_router(kb_ingest_router)
 app.include_router(kb_query_router)
 app.include_router(kb_visual_router)
+app.include_router(kb_object_store_router)
 
 
 __all__ = ["_kb_readiness_checks", "app", "db", "storage"]

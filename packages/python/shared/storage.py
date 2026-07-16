@@ -308,8 +308,10 @@ class FilesystemStorageClient:
             raise RuntimeError(f"invalid storage key path: {storage_key}")
         return target
 
-    def _staging_dir(self, storage_key: str, upload_id: str) -> Path:
-        digest = hashlib.sha256(f"{storage_key}\n{upload_id}".encode("utf-8")).hexdigest()
+    def _staging_dir(self, storage_key: str) -> Path:
+        # 按 storage_key 定位暂存目录(storage_key 内嵌 uuid4 且库内唯一)。
+        # 分片接收路由只从令牌拿到 storage_key(无 s3_upload_id),故不以 upload_id 入路径。
+        digest = hashlib.sha256(storage_key.encode("utf-8")).hexdigest()
         return (self.settings.root / ".uploads" / digest).resolve()
 
     def build_storage_key(self, *, service: str, document_id: str, file_name: str) -> str:
@@ -360,17 +362,17 @@ class FilesystemStorageClient:
     # --- multipart(本地暂存分片 + 完成时拼接) ---
     def create_multipart_upload(self, storage_key: str, *, metadata: dict[str, str] | None = None) -> str:
         upload_id = uuid4().hex
-        self._staging_dir(storage_key, upload_id).mkdir(parents=True, exist_ok=True)
+        self._staging_dir(storage_key).mkdir(parents=True, exist_ok=True)
         return upload_id
 
     def write_part(self, storage_key: str, upload_id: str, part_number: int, body: bytes) -> str:
-        staging = self._staging_dir(storage_key, upload_id)
+        staging = self._staging_dir(storage_key)
         staging.mkdir(parents=True, exist_ok=True)
         (staging / f"{int(part_number):06d}.part").write_bytes(body)
         return hashlib.md5(body).hexdigest()
 
     def list_parts(self, storage_key: str, upload_id: str) -> list[dict[str, Any]]:
-        staging = self._staging_dir(storage_key, upload_id)
+        staging = self._staging_dir(storage_key)
         if not staging.is_dir():
             return []
         parts: list[dict[str, Any]] = []
@@ -380,7 +382,7 @@ class FilesystemStorageClient:
         return parts
 
     def complete_multipart_upload(self, storage_key: str, upload_id: str, parts: list[dict[str, Any]]) -> None:
-        staging = self._staging_dir(storage_key, upload_id)
+        staging = self._staging_dir(storage_key)
         target = self._object_path(storage_key)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as out:
@@ -392,7 +394,7 @@ class FilesystemStorageClient:
         shutil.rmtree(staging, ignore_errors=True)
 
     def abort_multipart_upload(self, storage_key: str, upload_id: str) -> None:
-        shutil.rmtree(self._staging_dir(storage_key, upload_id), ignore_errors=True)
+        shutil.rmtree(self._staging_dir(storage_key), ignore_errors=True)
 
     # --- presign(返回同源相对 URL + HMAC 令牌) ---
     def _signed_url(self, operation: str, storage_key: str, part_number: int, expires_in: int) -> str:
