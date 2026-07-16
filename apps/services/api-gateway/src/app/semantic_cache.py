@@ -1,8 +1,12 @@
-"""语义缓存 —— 三层缓存体系降低推理成本与延迟。
+"""回答级缓存 —— 降低推理成本与延迟。
 
-L1 精确缓存：相同问题+相同知识库版本 → 直接返回（0 Token消耗）
-L2 语义缓存：基于问题 embedding 相似度匹配 → 返回缓存答案
-L3 Prompt Cache：利用 LLM API 的 prompt caching 缓存 system prompt 前缀
+L1 精确缓存：相同问题+相同知识库版本 → 直接返回（0 Token 消耗），默认启用。
+L2 相似度缓存：按问题 embedding 相似度匹配缓存答案。**默认关闭**
+    （GATEWAY_RESPONSE_CACHE_SEMANTIC_ENABLED=false）。开启后使用的 embedding
+    取决于配置:未配外部嵌入服务时走本地哈希嵌入(捕捉词元重叠/词法相似,
+    并非真正语义),仅在配置了 EMBEDDING_API_URL 外部嵌入服务时才是语义相似度。
+    因此默认形态以 L1 精确缓存为准,不宣称语义能力。
+L3 Prompt Cache：利用 LLM API 的 prompt caching 缓存 system prompt 前缀。
 
 缓存失效策略：
 - 知识库文档更新时主动失效相关缓存
