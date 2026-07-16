@@ -7,6 +7,8 @@
 - `knowledge-base/database/migrations/002_ingest_and_retrieval.sql`:删 `CREATE EXTENSION vector`、`kb_embedding_cache` 表、kb_sections/kb_chunks 的 `embedding VECTOR(512)` 列、两个 hnsw 索引。保留 fts_document/GIN、pg_trgm(KB 001,contrib 自带)。
 - `ops/docker/postgres/Dockerfile`:`FROM pgvector/pgvector:pg16` → `FROM postgres:16`。保留自定义镜像(init 脚本建 kb_app/gateway_app 两库,不可丢)。
 
+> 修正记录(2026-07-16):初次提交 5743bc5 仅落地了 gateway 001 与本报告,KB 002 与 Dockerfile 的编辑未实际写入(提交信息曾overclaim)。已在后续提交补齐 KB 002 全部 vector 对象删除 + Dockerfile 改 postgres:16,全仓 migrations/Dockerfile 无 vector/pgvector 残留,分组测试 33/33 全绿。
+
 ## 核实
 - 代码零读写 kb_embedding_cache 与 embedding 列(向量检索全在 Qdrant)。
 - 迁移无其他非标准扩展依赖(pg_trgm 为 contrib,postgres:16 自带;无 gen_random_uuid,ID 由应用传)。

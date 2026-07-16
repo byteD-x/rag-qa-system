@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS kb_upload_sessions (
     id UUID PRIMARY KEY,
     base_id UUID NOT NULL REFERENCES kb_bases(id) ON DELETE CASCADE,
@@ -45,15 +43,6 @@ CREATE TABLE IF NOT EXISTS kb_ingest_jobs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS kb_embedding_cache (
-    cache_key TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    model TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    embedding VECTOR(512) NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS storage_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS upload_session_id UUID NULL;
 ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS query_ready BOOLEAN NOT NULL DEFAULT FALSE;
@@ -64,17 +53,13 @@ ALTER TABLE kb_documents ADD COLUMN IF NOT EXISTS ready_at TIMESTAMPTZ NULL;
 
 ALTER TABLE kb_sections ADD COLUMN IF NOT EXISTS lexical_terms TEXT NOT NULL DEFAULT '';
 ALTER TABLE kb_sections ADD COLUMN IF NOT EXISTS fts_document TSVECTOR;
-ALTER TABLE kb_sections ADD COLUMN IF NOT EXISTS embedding VECTOR(512);
 ALTER TABLE kb_sections ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS lexical_terms TEXT NOT NULL DEFAULT '';
 ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS fts_document TSVECTOR;
-ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS embedding VECTOR(512);
 ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS content_hash TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_kb_upload_sessions_base_created ON kb_upload_sessions(base_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_kb_ingest_jobs_status_created ON kb_ingest_jobs(status, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_kb_sections_fts ON kb_sections USING GIN (fts_document);
 CREATE INDEX IF NOT EXISTS idx_kb_chunks_fts ON kb_chunks USING GIN (fts_document);
-CREATE INDEX IF NOT EXISTS idx_kb_sections_embedding ON kb_sections USING hnsw (embedding vector_cosine_ops);
-CREATE INDEX IF NOT EXISTS idx_kb_chunks_embedding ON kb_chunks USING hnsw (embedding vector_cosine_ops);
