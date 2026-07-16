@@ -1,4 +1,4 @@
-"""测试推理优化能力：语义缓存、模型健康监控、复杂度分类、请求合并。"""
+"""测试推理优化能力：语义缓存、模型健康监控。"""
 
 from __future__ import annotations
 
@@ -566,137 +566,6 @@ class TestModelHealth:
         assert 450 <= stats.latency_p95 <= 510
 
 
-# ============================================================================
-# 复杂度分类器测试
-# ============================================================================
-
-
-class TestComplexityClassifier:
-    """测试问题复杂度快速评估。"""
-
-    def test_trivial_greeting(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        result = classify_complexity("你好")
-        assert result.score == 1
-        assert result.label == "trivial"
-        assert result.can_use_small_model
-        assert result.should_cache
-
-    def test_simple_query(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        result = classify_complexity("退款流程是什么？")
-        assert result.score <= 2
-        assert result.recommended_route == "grounded"
-
-    def test_complex_comparison(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        result = classify_complexity("请比较v2.0和v3.0版本中退款流程的差异")
-        assert result.score >= 3
-        assert "complex_compare" in result.features
-
-    def test_very_complex_multi_step(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        result = classify_complexity(
-            "先列出所有退款类型，然后分析每种类型的审批条件，最后总结最常见的拒绝原因并计算拒绝率"
-        )
-        assert result.score >= 4
-        assert result.recommended_model_tier == "premium"
-
-    def test_multi_corpus_context(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        result = classify_complexity(
-            "退款流程是什么？",
-            context={"corpus_ids": ["a", "b", "c", "d"]},
-        )
-        assert result.score >= 2
-        assert "multi_corpus" in result.features
-
-    def test_resolve_model_for_complexity(self, monkeypatch) -> None:
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import (
-            classify_complexity,
-            resolve_model_for_complexity,
-        )
-
-        result = classify_complexity("你好")
-        model = resolve_model_for_complexity(result, available_models=["qwen-turbo", "qwen-plus"])
-        assert model == "qwen-turbo"
-
-
-# ============================================================================
-# 请求合并测试
-# ============================================================================
-
-
-class TestRequestCoalescer:
-    """测试请求合并与去重。"""
-
-    @pytest.mark.asyncio
-    async def test_leader_follower(self, monkeypatch) -> None:
-        _import_gateway("app.request_coalescer", monkeypatch)
-
-        from app.request_coalescer import RequestCoalescer, coalesce_key
-
-        coalescer = RequestCoalescer(window_ms=200)
-        key = coalesce_key("测试问题", ["kb:abc"])
-
-        results = []
-
-        async def leader_task():
-            async with coalescer.coalesce(key) as cr:
-                if cr.is_leader:
-                    await asyncio.sleep(0.05)  # 模拟工作
-                    cr.set_response({"answer": "测试答案"})
-                else:
-                    await cr._event.wait()
-                    results.append(("follower", cr.response))
-
-        async def follower_task():
-            await asyncio.sleep(0.01)  # 稍微延迟
-            async with coalescer.coalesce(key) as cr:
-                if cr.is_leader:
-                    pass
-                else:
-                    await cr._event.wait()
-                    results.append(("follower", cr.response))
-
-        await asyncio.gather(leader_task(), follower_task())
-
-        # leader 先完成，follower 获取相同结果
-        assert len(results) >= 1
-        assert results[0][1]["answer"] == "测试答案"
-
-    def test_coalesce_key_deterministic(self, monkeypatch) -> None:
-        _import_gateway("app.request_coalescer", monkeypatch)
-        from app.request_coalescer import coalesce_key
-
-        k1 = coalesce_key("测试问题", ["kb:a", "kb:b"], "qwen-plus")
-        k2 = coalesce_key("测试问题", ["kb:b", "kb:a"], "qwen-plus")  # 顺序不同
-        assert k1 == k2  # corpus_ids 排序后应相同
-
-        k3 = coalesce_key("另一个问题", ["kb:a"], "qwen-plus")
-        assert k1 != k3
-
-    def test_coalescer_stats(self, monkeypatch) -> None:
-        _import_gateway("app.request_coalescer", monkeypatch)
-        from app.request_coalescer import RequestCoalescer
-
-        coalescer = RequestCoalescer(window_ms=100)
-        stats = coalescer.stats()
-        assert "total_requests" in stats
-        assert "coalesce_rate" in stats
-        assert stats["window_ms"] == 100
-
 
 # ============================================================================
 # 集成测试
@@ -705,18 +574,6 @@ class TestRequestCoalescer:
 
 class TestInferenceIntegration:
     """测试模块间联动。"""
-
-    def test_complexity_drives_cache_decision(self, monkeypatch) -> None:
-        """简单问题应建议缓存，复杂问题不应。"""
-        _import_gateway("app.complexity_classifier", monkeypatch)
-        from app.complexity_classifier import classify_complexity
-
-        trivial = classify_complexity("你好")
-        assert trivial.should_cache
-
-        complex_q = classify_complexity("请比较v2和v3退款流程差异，分析影响范围并计算涉及部门数量")
-        assert not complex_q.should_cache
-        assert not complex_q.can_use_small_model
 
     def test_model_health_informs_routing(self, monkeypatch) -> None:
         """模型健康状态应影响路由选择。"""

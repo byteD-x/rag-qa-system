@@ -1,4 +1,4 @@
-"""测试 Agent 增强能力：工具注册中心、任务拆解、反思闭环、记忆提取。"""
+"""测试 Agent 增强能力：工具注册中心、任务拆解、反思闭环。"""
 
 from __future__ import annotations
 
@@ -759,96 +759,6 @@ class TestAgentReflection:
 
 
 # ============================================================================
-# 记忆提取测试
-# ============================================================================
-
-
-class TestMemoryExtractor:
-    """测试记忆三元组模型和冲突解决。"""
-
-    def test_memory_triple_creation(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import MemoryTriple
-
-        triple = MemoryTriple(
-            subject="用户角色",
-            predicate="是",
-            object="后端开发工程师",
-            memory_type="preference",
-            confidence=0.95,
-        )
-        assert triple.subject == "用户角色"
-        assert triple.memory_type == "preference"
-        assert triple.confidence == 0.95
-
-    def test_memory_entry_creation(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import MemoryEntry
-
-        entry = MemoryEntry(
-            id="mem-001",
-            user_id="user-001",
-            memory_type="fact",
-            subject="当前版本",
-            predicate="是",
-            object="v3.0",
-            embedding_id="emb-001",
-            confidence=0.9,
-            source_session_id="session-001",
-        )
-        assert entry.memory_type == "fact"
-        assert entry.is_active  # 默认活跃
-
-    def test_format_messages(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import _format_messages
-
-        messages = [
-            {"role": "user", "content": "我是后端工程师，负责支付系统"},
-            {"role": "assistant", "content": "明白了，您是负责支付系统的后端工程师。"},
-        ]
-        result = _format_messages(messages)
-        assert "[user]" in result
-        assert "后端工程师" in result
-
-    def test_format_messages_truncation(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import _format_messages
-
-        # 超过 12 条时只取最近 12 条
-        messages = [{"role": "user", "content": f"msg{i}"} for i in range(20)]
-        result = _format_messages(messages)
-        lines = result.strip().split("\n")
-        assert len(lines) <= 12
-
-    def test_parse_json_response_markdown_block(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import _parse_json_response
-
-        response = """```json
-{"memories": [{"subject": "test", "predicate": "is", "object": "value", "memory_type": "fact", "confidence": 0.9}]}
-```"""
-        parsed = _parse_json_response(response)
-        assert len(parsed.get("memories", [])) == 1
-
-    def test_parse_json_response_plain(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import _parse_json_response
-
-        response = '{"memories": []}'
-        parsed = _parse_json_response(response)
-        assert parsed.get("memories") == []
-
-    def test_parse_json_response_invalid(self, monkeypatch) -> None:
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import _parse_json_response
-
-        response = "这不是有效的JSON"
-        parsed = _parse_json_response(response)
-        assert parsed == {}
-
-
-# ============================================================================
 # 集成联动测试
 # ============================================================================
 
@@ -964,25 +874,3 @@ class TestIntegration:
         assert len(check.issues) >= 2
         assert check.confidence < 0.5
         assert check.retry_hint  # 有重试指导
-
-    @pytest.mark.asyncio
-    async def test_memory_store_upsert_and_search(self, monkeypatch) -> None:
-        """MemoryStore 的基础接口应可调用。"""
-        _import_module("app.memory_extractor", monkeypatch)
-        from app.memory_extractor import MemoryStore, MemoryEntry
-
-        store = MemoryStore(db_session_factory=lambda: None, qdrant_client=None)
-
-        entry = MemoryEntry(
-            id="test-1",
-            user_id="user-1",
-            memory_type="preference",
-            subject="回答风格",
-            predicate="偏好",
-            object="简洁技术风格",
-            embedding_id="emb-1",
-            confidence=0.9,
-            source_session_id="s1",
-        )
-        result = await store.upsert(entry)
-        assert result is True

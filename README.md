@@ -1987,13 +1987,8 @@ apps/
       ├─ tool_registry.py          工具注册中心（MCP兼容）
       ├─ task_decomposer.py        任务拆解（DAG并行）
       ├─ agent_reflection.py       反思闭环（自检+失败分析）
-      ├─ memory_extractor.py       三层记忆提取
-      ├─ instruction_merger.py     五层分层指令合并
-      ├─ scene_templates.py        场景模板库（6大场景）
       ├─ semantic_cache.py         回答级缓存（L1 精确；L2 语义命中可选开启）
       ├─ model_health.py           模型健康监控（熔断）
-      ├─ complexity_classifier.py  问题复杂度分类
-      ├─ request_coalescer.py      请求合并器
       ├─ hallucination_detector.py RAG幻觉检测
       └─ gateway_graph.py          LangGraph 工作流引擎
     knowledge-base/     知识库、上传、检索、连接器、Worker

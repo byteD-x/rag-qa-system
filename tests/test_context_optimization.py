@@ -1,4 +1,4 @@
-"""上下文优化模块测试 —— 覆盖 context_window、context_compressor、context_prioritizer。"""
+"""上下文优化模块测试 —— 覆盖 context_window、context_prioritizer。"""
 
 from __future__ import annotations
 
@@ -178,50 +178,6 @@ class TestContextWindowManager:
 
 
 # ============================================================================
-# 提取式压缩测试
-# ============================================================================
-
-
-class TestExtractiveCompressor:
-    def test_compress_short_text(self, monkeypatch) -> None:
-        _import_gateway("app.context_compressor", monkeypatch)
-        from app.context_compressor import ExtractiveCompressor
-        c = ExtractiveCompressor()
-        text = "这是一个简单的测试文本。"
-        compressed, result = c.compress(text, target_ratio=0.5)
-        assert result.original_tokens > 0
-        assert result.compressed_tokens > 0
-        assert result.method == "extractive"
-
-    def test_compress_preserves_entities(self, monkeypatch) -> None:
-        _import_gateway("app.context_compressor", monkeypatch)
-        from app.context_compressor import ExtractiveCompressor
-        c = ExtractiveCompressor()
-        text = "用户报告了一个问题。版本号是 v3.2.1，涉及金额 ¥15,000。已于 2024-03-15 修复。"
-        compressed, result = c.compress(text, target_ratio=0.7)
-        assert "v3.2.1" in compressed
-        assert "2024-03-15" in compressed
-        assert result.entities_found > 0
-        assert result.entities_preserved > 0
-
-    def test_compress_keeps_questions(self, monkeypatch) -> None:
-        _import_gateway("app.context_compressor", monkeypatch)
-        from app.context_compressor import ExtractiveCompressor
-        c = ExtractiveCompressor()
-        text = "你好。今天天气真好。请问v3.0版本的配置参数是什么？好的我记下了。"
-        compressed, result = c.compress(text, target_ratio=0.5)
-        assert "v3.0" in compressed
-        assert "配置参数" in compressed
-
-    def test_compression_ratio(self, monkeypatch) -> None:
-        _import_gateway("app.context_compressor", monkeypatch)
-        from app.context_compressor import ExtractiveCompressor
-        c = ExtractiveCompressor()
-        text = "。".join([f"这是一段测试文本第{i}句" for i in range(50)])
-        compressed, result = c.compress(text, target_ratio=0.3)
-        assert result.compression_ratio <= 1.0
-        assert result.compression_ratio >= 0.0
-
 
 # ============================================================================
 # 上下文优先级排序测试

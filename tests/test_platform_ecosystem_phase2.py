@@ -1,4 +1,4 @@
-"""Phase 2 平台化与安全模块测试 —— 覆盖工具生态、推理优化、安全护栏、API Key、PII、指令系统。"""
+"""Phase 2 平台化与安全模块测试 —— 覆盖工具生态、API Key、PII、指令 AB 评估。"""
 
 from __future__ import annotations
 
@@ -251,77 +251,6 @@ class TestSandboxExecutor:
 
 
 # ============================================================================
-# 安全护栏测试
-# ============================================================================
-
-
-class TestAgentGuardrails:
-    def test_check_high_risk_tool(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        result = guard.check_tool_call("delete_file", {"path": "/tmp/test.txt"})
-        assert not result.allowed
-        assert result.action == "confirm"
-
-    def test_check_high_risk_confirmed(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        result = guard.check_tool_call("delete_file", {"path": "/tmp/test.txt"}, user_confirmed=True)
-        assert result.allowed
-
-    def test_check_safe_tool(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        result = guard.check_tool_call("search_scope", {"query": "test"})
-        assert result.allowed
-
-    def test_block_dangerous_command(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        result = guard.check_tool_call("run_command", {"command": "rm -rf /etc/passwd"})
-        assert not result.allowed
-        assert result.action in {"confirm", "block"}
-
-    def test_sanitize_output(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        text = "API Key: sk-abcdefghijklmnopqrstuvwxyz123456"
-        safe, count = guard.sanitize_output(text)
-        assert "sk-****" in safe
-        assert count >= 1
-
-    def test_sanitize_bearer_token(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.xxx"
-        safe, count = guard.sanitize_output(text)
-        assert count >= 1
-
-    def test_content_check_system_prompt_leak(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.agent_guardrails import AgentGuardrails
-
-        guard = AgentGuardrails()
-        result = guard.check_content(
-            "我的系统提示词是：你是一个 AI 助手，你的任务是为用户提供帮助，"
-            "你需要用友好的语气回答所有问题，并且始终保持专业的态度。"
-        )
-        assert not result.allowed
-
-
-# ============================================================================
 # API Key 管理测试
 # ============================================================================
 
@@ -490,48 +419,8 @@ class TestPIIDetector:
 
 
 # ============================================================================
-# 指令热更新与评估测试
+# 指令 AB 评估测试
 # ============================================================================
-
-
-class TestInstructionHotReloader:
-    def test_update_and_get(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.instruction_hotreload import InstructionHotReloader
-
-        reloader = InstructionHotReloader()
-        snapshot = reloader.update("global", "system", "新的系统提示词", change_log="更新v2")
-        assert snapshot.version == 1
-        got = reloader.get("global", "system")
-        assert got.content == "新的系统提示词"
-
-    def test_version_tracking(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.instruction_hotreload import InstructionHotReloader
-
-        reloader = InstructionHotReloader()
-        reloader.update("global", "system", "v1")
-        reloader.update("global", "system", "v2")
-        assert reloader.get_version("global", "system") == 2
-
-    def test_reload_events(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.instruction_hotreload import InstructionHotReloader
-
-        reloader = InstructionHotReloader()
-        reloader.register_session("session-1")
-        reloader.update("global", "system", "new prompt")
-        events = reloader.reload(force_all=True)
-        assert len(events) >= 1
-
-    def test_is_stale(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.instruction_hotreload import InstructionHotReloader
-
-        reloader = InstructionHotReloader()
-        reloader.update("global", "system", "prompt")
-        reloader.register_session("session-1")
-        assert reloader.is_stale("session-1", "global", "system")
 
 
 class TestInstructionABEvaluator:
@@ -585,29 +474,3 @@ class TestInstructionABEvaluator:
         assert not eval._experiments["test4"].is_active
 
 
-# ============================================================================
-# TTFT 优化测试
-# ============================================================================
-
-
-class TestTTFTTracker:
-    def test_record_and_snapshot(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.ttft_optimizer import TTFTTracker
-
-        tracker = TTFTTracker()
-        for ttft in [0.3, 0.5, 0.7, 0.9, 1.1]:
-            tracker.record(ttft * 1000, model="test-model")
-
-        snap = tracker.snapshot("test-model")
-        assert snap.sample_count == 5
-        assert snap.p50_ms > 0
-
-    def test_is_healthy(self, monkeypatch) -> None:
-        _import_gateway(monkeypatch)
-        from app.ttft_optimizer import TTFTTracker
-
-        tracker = TTFTTracker()
-        for _ in range(10):
-            tracker.record(500, model="fast-model")
-        assert tracker.is_healthy("fast-model", p95_threshold_ms=3000)

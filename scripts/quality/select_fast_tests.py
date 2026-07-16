@@ -9,20 +9,6 @@ from pathlib import Path, PurePosixPath
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _EXACT_TARGETS: dict[str, list[str]] = {
-    "apps/services/api-gateway/src/app/agent_guardrails.py": [
-        "tests/test_platform_ecosystem_phase2.py",
-    ],
-    "apps/services/api-gateway/src/app/agent_error_recovery.py": [
-        "tests/test_agent_metacognition.py::TestErrorClassifier",
-        "tests/test_agent_metacognition.py::TestRecoveryAction",
-        "tests/test_agent_metacognition.py::TestErrorRecoveryEngine",
-    ],
-    "apps/services/api-gateway/src/app/agent_metacognition.py": [
-        "tests/test_agent_metacognition.py",
-    ],
-    "apps/services/api-gateway/src/app/agent_orchestrator.py": [
-        "tests/test_agent_orchestration.py",
-    ],
     "apps/services/api-gateway/src/app/agent_reflection.py": [
         "tests/test_agent_capabilities.py::TestAgentReflection",
         "tests/test_agent_capabilities.py::TestIntegration::test_reflection_result_can_trigger_retry",
@@ -34,13 +20,6 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     ],
     "apps/services/api-gateway/src/app/api_key_manager.py": [
         "tests/test_platform_ecosystem_phase2.py::TestAPIKeyManager",
-    ],
-    "apps/services/api-gateway/src/app/complexity_classifier.py": [
-        "tests/test_inference_optimization.py::TestComplexityClassifier",
-        "tests/test_inference_optimization.py::TestInferenceIntegration::test_complexity_drives_cache_decision",
-    ],
-    "apps/services/api-gateway/src/app/context_compressor.py": [
-        "tests/test_context_optimization.py::TestExtractiveCompressor",
     ],
     "apps/services/api-gateway/src/app/context_prioritizer.py": [
         "tests/test_context_optimization.py::TestContextPrioritizer",
@@ -117,23 +96,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/instruction_evaluator.py": [
         "tests/test_platform_ecosystem_phase2.py::TestInstructionABEvaluator",
     ],
-    "apps/services/api-gateway/src/app/instruction_hotreload.py": [
-        "tests/test_platform_ecosystem_phase2.py::TestInstructionHotReloader",
-    ],
-    "apps/services/api-gateway/src/app/instruction_merger.py": [
-        "tests/test_platform_ecosystem.py::TestInstructionMerger",
-    ],
-    "apps/services/api-gateway/src/app/memory_extractor.py": [
-        "tests/test_agent_capabilities.py::TestMemoryExtractor",
-        "tests/test_agent_capabilities.py::TestIntegration::test_memory_store_upsert_and_search",
-        "tests/test_memory_enhancement.py",
-    ],
     "apps/services/api-gateway/src/app/memory_importance.py": [
         "tests/test_memory_enhancement.py::TestMemoryImportanceScorer",
         "tests/test_memory_enhancement.py::TestForgettingCurve",
-    ],
-    "apps/services/api-gateway/src/app/memory_injection.py": [
-        "tests/test_memory_enhancement.py::TestMemoryInjector",
     ],
     "apps/services/api-gateway/src/app/model_health.py": [
         "tests/test_inference_optimization.py::TestModelHealth",
@@ -142,18 +107,9 @@ _EXACT_TARGETS: dict[str, list[str]] = {
     "apps/services/api-gateway/src/app/pii_detector.py": [
         "tests/test_platform_ecosystem_phase2.py::TestPIIDetector",
     ],
-    "apps/services/api-gateway/src/app/request_coalescer.py": [
-        "tests/test_inference_optimization.py::TestRequestCoalescer",
-    ],
-    "apps/services/api-gateway/src/app/scene_templates.py": [
-        "tests/test_platform_ecosystem.py::TestSceneTemplates",
-    ],
     "apps/services/api-gateway/src/app/task_decomposer.py": [
         "tests/test_agent_capabilities.py::TestTaskDecomposer",
         "tests/test_agent_capabilities.py::TestIntegration::test_decomposition_result_feeds_agent",
-    ],
-    "apps/services/api-gateway/src/app/ttft_optimizer.py": [
-        "tests/test_platform_ecosystem_phase2.py::TestTTFTTracker",
     ],
     "apps/services/api-gateway/src/app/semantic_cache.py": [
         "tests/test_inference_optimization.py::TestSemanticCache",

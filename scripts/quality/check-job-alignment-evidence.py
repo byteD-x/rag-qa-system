@@ -87,10 +87,6 @@ EVIDENCE_CHECKS = (
         ("resolve_model_route_plan", "fallback_route_key", "execute_with_model_route_fallback"),
     ),
     EvidenceCheck(
-        "apps/services/api-gateway/src/app/agent_orchestrator.py",
-        ("ExecutionPlan", "SubTask", "OrchestrationResult"),
-    ),
-    EvidenceCheck(
         "apps/services/api-gateway/src/app/tool_registry.py",
         ("ToolRegistry", "ToolDefinition", "get_llm_tools"),
     ),
@@ -120,7 +116,7 @@ EVIDENCE_CHECKS = (
     ),
     EvidenceCheck(
         "tests/test_inference_optimization.py",
-        ("SemanticCache", "ModelHealth", "RequestCoalescer"),
+        ("SemanticCache", "ModelHealth"),
     ),
     EvidenceCheck(
         "tests/fixtures/evals/retrieval-ablation-fixture.json",
