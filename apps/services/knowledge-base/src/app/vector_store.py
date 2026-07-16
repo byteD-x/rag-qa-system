@@ -146,7 +146,8 @@ def build_vector_retriever(
     document_ids: list[str] | None,
     limit: int,
 ) -> KnowledgeBaseRetriever:
-    ensure_qdrant_collection(settings=QDRANT_SETTINGS)
+    # 集合与载荷索引在服务启动(stack_init)和索引写入时已确保;查询路径不再重复 ensure,
+    # 省去每次查询的多次 Qdrant 往返。集合缺失时由 search_vector_documents 的 try/except 优雅降级。
     return KnowledgeBaseRetriever(
         vector_store=_get_vector_store(QDRANT_SETTINGS),
         base_id=base_id,

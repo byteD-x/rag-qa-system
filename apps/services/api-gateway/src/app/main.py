@@ -46,6 +46,8 @@ async def lifespan(_: FastAPI):
         logger.warning("gateway auth configuration warning: %s", warning)
     ensure_gateway_graph_schema()
     yield
+    # 关闭时释放数据库连接池。
+    gateway_db.close()
 
 
 app = FastAPI(title="Enterprise RAG QA Gateway", version="3.1.0", lifespan=lifespan)

@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from shared.auth import CurrentUser
@@ -201,7 +202,10 @@ async def stream_query_kb(payload: KBQueryRequest, request: Request, user: Curre
     )
     if not decision.allowed:
         _reject_backpressure(request=request, user=user, endpoint="kb.query.stream", base_id=payload.base_id, scope=decision.scope)
-    prepared = prepare_query_response(base_id=payload.base_id, question=payload.question, document_ids=payload.document_ids)
+    # 检索+安全分析同步阻塞;放进线程池,避免阻塞事件循环。
+    prepared = await run_in_threadpool(
+        prepare_query_response, base_id=payload.base_id, question=payload.question, document_ids=payload.document_ids
+    )
     degraded = "true" if list((prepared.get("retrieval") or {}).get("degraded_signals") or []) else "false"
     result_label = "refusal" if str(prepared.get("answer_mode") or "") == "refusal" else "success"
     KB_RETRIEVE_REQUESTS_TOTAL.labels(result_label, degraded).inc()

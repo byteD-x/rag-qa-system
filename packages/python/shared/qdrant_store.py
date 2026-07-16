@@ -162,21 +162,22 @@ def ensure_qdrant_collection(
                 SPARSE_VECTOR_NAME: models.SparseVectorParams(),
             },
         )
-    for field_name in (
-        "base_id",
-        "document_id",
-        "unit_type",
-        "source_kind",
-        "metadata.base_id",
-        "metadata.document_id",
-        "metadata.unit_type",
-        "metadata.source_kind",
-    ):
-        qdrant.create_payload_index(
-            config.collection,
-            field_name=field_name,
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
+        # 载荷索引只在集合新建时建一次;后续查询不再重复建,避免每查多次往返。
+        for field_name in (
+            "base_id",
+            "document_id",
+            "unit_type",
+            "source_kind",
+            "metadata.base_id",
+            "metadata.document_id",
+            "metadata.unit_type",
+            "metadata.source_kind",
+        ):
+            qdrant.create_payload_index(
+                config.collection,
+                field_name=field_name,
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
     return {
         "url": config.url,
         "collection": config.collection,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 from shared.grounded_answering import (
     classify_evidence,
     dicts_to_langchain_messages,
@@ -76,7 +77,10 @@ def prepare_query_response(*, base_id: str, question: str, document_ids: list[st
 
 
 async def build_query_response(*, base_id: str, question: str, document_ids: list[str]) -> dict[str, Any]:
-    prepared = prepare_query_response(base_id=base_id, question=question, document_ids=document_ids)
+    # 检索+安全分析是同步阻塞;在 async 路由里放进线程池,避免阻塞事件循环。
+    prepared = await run_in_threadpool(
+        prepare_query_response, base_id=base_id, question=question, document_ids=document_ids
+    )
     answer = await _generate_query_answer(prepared=prepared)
     return _finalize_query_response(prepared=prepared, answer=answer)
 

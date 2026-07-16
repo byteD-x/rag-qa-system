@@ -116,10 +116,10 @@
 | knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/visual-assets` | `get_document_visual_assets` | `apps/services/knowledge-base/src/app/kb_base_routes.py:652` |
 | knowledge-base | `GET` | `/api/v1/kb/ingest-jobs/{job_id}` | `get_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:17` |
 | knowledge-base | `POST` | `/api/v1/kb/ingest-jobs/{job_id}/retry` | `retry_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:26` |
-| knowledge-base | `POST` | `/api/v1/kb/query` | `query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:145` |
-| knowledge-base | `POST` | `/api/v1/kb/query/stream` | `stream_query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:192` |
-| knowledge-base | `POST` | `/api/v1/kb/retrieve` | `retrieve_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:63` |
-| knowledge-base | `POST` | `/api/v1/kb/retrieve/debug` | `retrieve_kb_debug` | `apps/services/knowledge-base/src/app/kb_query_routes.py:107` |
+| knowledge-base | `POST` | `/api/v1/kb/query` | `query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:146` |
+| knowledge-base | `POST` | `/api/v1/kb/query/stream` | `stream_query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:193` |
+| knowledge-base | `POST` | `/api/v1/kb/retrieve` | `retrieve_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:64` |
+| knowledge-base | `POST` | `/api/v1/kb/retrieve/debug` | `retrieve_kb_debug` | `apps/services/knowledge-base/src/app/kb_query_routes.py:108` |
 | knowledge-base | `POST` | `/api/v1/kb/uploads` | `create_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:37` |
 | knowledge-base | `GET` | `/api/v1/kb/uploads/{upload_id}` | `get_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:136` |
 | knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/complete` | `complete_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:168` |
@@ -148,8 +148,8 @@
 | api-gateway | `GET` | `/api/v2/chat/threads/{thread_id}` | `get_chat_thread` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:160` |
 | api-gateway | `GET` | `/api/v2/chat/threads/{thread_id}/messages` | `list_chat_thread_messages` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:166` |
 | api-gateway | `POST` | `/api/v2/chat/threads/{thread_id}/runs` | `create_chat_run` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:178` |
-| knowledge-base | `POST` | `/api/v2/kb/query` | `query_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:185` |
-| knowledge-base | `POST` | `/api/v2/kb/retrieve` | `retrieve_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:83` |
+| knowledge-base | `POST` | `/api/v2/kb/query` | `query_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:186` |
+| knowledge-base | `POST` | `/api/v2/kb/retrieve` | `retrieve_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:84` |
 | api-gateway | `GET` | `/healthz` | `healthz` | `apps/services/api-gateway/src/app/gateway_system_routes.py:22` |
 | knowledge-base | `GET` | `/healthz` | `healthz` | `apps/services/knowledge-base/src/app/kb_system_routes.py:18` |
 | api-gateway | `GET` | `/metrics` | `metrics` | `apps/services/api-gateway/src/app/gateway_system_routes.py:122` |

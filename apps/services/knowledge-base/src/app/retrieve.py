@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import time
 from datetime import datetime
 from functools import lru_cache
@@ -282,22 +283,39 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
         return state
 
     tsquery = build_simple_tsquery(rewrite.retrieval_query)
-    structure_docs = StructureRetriever(
-        base_id=state["base_id"],
-        document_ids=doc_ids,
-        focus_query=rewrite.focus_query or state["question"],
-    ).invoke(rewrite.focus_query or state["question"])
-    fts_docs = FTSRetriever(
-        base_id=state["base_id"],
-        document_ids=doc_ids,
-        tsquery=tsquery,
-    ).invoke(rewrite.retrieval_query)
-    vector_docs, degraded_signals, warnings = search_vector_documents(
-        base_id=state["base_id"],
-        question=rewrite.retrieval_query,
-        document_ids=doc_ids,
-        limit=40,
-    )
+
+    # 三路信号相互独立且各自阻塞(structure/fts 打 Postgres,vector 打 Qdrant),
+    # 各检索器内部独立开连接,可并发。用线程池并发跑,总耗时约等于最慢一路而非三路之和。
+    def _run_structure() -> list[Document]:
+        return StructureRetriever(
+            base_id=state["base_id"],
+            document_ids=doc_ids,
+            focus_query=rewrite.focus_query or state["question"],
+        ).invoke(rewrite.focus_query or state["question"])
+
+    def _run_fts() -> list[Document]:
+        return FTSRetriever(
+            base_id=state["base_id"],
+            document_ids=doc_ids,
+            tsquery=tsquery,
+        ).invoke(rewrite.retrieval_query)
+
+    def _run_vector() -> tuple[list[Document], list[str], list[str]]:
+        return search_vector_documents(
+            base_id=state["base_id"],
+            question=rewrite.retrieval_query,
+            document_ids=doc_ids,
+            limit=40,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        structure_future = executor.submit(_run_structure)
+        fts_future = executor.submit(_run_fts)
+        vector_future = executor.submit(_run_vector)
+        structure_docs = structure_future.result()
+        fts_docs = fts_future.result()
+        vector_docs, degraded_signals, warnings = vector_future.result()
+
     state["signal_documents"] = {
         "structure": structure_docs,
         "fts": fts_docs,
