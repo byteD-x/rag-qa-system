@@ -4,9 +4,10 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
+from fastembed import TextEmbedding
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
-from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
 from pydantic import ConfigDict
 from qdrant_client import models
@@ -301,9 +302,34 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
     )
 
 
+class _FastEmbedDenseEmbeddings(Embeddings):
+    """密集向量适配器:直接用 fastembed.TextEmbedding,替代 langchain_community.FastEmbedEmbeddings。
+
+    产出向量与 FastEmbedEmbeddings 默认行为一致(embed_documents→model.embed,
+    embed_query→model.query_embed,max_length=512,batch_size=256),从而去掉 langchain-community 依赖
+    而不改变已入库向量的一致性。
+    """
+
+    _BATCH_SIZE = 256
+
+    def __init__(self, *, model_name: str, cache_dir: str | None, threads: int | None) -> None:
+        self._model = TextEmbedding(
+            model_name=model_name,
+            max_length=512,
+            cache_dir=cache_dir,
+            threads=threads,
+        )
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [vector.tolist() for vector in self._model.embed(texts, batch_size=self._BATCH_SIZE)]
+
+    def embed_query(self, text: str) -> list[float]:
+        return next(self._model.query_embed(text, batch_size=self._BATCH_SIZE)).tolist()
+
+
 @lru_cache(maxsize=2)
 def _get_vector_store(settings: QdrantSettings) -> QdrantVectorStore:
-    dense_embedding = FastEmbedEmbeddings(
+    dense_embedding = _FastEmbedDenseEmbeddings(
         model_name=settings.fastembed_model_name,
         cache_dir=settings.fastembed_cache_dir or None,
         threads=settings.fastembed_threads,
