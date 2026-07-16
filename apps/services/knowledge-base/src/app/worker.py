@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -44,22 +45,35 @@ WORKER_INGEST_PHASE_DURATION_MS = Histogram(
 WORKER_DEAD_LETTER_TOTAL = Counter("rag_kb_dead_letter_total_worker", "KB worker dead-lettered ingest jobs.")
 
 
-def run_forever() -> None:
+def run_worker_loop(stop_event: threading.Event | None = None, *, enable_metrics: bool = True) -> None:
+    """Ingest 轮询主循环。
+
+    - stop_event:传入则用 stop_event.wait(POLL_SECONDS) 替代 time.sleep,支持优雅停止
+      (供 kb-service 进程内后台线程使用,shutdown 时置位即可干净退出)。
+    - enable_metrics:进程内运行时应传 False,避免与 service 的指标端口冲突。
+    """
     prepare_runtime()
-    if WORKER_METRICS_PORT > 0:
+    if enable_metrics and WORKER_METRICS_PORT > 0:
         start_http_server(WORKER_METRICS_PORT)
         logger.info("kb worker metrics listening port=%s", WORKER_METRICS_PORT)
     logger.info("kb worker started poll_seconds=%s", POLL_SECONDS)
-    while True:
+    while stop_event is None or not stop_event.is_set():
         job = _claim_next_job()
         if job is None:
-            time.sleep(POLL_SECONDS)
+            if stop_event is not None:
+                stop_event.wait(POLL_SECONDS)
+            else:
+                time.sleep(POLL_SECONDS)
             continue
         try:
             _process_job(job)
         except Exception as exc:  # pragma: no cover
             logger.exception("kb ingest job failed job_id=%s", job["id"])
             _handle_job_failure(job, exc)
+
+
+def run_forever() -> None:
+    run_worker_loop(stop_event=None, enable_metrics=True)
 
 
 def _claim_next_job() -> dict[str, Any] | None:
