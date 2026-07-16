@@ -200,35 +200,3 @@ def check_qdrant_access(
         "collection": config.collection,
         "status": str(getattr(info, "status", "") or "ok"),
     }
-
-
-def embed_passages(texts: list[str], settings: QdrantSettings | None = None) -> list[list[float]]:
-    if not texts:
-        return []
-    model = _get_fastembed_model(settings or load_qdrant_settings())
-    return [_vector_to_list(item) for item in model.passage_embed(texts)]
-
-
-def embed_query(text: str, settings: QdrantSettings | None = None) -> list[float]:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return []
-    model = _get_fastembed_model(settings or load_qdrant_settings())
-    for item in model.query_embed(cleaned):
-        return _vector_to_list(item)
-    return []
-
-
-@lru_cache(maxsize=2)
-def _get_fastembed_model(settings: QdrantSettings) -> TextEmbedding:
-    return TextEmbedding(
-        model_name=settings.fastembed_model_name,
-        cache_dir=settings.fastembed_cache_dir or None,
-        threads=settings.fastembed_threads,
-    )
-
-
-def _vector_to_list(value: Any) -> list[float]:
-    if hasattr(value, "tolist"):
-        return [float(item) for item in value.tolist()]
-    return [float(item) for item in list(value)]

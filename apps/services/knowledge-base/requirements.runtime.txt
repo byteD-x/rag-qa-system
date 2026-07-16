@@ -15,5 +15,4 @@ pypdf==5.3.1
 python-docx==1.1.2
 python-multipart==0.0.20
 qdrant-client==1.13.3
-rapidocr-onnxruntime==1.4.4
 uvicorn==0.34.0
