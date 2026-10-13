@@ -38,7 +38,6 @@ tar \
   --exclude='./.env.bak.*' \
   --exclude='./ops/deploy/qdrant-data' \
   --exclude='./ops/deploy/kb-data' \
-  --exclude='./apps/web/dist' \
   --exclude='./apps/web/dist.bak.*' \
   -czf "$archive" -C "$ROOT_DIR" .
 
