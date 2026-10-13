@@ -214,8 +214,11 @@ class SemanticCache:
         removed = 0
         to_remove: list[str] = []
 
+        clear_all = not any((corpus_id, question, model_name))
         for key, entry in self._memory_cache.items():
-            if corpus_id and corpus_id in entry.corpus_ids:
+            if clear_all:
+                to_remove.append(key)
+            elif corpus_id and corpus_id in entry.corpus_ids:
                 to_remove.append(key)
             elif question and entry.question == question:
                 to_remove.append(key)
@@ -229,6 +232,30 @@ class SemanticCache:
         self._clears += removed
         logger.info("cache_invalidated count=%d corpus=%s", removed, corpus_id or "all")
         return removed
+
+    def config(self) -> dict[str, Any]:
+        return {
+            "semantic_threshold": round(float(self._semantic_threshold), 4),
+            "default_ttl": round(float(self._default_ttl), 3),
+            "max_entries": int(self._max_entries),
+            "semantic_enabled": bool(self._semantic_enabled),
+        }
+
+    def update_config(
+        self,
+        *,
+        semantic_threshold: float | None = None,
+        default_ttl: float | None = None,
+        max_entries: int | None = None,
+    ) -> dict[str, Any]:
+        if semantic_threshold is not None:
+            self._semantic_threshold = float(semantic_threshold)
+        if default_ttl is not None:
+            self._default_ttl = float(default_ttl)
+        if max_entries is not None:
+            self._max_entries = int(max_entries)
+            self._evict_lru()
+        return self.config()
 
     def stats(self) -> dict[str, Any]:
         """缓存统计。"""

@@ -118,6 +118,23 @@ class LLMModelDiscoveryRequest(BaseModel):
         return value.strip()
 
 
+class CacheInvalidateRequest(BaseModel):
+    corpus_id: str = Field(default="", max_length=256)
+    question: str = Field(default="", max_length=12000)
+    model_name: str = Field(default="", max_length=256)
+
+    @field_validator("corpus_id", "question", "model_name")
+    @classmethod
+    def normalize_cache_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class CacheConfigRequest(BaseModel):
+    semantic_threshold: float | None = Field(default=None, ge=0.7, le=0.99)
+    default_ttl: float | None = Field(default=None, ge=60, le=604800)
+    max_entries: int | None = Field(default=None, ge=100, le=100000)
+
+
 class ModelProviderConfigRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     provider_type: str = Field(default="openai-compatible", min_length=1, max_length=64)

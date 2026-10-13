@@ -13,6 +13,33 @@ from .ai_client import LLMSettings, load_llm_settings
 DEFAULT_MAX_MODELS = 200
 
 
+def infer_provider_from_base_url(base_url: str, provider: str = "") -> str:
+    """Infer common provider labels from an OpenAI-compatible endpoint.
+
+    Explicit non-generic provider labels always win; the inference only removes
+    the need to manually label well-known relay/local endpoints in the UI.
+    """
+    explicit = str(provider or "").strip().lower()
+    if explicit and explicit not in {"openai-compatible", "auto", ""}:
+        return explicit
+    value = str(base_url or "").strip().lower()
+    markers = (
+        ("newapi", "newapi"),
+        ("new-api", "newapi"),
+        ("sub2api", "sub2api"),
+        ("ollama", "ollama"),
+        ("lmstudio", "lmstudio"),
+        ("lm-studio", "lmstudio"),
+        ("dashscope", "dashscope"),
+        ("aliyuncs", "dashscope"),
+        ("deepseek", "deepseek"),
+    )
+    for marker, label in markers:
+        if marker in value:
+            return label
+    return explicit or "openai-compatible"
+
+
 def llm_config_summary(settings: LLMSettings | None = None) -> dict[str, Any]:
     effective = settings or load_llm_settings()
     return {
@@ -147,7 +174,10 @@ async def discover_openai_compatible_models(
     client_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     effective = settings or load_llm_settings()
-    resolved_provider = (provider or effective.provider or "openai-compatible").strip()
+    resolved_provider = infer_provider_from_base_url(
+        base_url or effective.base_url,
+        provider or effective.provider,
+    )
     resolved_base_url = (base_url or effective.base_url).strip()
     resolved_credential = (credential or effective.api_key).strip()
     no_key_providers = {"ollama", "localai", "vllm", "local", "openai-compatible-local"}

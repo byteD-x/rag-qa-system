@@ -263,6 +263,16 @@ const routeEntries = computed(() =>
 const effectiveBaseUrl = computed(() => discoveryResult.value?.base_url || form.base_url || config.value?.base_url || '');
 const effectiveProvider = computed(() => discoveryResult.value?.provider || form.provider || config.value?.provider || 'openai-compatible');
 
+function inferProviderFromUrl(value: string) {
+  const url = value.toLowerCase();
+  const markers: Array<[string, string]> = [
+    ['newapi', 'newapi'], ['new-api', 'newapi'], ['sub2api', 'sub2api'],
+    ['ollama', 'ollama'], ['lmstudio', 'lmstudio'], ['lm-studio', 'lmstudio'],
+    ['dashscope', 'dashscope'], ['aliyuncs', 'dashscope'], ['deepseek', 'deepseek'],
+  ];
+  return markers.find(([marker]) => url.includes(marker))?.[1] || 'openai-compatible';
+}
+
 const configSnippet = computed(() => {
   const model = selectedModel.value || '<select-a-model>';
   const baseUrl = effectiveBaseUrl.value || '<relay-base-url>';
@@ -317,6 +327,9 @@ async function loadConfig() {
     applyConfigDefaults(payload);
     const stored: any = await listModelProviderConfigs().catch(() => ({ items: [] }));
     modelConfigs.value = stored.items || [];
+    if (form.base_url) {
+      await discoverModels(true);
+    }
   } finally {
     configLoading.value = false;
   }
@@ -350,13 +363,17 @@ async function disableSavedConfig(configId: string) {
   ElMessage.success('模型配置已停用');
 }
 
-async function discoverModels() {
+async function discoverModels(silent = false) {
+  if (form.provider === 'openai-compatible' && form.base_url.trim()) {
+    form.provider = inferProviderFromUrl(form.base_url);
+  }
   if (!form.base_url.trim()) {
-    ElMessage.warning('请先填写中转站 Base URL');
+    if (!silent) ElMessage.warning('请先填写中转站 Base URL');
     return;
   }
-  if (!form.credential.trim() && !config.value?.api_key_configured) {
-    ElMessage.warning('请填写 API Key，或先在后端环境变量中配置密钥');
+  const noKeyProvider = ['ollama', 'localai', 'vllm', 'local', 'openai-compatible-local'].includes(form.provider.toLowerCase());
+  if (!form.credential.trim() && !config.value?.api_key_configured && !noKeyProvider) {
+    if (!silent) ElMessage.warning('请填写 API Key，或先在后端环境变量中配置密钥');
     return;
   }
 
@@ -374,7 +391,8 @@ async function discoverModels() {
     });
     discoveryResult.value = payload;
     selectedModel.value = payload.models?.[0]?.id || selectedModel.value;
-    ElMessage.success(`已获取 ${payload.count || 0} 个模型`);
+    if (payload.provider && form.provider === 'openai-compatible') form.provider = payload.provider;
+    if (!silent) ElMessage.success(`已获取 ${payload.count || 0} 个模型`);
   } finally {
     form.credential = '';
     discovering.value = false;
