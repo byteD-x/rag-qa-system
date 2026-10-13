@@ -210,6 +210,7 @@ def execute_notion_sync(
     delete_missing: bool,
     dry_run: bool,
     max_pages: int | None,
+    allowed_departments: list[str] | None = None,
     user: CurrentUser,
     db: Any,
     storage: Any,
@@ -232,6 +233,7 @@ def execute_notion_sync(
         db=db,
         storage=storage,
         storage_service="kb-connector-notion",
+        allowed_departments=allowed_departments,
         ignored_files=[],
         extra_result={"page_ids": normalized_ids},
     )

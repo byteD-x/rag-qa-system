@@ -16,24 +16,55 @@ from .kb_runtime import VISUAL_ASSET_URL_EXPIRES_SECONDS, db, storage
 VISUAL_REGION_TITLE_RE = re.compile(r"^Page\s+\d+\s+(.+)$", re.IGNORECASE)
 
 
-def fetch_base_documents(base_id: str, *, user: CurrentUser, cur=None) -> list[dict[str, Any]]:
+def fetch_base_documents(
+    base_id: str,
+    *,
+    user: CurrentUser,
+    cur=None,
+    shared_read: bool = False,
+) -> list[dict[str, Any]]:
     if cur is not None:
-        return fetch_base_documents_with_cursor(cur, base_id, user=user)
+        return fetch_base_documents_with_cursor(cur, base_id, user=user, shared_read=shared_read)
     with db.connect() as conn:
         with conn.cursor() as next_cur:
-            return fetch_base_documents_with_cursor(next_cur, base_id, user=user)
+            return fetch_base_documents_with_cursor(next_cur, base_id, user=user, shared_read=shared_read)
 
 
-def fetch_base_documents_with_cursor(cur, base_id: str, *, user: CurrentUser) -> list[dict[str, Any]]:
-    if can_manage_everything(user):
-        cur.execute(
+def fetch_base_documents_with_cursor(
+    cur,
+    base_id: str,
+    *,
+    user: CurrentUser,
+    shared_read: bool = False,
+) -> list[dict[str, Any]]:
+    if can_manage_everything(user) or shared_read:
+        access_clause = ""
+        params: tuple[Any, ...] = (base_id,)
+        if shared_read and not can_manage_everything(user):
+            department = str(getattr(user, "department", "") or "").strip().lower()
+            access_clause = """
+              AND (
+                  cardinality(COALESCE(allowed_departments, ARRAY[]::text[])) = 0
+                  OR (
+                      %s <> ''
+                      AND EXISTS (
+                          SELECT 1
+                          FROM unnest(COALESCE(allowed_departments, ARRAY[]::text[])) AS allowed(department)
+                          WHERE lower(trim(allowed.department)) = %s
+                      )
+                  )
+              )
             """
+            params = (base_id, department, department)
+        cur.execute(
+            f"""
             SELECT *
             FROM kb_documents
             WHERE base_id = %s
+            {access_clause}
             ORDER BY created_at DESC
             """,
-            (base_id,),
+            params,
         )
     else:
         cur.execute(
@@ -70,7 +101,30 @@ def load_base(base_id: str, *, user: CurrentUser, request: Request | None = None
 def load_base_unscoped(base_id: str) -> dict[str, Any]:
     with db.connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM kb_bases WHERE id = %s", (base_id,))
+            cur.execute(
+                """
+                SELECT b.*,
+                       COALESCE(
+                           (SELECT array_agg(bt.type_key ORDER BY bt.is_primary DESC, bt.type_key)
+                            FROM kb_base_types bt WHERE bt.base_id = b.id),
+                           ARRAY['general']::text[]
+                       ) AS type_keys,
+                       COALESCE(
+                           (SELECT jsonb_agg(jsonb_build_object(
+                               'id', jp.id::text,
+                               'code', jp.code,
+                               'name', jp.name
+                           ) ORDER BY bpj.is_primary DESC, jp.name)
+                            FROM kb_base_job_positions bpj
+                            JOIN job_positions jp ON jp.id = bpj.job_position_id
+                            WHERE bpj.base_id = b.id),
+                           '[]'::jsonb
+                       ) AS job_positions
+                FROM kb_bases b
+                WHERE b.id = %s
+                """,
+                (base_id,),
+            )
             row = cur.fetchone()
     if row is None:
         raise_api_error(404, "knowledge_base_not_found", "knowledge base not found")
@@ -148,7 +202,17 @@ def load_visual_asset(
     return row
 
 
-def ensure_base_exists(base_id: str, *, user: CurrentUser, request: Request | None = None, action: str = "kb.base.get") -> None:
+def ensure_base_exists(
+    base_id: str,
+    *,
+    user: CurrentUser,
+    request: Request | None = None,
+    action: str = "kb.base.get",
+    allow_shared_read: bool = False,
+) -> None:
+    if allow_shared_read:
+        load_base_unscoped(base_id)
+        return
     load_base(base_id, user=user, request=request, action=action)
 
 

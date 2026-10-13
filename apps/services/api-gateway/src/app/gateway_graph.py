@@ -98,6 +98,7 @@ def _deserialize_user(payload: dict[str, Any]) -> AuthUser:
         role=str(payload.get("role") or ""),
         permissions=permissions,
         role_version=int(payload.get("role_version") or 1),
+        department=str(payload.get("department") or "").strip(),
     )
 
 

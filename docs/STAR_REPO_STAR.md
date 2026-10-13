@@ -1,7 +1,23 @@
 # RAG-QA STAR 主材料
 
-> Last updated: 2026-06-08  
+> Last updated: 2026-09-27
 > 口径：所有结果都绑定到当前仓库代码、测试或文档；没有真实业务报告的数据只写“待补指标”。
+
+## 本轮可量化成果
+
+### 检索并发与 P95
+
+- **背景/困难**：基线每请求建立 PostgreSQL 连接和三路召回线程池，并发升高后 QPS 饱和、P95 劣化；单次压测还会受缓存预热和问题顺序影响。
+- **解决办法**：复用连接池和有界召回线程池，增加 ACL 感知 TTL/LRU 检索缓存与 single-flight，并采用同语料、同问题集、每档 500 请求的 ABBA 交替压测。
+- **成效**：`POST /api/v1/kb/retrieve` 纯检索接口在并发 4–32 下 QPS **+48.8%–59.1%**、P95 **-29.0%–36.3%**；成功率和非空检索率均 **100%**、错误数 **0**。该数据不包含 LLM 生成链路。
+
+### 召回与拒答判定
+
+- **背景/困难**：RRF 相对排名分被误当绝对相关性，造成无证据问题被判为 `grounded`；Gateway 证据裁剪还会改变阈值分布。
+- **解决办法**：增加 dense absolute relevance，贯通 `EvidencePath`，按章节去重并基于端到端裁剪口径重标阈值。
+- **成效**：140 题评测中拒答率 **0→2.86%**，无证据题 grounded 误判 **12/12→0/12**，拒答 precision **0.75**、recall **0.25**；可回答题硬误拒 **1/128**，检索 Accuracy（`matched` 比例）**0.8643 保持不变**。仍有 9/12 无证据题走 `weak_grounded`，指标不能外推到生产；LLM faithfulness/答案正确率不纳入本轮结论。
+
+证据：`.codex/verification-report-perf-2026-09-27.md`、`docs/reference/RAG_STAR_TECHNICAL_CHALLENGES.md`。
 
 ## STAR 1：把回答从“生成文本”收紧为“证据约束输出”
 

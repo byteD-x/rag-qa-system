@@ -204,6 +204,7 @@ def execute_local_directory_sync(
     delete_missing: bool,
     dry_run: bool,
     max_files: int | None,
+    allowed_departments: list[str] | None = None,
     user: CurrentUser,
     db: Any,
     storage: Any,
@@ -241,6 +242,7 @@ def execute_local_directory_sync(
         db=db,
         storage=storage,
         storage_service="kb-connector-local",
+        allowed_departments=allowed_departments,
         ignored_files=ignored,
         extra_result={"recursive": recursive},
     )

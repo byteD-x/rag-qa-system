@@ -13,7 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages/python"))
 
 from shared.embeddings import EmbeddingSettings, cosine_similarity, embed_texts
-from shared.eval_metrics import ndcg_at_k, recall_at_k, reciprocal_rank
+from shared.eval_metrics import ndcg_at_k, recall_at_k_ids, reciprocal_rank
 
 
 def _build_local_settings(backend: str) -> EmbeddingSettings:
@@ -47,8 +47,8 @@ def _build_external_settings(args: argparse.Namespace) -> EmbeddingSettings | No
 def _score_metrics(expected_unit_ids: set[str], ranked_unit_ids: list[str]) -> dict[str, float]:
     relevance = [1 if unit_id in expected_unit_ids else 0 for unit_id in ranked_unit_ids]
     return {
-        "recall_at_1": recall_at_k(relevance, 1),
-        "recall_at_3": recall_at_k(relevance, 3),
+        "recall_at_1": recall_at_k_ids(expected_unit_ids, ranked_unit_ids, 1),
+        "recall_at_3": recall_at_k_ids(expected_unit_ids, ranked_unit_ids, 3),
         "mrr": reciprocal_rank(relevance),
         "ndcg_at_3": ndcg_at_k(relevance, 3),
     }

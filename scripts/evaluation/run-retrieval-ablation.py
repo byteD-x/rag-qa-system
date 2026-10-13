@@ -11,7 +11,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages/python"))
 
-from shared.eval_metrics import ndcg_at_k, recall_at_k, reciprocal_rank
+from shared.eval_metrics import ndcg_at_k, recall_at_k_ids, reciprocal_rank
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath, weighted_rrf
@@ -108,9 +108,10 @@ def rank_case(case: dict[str, Any], *, enable_rewrite: bool, enable_rerank: bool
 def score_ranking(case: dict[str, Any], ranked: list[EvidenceBlock]) -> dict[str, Any]:
     expected = {str(item) for item in case.get("expected_unit_ids", [])}
     relevance = [1 if block.unit_id in expected else 0 for block in ranked]
+    ranked_ids = [block.unit_id for block in ranked]
     return {
-        "recall_at_1": recall_at_k(relevance, 1),
-        "recall_at_3": recall_at_k(relevance, 3),
+        "recall_at_1": recall_at_k_ids(expected, ranked_ids, 1),
+        "recall_at_3": recall_at_k_ids(expected, ranked_ids, 3),
         "mrr": reciprocal_rank(relevance),
         "ndcg_at_3": ndcg_at_k(relevance, 3),
     }

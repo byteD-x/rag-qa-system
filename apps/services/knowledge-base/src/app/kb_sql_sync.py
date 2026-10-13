@@ -78,6 +78,7 @@ def execute_sql_sync(
     delete_missing: bool,
     dry_run: bool,
     max_rows: int | None,
+    allowed_departments: list[str] | None = None,
     user: CurrentUser,
     db: Any,
     storage: Any,
@@ -140,6 +141,7 @@ def execute_sql_sync(
         db=db,
         storage=storage,
         storage_service="kb-connector-sql",
+        allowed_departments=allowed_departments,
         ignored_files=[],
         extra_result={"row_count": len(connector_candidates)},
     )

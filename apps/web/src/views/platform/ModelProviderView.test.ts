@@ -1,9 +1,10 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { discoverLlmModels, getLlmConfig, messageSuccess, messageWarning } = vi.hoisted(() => ({
+const { discoverLlmModels, getLlmConfig, listModelProviderConfigs, messageSuccess, messageWarning } = vi.hoisted(() => ({
   discoverLlmModels: vi.fn(),
   getLlmConfig: vi.fn(),
+  listModelProviderConfigs: vi.fn().mockResolvedValue({ items: [] }),
   messageSuccess: vi.fn(),
   messageWarning: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock('element-plus', () => ({
 vi.mock('@/api/platform', () => ({
   discoverLlmModels,
   getLlmConfig,
+  listModelProviderConfigs,
 }));
 
 import ModelProviderView from './ModelProviderView.vue';
@@ -100,6 +102,7 @@ describe('ModelProviderView', () => {
   beforeEach(() => {
     discoverLlmModels.mockReset();
     getLlmConfig.mockReset();
+    listModelProviderConfigs.mockReset();
     messageSuccess.mockReset();
     messageWarning.mockReset();
 
@@ -113,6 +116,7 @@ describe('ModelProviderView', () => {
       common_knowledge_model: '',
       model_routing: {},
     });
+    listModelProviderConfigs.mockResolvedValue({ items: [] });
     discoverLlmModels.mockResolvedValue({
       provider: 'newapi',
       base_url: 'https://relay.example.test/v1',
@@ -139,10 +143,7 @@ describe('ModelProviderView', () => {
 
     const inputs = wrapper.findAll('input');
     const baseUrlInput = inputs.find((input) => input.attributes('placeholder') === 'https://relay.example.com/v1');
-    const credentialInput = inputs.find((input) => {
-      const placeholder = input.attributes('placeholder');
-      return placeholder !== 'https://relay.example.com/v1' && placeholder !== 'grounded' && placeholder !== 'grounded_backup' && input.attributes('type') !== 'number';
-    });
+    const credentialInput = inputs.find((input) => input.attributes('placeholder') === '仅用于本次模型发现请求');
     const fallbackRouteInput = inputs.find((input) => input.attributes('placeholder') === 'grounded_backup');
 
     expect(baseUrlInput).toBeTruthy();
@@ -152,7 +153,7 @@ describe('ModelProviderView', () => {
     await baseUrlInput!.setValue('https://relay.example.test/v1');
     await credentialInput!.setValue(relayCredential);
     await fallbackRouteInput!.setValue('grounded_backup');
-    const discoverButton = wrapper.findAll('button')[1];
+    const discoverButton = wrapper.findAll('button').find((button) => button.text().includes('获取模型列表'));
     expect(discoverButton).toBeTruthy();
     await discoverButton!.trigger('click');
     await flushPromises();

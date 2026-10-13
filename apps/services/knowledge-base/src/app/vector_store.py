@@ -48,6 +48,38 @@ class KnowledgeBaseRetriever(BaseRetriever):
     document_ids: list[str]
     limit: int
 
+    def _dense_relevance(self, query: str, query_filter: models.Filter) -> dict[str, float]:
+        """取 dense 单路余弦分,作为可跨查询比较的绝对相关性信号。
+
+        RetrievalMode.HYBRID 下 similarity_search_with_score 返回的是 Qdrant 的 RRF
+        融合分(相对排名量,量纲随 k 与各路命中数变化),不能当绝对阈值用,
+        故此处额外查一次 dense 单路。失败时返回空字典,由调用方按「信号缺失」降级处理。
+
+        注意:with_payload 必须传 True。传部分字段选择器(如 ["metadata.unit_id"])
+        会让 qdrant-client 走慢路径,单次查询从 ~1.5ms 劣化到 ~44ms。
+        """
+        try:
+            vector = self.vector_store.embeddings.embed_query(query)
+            points = self.vector_store.client.query_points(
+                collection_name=self.vector_store.collection_name,
+                query=vector,
+                using=self.vector_store.vector_name,
+                query_filter=query_filter,
+                limit=max(self.limit, 1),
+                with_payload=True,
+            ).points
+        except Exception:
+            from .kb_runtime import logger
+
+            logger.warning("dense relevance probe failed", exc_info=True)
+            return {}
+        scores: dict[str, float] = {}
+        for point in points:
+            unit_id = str(((point.payload or {}).get("metadata") or {}).get("unit_id") or "")
+            if unit_id:
+                scores[unit_id] = float(point.score or 0.0)
+        return scores
+
     def _get_relevant_documents(self, query: str, *, run_manager: Any) -> list[Document]:
         cleaned = query.strip()
         if not cleaned:
@@ -60,23 +92,31 @@ class KnowledgeBaseRetriever(BaseRetriever):
             filter_must.append(
                 models.FieldCondition(key=f"{METADATA_PREFIX}document_id", match=models.MatchAny(any=filtered_document_ids))
             )
+        query_filter = models.Filter(must=filter_must)
         results = self.vector_store.similarity_search_with_score(
             cleaned,
             k=max(self.limit, 1),
-            filter=models.Filter(must=filter_must),
+            filter=query_filter,
         )
+        relevance_by_unit = self._dense_relevance(cleaned, query_filter)
         documents: list[Document] = []
         for rank, (document, score) in enumerate(results, start=1):
             metadata = dict(document.metadata or {})
             signal_scores = dict(metadata.get("signal_scores") or {})
             signal_scores["vector"] = round(float(score or 0.0), 6)
+            unit_id = str(metadata.get("unit_id") or "")
+            if unit_id in relevance_by_unit:
+                signal_scores["relevance"] = round(relevance_by_unit[unit_id], 6)
             metadata["signal_scores"] = signal_scores
-            metadata["evidence_path"] = {
+            evidence_path = {
                 **dict(metadata.get("evidence_path") or {}),
                 "vector_rank": rank,
                 "final_rank": rank,
                 "final_score": round(float(score or 0.0), 6),
             }
+            if "relevance" in signal_scores:
+                evidence_path["relevance"] = signal_scores["relevance"]
+            metadata["evidence_path"] = evidence_path
             documents.append(Document(page_content=document.page_content, metadata=metadata))
         return documents
 
@@ -233,6 +273,11 @@ def _row_to_document(row: dict[str, Any], *, unit_type: str) -> Document:
         "unit_id": str(row["unit_id"]),
         "base_id": str(row["base_id"]),
         "document_id": str(row["document_id"]),
+        "content_kind": str(row.get("content_kind") or "document"),
+        "question_type": str(row.get("question_type") or ""),
+        "difficulty": str(row.get("difficulty") or ""),
+        "tags": list(row.get("tags_json") or []),
+        "kb_metadata": dict(row.get("metadata_json") or {}),
         "document_title": str(row.get("document_title") or ""),
         "region_label": str(row.get("region_label") or ""),
         "version_family_key": str(row.get("version_family_key") or ""),
@@ -286,6 +331,11 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
         service_type="kb",
         evidence_kind=_evidence_kind_from_source_kind(str(metadata.get("source_kind") or "")),
         source_kind=str(metadata.get("source_kind") or "text"),
+        content_kind=str(metadata.get("content_kind") or "document"),
+        question_type=str(metadata.get("question_type") or ""),
+        difficulty=str(metadata.get("difficulty") or ""),
+        tags=[str(item) for item in list(metadata.get("tags") or [])],
+        kb_metadata=dict(metadata.get("kb_metadata") or {}),
         page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
         asset_id=str(metadata.get("asset_id") or ""),
         thumbnail_url=str(metadata.get("thumbnail_url") or ""),
@@ -298,6 +348,7 @@ def _document_to_evidence(document: Document) -> EvidenceBlock:
             vector_rank=int(evidence_path["vector_rank"]) if evidence_path.get("vector_rank") is not None else None,
             final_rank=int(evidence_path["final_rank"]) if evidence_path.get("final_rank") is not None else None,
             final_score=round(float(evidence_path.get("final_score") or 0.0), 6),
+            relevance=round(float(evidence_path.get("relevance") or 0.0), 6),
         ),
     )
 
@@ -365,6 +416,11 @@ def _load_section_rows(document_id: str) -> list[dict[str, Any]]:
                     documents.base_id::text AS base_id,
                     sections.document_id::text AS document_id,
                     documents.file_name AS document_title,
+                    documents.content_kind,
+                    documents.question_type,
+                    documents.difficulty,
+                    documents.tags_json,
+                    bases.metadata_json,
                     documents.version_family_key,
                     documents.version_label,
                     documents.version_number,
@@ -387,6 +443,7 @@ def _load_section_rows(document_id: str) -> list[dict[str, Any]]:
                     vr.confidence
                 FROM kb_sections sections
                 JOIN kb_documents documents ON documents.id = sections.document_id
+                JOIN kb_bases bases ON bases.id = documents.base_id
                 LEFT JOIN LATERAL (
                     SELECT region_label, bbox_json, confidence
                     FROM kb_visual_asset_regions region
@@ -422,6 +479,11 @@ def _load_chunk_rows(document_id: str) -> list[dict[str, Any]]:
                     documents.base_id::text AS base_id,
                     chunks.document_id::text AS document_id,
                     documents.file_name AS document_title,
+                    documents.content_kind,
+                    documents.question_type,
+                    documents.difficulty,
+                    documents.tags_json,
+                    bases.metadata_json,
                     documents.version_family_key,
                     documents.version_label,
                     documents.version_number,
@@ -445,6 +507,7 @@ def _load_chunk_rows(document_id: str) -> list[dict[str, Any]]:
                 FROM kb_chunks chunks
                 JOIN kb_sections sections ON sections.id = chunks.section_id
                 JOIN kb_documents documents ON documents.id = chunks.document_id
+                JOIN kb_bases bases ON bases.id = documents.base_id
                 LEFT JOIN LATERAL (
                     SELECT region_label, bbox_json, confidence
                     FROM kb_visual_asset_regions region

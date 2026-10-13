@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -34,14 +35,17 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         "| metric | value |",
         "| --- | ---: |",
         f"| success rate | {summary['success_rate']:.4f} |",
-        f"| throughput (req/s) | {summary['throughput_rps']:.4f} |",
+        f"| nonempty retrieval rate (successful requests) | {summary['nonempty_retrieval_rate']:.4f} |",
+        f"| successful throughput (req/s) | {summary['success_throughput_rps']:.4f} |",
+        f"| attempted throughput (req/s) | {summary['throughput_rps']:.4f} |",
         f"| wall time (s) | {summary['wall_time_seconds']:.4f} |",
         f"| p50 latency (ms) | {summary['latency']['p50_ms']:.2f} |",
-        f"| p95 latency (ms) | {summary['latency']['p95_ms']:.2f} |",
+        f"| p95 successful latency (ms) | {summary['latency']['p95_ms']:.2f} |",
         f"| max latency (ms) | {summary['latency']['max_ms']:.2f} |",
         f"| mean retrieval ms | {summary['retrieval_ms']['mean_ms']:.2f} |",
         f"| p95 retrieval ms | {summary['retrieval_ms']['p95_ms']:.2f} |",
         f"| mean selected candidates | {summary['mean_selected_candidates']:.2f} |",
+        f"| retrieval cache hit rate | {summary['retrieval_cache_hit_rate']:.4f} |",
         f"| error count | {summary['error_count']} |",
     ]
     if report["errors"]:
@@ -82,6 +86,7 @@ async def send_request(
             "trace_id": str(body.get("trace_id") or ""),
             "selected_candidates": int(retrieval.get("selected_candidates", 0) or 0),
             "retrieval_ms": float(retrieval.get("retrieval_ms", 0.0) or 0.0),
+            "cache_hit": bool(retrieval.get("cache_hit", False)),
             "error": {},
         }
     except httpx.HTTPStatusError as exc:
@@ -100,6 +105,7 @@ async def send_request(
             "trace_id": "",
             "selected_candidates": 0,
             "retrieval_ms": 0.0,
+            "cache_hit": False,
             "error": {
                 "code": str(detail.get("code") or "http_error"),
                 "detail": str(detail.get("detail") or exc.response.text or "request failed"),
@@ -115,6 +121,7 @@ async def send_request(
             "trace_id": "",
             "selected_candidates": 0,
             "retrieval_ms": 0.0,
+            "cache_hit": False,
             "error": {
                 "code": exc.__class__.__name__,
                 "detail": str(exc),
@@ -130,27 +137,32 @@ async def run_concurrency_benchmark(
     total_requests: int,
     concurrency: int,
     timeout_seconds: float,
+    questions: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], float]:
     limits = httpx.Limits(max_keepalive_connections=concurrency, max_connections=max(concurrency * 2, 4))
     async with httpx.AsyncClient(timeout=timeout_seconds, limits=limits) as client:
         started = time.perf_counter()
-        tasks = [
-            send_request(
-                client,
-                retrieve_url=retrieve_url,
-                headers=headers,
-                payload=payload,
-                request_id=request_id,
-            )
-            for request_id in range(1, total_requests + 1)
-        ]
-
+        next_request_id = 1
         results: list[dict[str, Any]] = []
-        for chunk_start in range(0, len(tasks), concurrency):
-            chunk = tasks[chunk_start : chunk_start + concurrency]
-            results.extend(await asyncio.gather(*chunk))
+
+        async def worker() -> None:
+            nonlocal next_request_id
+            while next_request_id <= total_requests:
+                request_id = next_request_id
+                next_request_id += 1
+                results.append(
+                    await send_request(
+                        client,
+                        retrieve_url=retrieve_url,
+                        headers=headers,
+                        payload={**payload, "question": questions[(request_id - 1) % len(questions)]} if questions else payload,
+                        request_id=request_id,
+                    )
+                )
+
+        await asyncio.gather(*(worker() for _ in range(min(concurrency, total_requests))))
         wall_time_seconds = round(time.perf_counter() - started, 4)
-        return results, wall_time_seconds
+        return sorted(results, key=lambda item: item["request_id"]), wall_time_seconds
 
 
 def summarize_results(
@@ -162,9 +174,10 @@ def summarize_results(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     success_rows = [item for item in results if item["ok"]]
     error_rows = [item for item in results if not item["ok"]]
-    latency_values = [float(item["latency_ms"]) for item in results]
+    latency_values = [float(item["latency_ms"]) for item in success_rows]
     retrieval_values = [float(item["retrieval_ms"]) for item in success_rows if float(item["retrieval_ms"]) > 0]
     selected_candidates = [int(item["selected_candidates"]) for item in success_rows]
+    cache_hits = [item for item in success_rows if bool(item.get("cache_hit", False))]
 
     error_counts: dict[tuple[int, str], int] = {}
     for item in error_rows:
@@ -181,11 +194,17 @@ def summarize_results(
         "success_count": len(success_rows),
         "error_count": len(error_rows),
         "success_rate": round(len(success_rows) / float(total_requests), 4) if total_requests else 0.0,
+        "nonempty_retrieval_rate": round(
+            sum(1 for item in success_rows if int(item["selected_candidates"]) > 0) / len(success_rows), 4
+        ) if success_rows else 0.0,
         "throughput_rps": round(len(results) / wall_time_seconds, 4) if wall_time_seconds > 0 else 0.0,
+        "success_throughput_rps": round(len(success_rows) / wall_time_seconds, 4) if wall_time_seconds > 0 else 0.0,
         "wall_time_seconds": wall_time_seconds,
         "latency": summarize_latencies(latency_values),
+        "all_latency": summarize_latencies([float(item["latency_ms"]) for item in results]),
         "retrieval_ms": summarize_latencies(retrieval_values),
         "mean_selected_candidates": round(mean(selected_candidates), 4) if selected_candidates else 0.0,
+        "retrieval_cache_hit_rate": round(len(cache_hits) / len(success_rows), 4) if success_rows else 0.0,
     }
     return summary, errors
 
@@ -197,12 +216,14 @@ def warmup(
     payload: dict[str, Any],
     requests: int,
     timeout_seconds: float,
+    questions: list[str] | None = None,
 ) -> None:
     if requests <= 0:
         return
     with httpx.Client(timeout=timeout_seconds) as client:
-        for _ in range(requests):
-            response = client.post(retrieve_url, headers=headers, json=payload)
+        for index in range(requests):
+            body = {**payload, "question": questions[index % len(questions)]} if questions else payload
+            response = client.post(retrieve_url, headers=headers, json=body)
             response.raise_for_status()
 
 
@@ -211,9 +232,10 @@ def main() -> int:
     parser.add_argument("--auth-base-url", default="http://localhost:8080/api/v1")
     parser.add_argument("--retrieve-url", default="http://localhost:8300/api/v1/kb/retrieve")
     parser.add_argument("--email", default="admin@local")
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--password", default=None, help="Defaults to BENCHMARK_PASSWORD environment variable.")
     parser.add_argument("--base-id", required=True)
-    parser.add_argument("--question", required=True)
+    parser.add_argument("--question", default="")
+    parser.add_argument("--questions-file", help="UTF-8 text file with one question per line.")
     parser.add_argument("--document-id", action="append", default=[])
     parser.add_argument("--limit", type=int, default=8)
     parser.add_argument("--total-requests", type=int, default=40)
@@ -228,12 +250,21 @@ def main() -> int:
         raise SystemExit("--total-requests must be > 0")
     if args.concurrency <= 0:
         raise SystemExit("--concurrency must be > 0")
+    password = args.password or os.getenv("BENCHMARK_PASSWORD", "")
+    if not password:
+        raise SystemExit("--password or BENCHMARK_PASSWORD is required")
+    questions = (
+        [line.strip() for line in Path(args.questions_file).read_text(encoding="utf-8").splitlines() if line.strip()]
+        if args.questions_file else [args.question.strip()]
+    )
+    if not questions or not all(questions):
+        raise SystemExit("--question or a nonempty --questions-file is required")
 
-    token = login(args.auth_base_url, args.email, args.password)
+    token = login(args.auth_base_url, args.email, password)
     headers = auth_headers(token)
     payload = {
         "base_id": args.base_id,
-        "question": args.question,
+        "question": questions[0],
         "document_ids": [str(item) for item in args.document_id if str(item).strip()],
         "limit": max(int(args.limit), 1),
     }
@@ -244,6 +275,7 @@ def main() -> int:
         payload=payload,
         requests=max(int(args.warmup_requests), 0),
         timeout_seconds=max(float(args.timeout_seconds), 5.0),
+        questions=questions,
     )
 
     results, wall_time_seconds = asyncio.run(
@@ -254,6 +286,7 @@ def main() -> int:
             total_requests=int(args.total_requests),
             concurrency=int(args.concurrency),
             timeout_seconds=max(float(args.timeout_seconds), 5.0),
+            questions=questions,
         )
     )
     summary, errors = summarize_results(
@@ -268,6 +301,8 @@ def main() -> int:
             "retrieve_url": args.retrieve_url,
             "base_id": args.base_id,
             "question": args.question,
+            "questions_file": str(args.questions_file or ""),
+            "questions_count": len(questions),
             "document_ids": payload["document_ids"],
             "limit": payload["limit"],
             "total_requests": int(args.total_requests),

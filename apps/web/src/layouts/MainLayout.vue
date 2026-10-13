@@ -187,6 +187,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/auth';
 import {
   ChatDotRound,
+  Collection,
   Files,
   Grid,
   Monitor,
@@ -215,6 +216,11 @@ const navItemsPrimary = [
     path: '/workspace/chat',
     label: '统一问答',
     icon: ChatDotRound
+  },
+  {
+    path: '/workspace/interview',
+    label: 'AI 模拟面试',
+    icon: Collection
   },
   {
     path: '/workspace/platform/agents',
@@ -262,6 +268,7 @@ const navItemsPrimaryFiltered = computed(() =>
   navItemsPrimary.filter((item) => {
     if (
       item.path === '/workspace/chat' ||
+      item.path === '/workspace/interview' ||
       item.path === '/workspace/platform/agents' ||
       item.path === '/workspace/platform/prompts' ||
       item.path === '/workspace/platform/models'

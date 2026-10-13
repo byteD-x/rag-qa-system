@@ -9,6 +9,7 @@
 | 场景 | 文档 | 用途 |
 |---|---|---|
 | 了解项目和本地启动 | [README.md](../README.md) | 项目能力、快速开始、环境变量、验证命令 |
+| 小规格 Linux 服务器部署 | [ops/deploy/README.md](../ops/deploy/README.md) | 低内存 Compose、数据库初始化、Nginx 与 HTTPS 接入 |
 | 查接口契约 | [reference/api-specification.md](reference/api-specification.md) | Gateway 与 KB Service 的核心 HTTP API |
 | 查路由索引 | [API_ROUTE_INDEX.md](API_ROUTE_INDEX.md) | 静态生成的 FastAPI path、method、handler 与源码位置清单 |
 | 配置模型中转站 | [../README.md](../README.md#接入-newapi--sub2api-等中转站) / [reference/api-specification.md](reference/api-specification.md#llm-配置与模型发现) | newapi/sub2api 接入、`工作台 -> 模型接入`、模型发现接口、`LLM_MODEL_ROUTING_JSON` / `AI_MODEL_ROUTING_JSON` 和 `fallback_route_key` |

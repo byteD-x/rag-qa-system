@@ -43,6 +43,18 @@
                 size="small"
               />
             </el-form-item>
+            <el-form-item label="内容类型">
+              <el-input v-model="uploadForm.content_kind" placeholder="例如：question / guide / faq" size="small" />
+            </el-form-item>
+            <el-form-item label="题型">
+              <el-input v-model="uploadForm.question_type" placeholder="可选，例如：coding" size="small" />
+            </el-form-item>
+            <el-form-item label="难度">
+              <el-input v-model="uploadForm.difficulty" placeholder="可选，例如：medium" size="small" />
+            </el-form-item>
+            <el-form-item label="标签（逗号分隔）">
+              <el-input v-model="uploadForm.tags" placeholder="可选，例如：vue, composition-api" size="small" />
+            </el-form-item>
             <el-divider content-position="left">版本治理（可选）</el-divider>
             <el-form-item label="版本家族 Key">
               <el-input
@@ -109,12 +121,12 @@
           >
             <el-icon :size="32"><UploadFilled /></el-icon>
             <span>点击或拖拽文件</span>
-            <span class="dropzone-hint">TXT / PDF / DOCX / PNG / JPG / JPEG</span>
+            <span class="dropzone-hint">TXT / MD / JSON / CSV / XLSX / XLS / PDF / DOCX</span>
           </div>
           <input
             ref="fileInputRef"
             type="file"
-            accept=".txt,.pdf,.docx,.png,.jpg,.jpeg"
+            accept=".txt,.md,.markdown,.json,.csv,.xlsx,.xls,.pdf,.docx,.png,.jpg,.jpeg"
             multiple
             class="hidden-input"
             @change="handleFileChange"
@@ -219,6 +231,27 @@
             placeholder="选填"
           />
         </el-form-item>
+        <el-form-item label="知识库类型">
+          <el-select v-model="baseForm.type_keys" multiple filterable style="width: 100%" placeholder="选择一个或多个类型" @change="ensureMetadataDefaults">
+            <el-option v-for="type in kbTypes" :key="type.type_key" :label="type.display_name || type.type_key" :value="type.type_key" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联岗位">
+          <el-select v-model="baseForm.job_position_ids" multiple filterable style="width: 100%" placeholder="可选">
+            <el-option v-for="position in jobPositions" :key="position.id" :label="position.name || position.code" :value="position.id" />
+          </el-select>
+        </el-form-item>
+        <template v-for="field in metadataFields" :key="field.key">
+          <el-form-item :label="field.label">
+            <el-select v-if="field.enumValues.length" v-model="baseForm.metadata[field.key]" filterable style="width: 100%">
+              <el-option v-for="value in field.enumValues" :key="String(value)" :label="String(value)" :value="value" />
+            </el-select>
+            <el-select v-else-if="field.type === 'array'" v-model="baseForm.metadata[field.key]" multiple filterable allow-create default-first-option style="width: 100%" />
+            <el-switch v-else-if="field.type === 'boolean'" v-model="baseForm.metadata[field.key]" />
+            <el-input-number v-else-if="field.type === 'number' || field.type === 'integer'" v-model="baseForm.metadata[field.key]" :min="field.minimum" :max="field.maximum" style="width: 100%" />
+            <el-input v-else v-model="baseForm.metadata[field.key]" :placeholder="field.description || `填写${field.label}`" />
+          </el-form-item>
+        </template>
         <el-form-item>
           <el-button type="primary" :loading="creatingBase" :disabled="!canWrite" @click="handleSubmitBase">
             {{ baseFormMode === 'edit' ? '保存' : '创建' }}
@@ -256,6 +289,8 @@ import {
   getKBDocumentEvents,
   getKBIngestJob,
   getKBUpload,
+  listKBJobPositions,
+  listKBTypes,
   listKBDocuments,
   listKnowledgeBases,
   presignKBUploadParts,
@@ -270,6 +305,8 @@ const route = useRoute();
 const authStore = useAuthStore();
 
 const bases = ref<any[]>([]);
+const kbTypes = ref<any[]>([]);
+const jobPositions = ref<any[]>([]);
 const selectedBaseId = ref('');
 const selectedFiles = ref<File[]>([]);
 const latestDocuments = ref<any[]>([]);
@@ -287,7 +324,10 @@ let pollTimer: number | null = null;
 const baseForm = reactive({
   name: '',
   description: '',
-  category: ''
+  category: '',
+  type_keys: ['general'] as string[],
+  job_position_ids: [] as string[],
+  metadata: {} as Record<string, any>
 });
 
 const uploadForm = reactive({
@@ -299,8 +339,40 @@ const uploadForm = reactive({
   is_current_version: true,
   effective_from: '',
   effective_to: '',
-  supersedes_document_id: ''
+  supersedes_document_id: '',
+  content_kind: 'document',
+  question_type: '',
+  difficulty: '',
+  tags: ''
 });
+
+const metadataFields = computed(() => {
+  const fields = new Map<string, any>();
+  for (const key of baseForm.type_keys) {
+    const schema = kbTypes.value.find((item) => String(item.type_key) === String(key))?.schema_json || kbTypes.value.find((item) => String(item.type_key) === String(key))?.config_schema || {};
+    for (const [fieldKey, fieldSchema] of Object.entries((schema as any).properties || {})) {
+      const child: any = fieldSchema || {};
+      fields.set(fieldKey, {
+        key: fieldKey,
+        label: child.title || fieldKey,
+        description: child.description || '',
+        type: child.type || 'string',
+        enumValues: Array.isArray(child.enum) ? child.enum : [],
+        minimum: typeof child.minimum === 'number' ? child.minimum : undefined,
+        maximum: typeof child.maximum === 'number' ? child.maximum : undefined
+      });
+    }
+  }
+  return Array.from(fields.values());
+});
+
+const ensureMetadataDefaults = () => {
+  for (const field of metadataFields.value) {
+    if (!(field.key in baseForm.metadata)) {
+      baseForm.metadata[field.key] = field.type === 'array' ? [] : field.type === 'boolean' ? false : '';
+    }
+  }
+};
 
 const fileFingerprint = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
 const canWrite = computed(() => authStore.hasPermission('kb.write'));
@@ -357,7 +429,7 @@ const handleDrop = (e: DragEvent) => {
 const addFiles = (files: File[]) => {
   const valid = files.filter((f) => {
     const ext = f.name.split('.').pop()?.toLowerCase();
-    return ['txt', 'pdf', 'docx', 'png', 'jpg', 'jpeg'].includes(String(ext || ''));
+    return ['txt', 'md', 'markdown', 'json', 'csv', 'xlsx', 'xls', 'pdf', 'docx', 'png', 'jpg', 'jpeg'].includes(String(ext || ''));
   });
   if (valid.length < files.length) ElMessage.warning('已过滤不支持格式');
   selectedFiles.value = [...selectedFiles.value, ...valid];
@@ -367,12 +439,19 @@ const resetBaseForm = () => {
   baseForm.name = '';
   baseForm.description = '';
   baseForm.category = '';
+  baseForm.type_keys = ['general'];
+  baseForm.job_position_ids = [];
+  baseForm.metadata = {};
 };
 
 const fillBaseForm = (base: any) => {
   baseForm.name = String(base?.name || '');
   baseForm.description = String(base?.description || '');
   baseForm.category = String(base?.category || '');
+  baseForm.type_keys = Array.isArray(base?.type_keys) && base.type_keys.length ? [...base.type_keys] : ['general'];
+  baseForm.job_position_ids = Array.isArray(base?.job_positions) ? base.job_positions.map((item: any) => String(item.id)) : [];
+  baseForm.metadata = { ...(base?.metadata_json || {}) };
+  ensureMetadataDefaults();
 };
 
 const openBaseDrawer = (mode: 'create' | 'edit') => {
@@ -402,7 +481,10 @@ const handleSubmitBase = async () => {
       await updateKnowledgeBase(selectedBaseId.value, {
         name: baseForm.name.trim(),
         description: baseForm.description.trim(),
-        category: baseForm.category.trim()
+        category: baseForm.category.trim(),
+        type_keys: baseForm.type_keys,
+        job_position_ids: baseForm.job_position_ids,
+        metadata: baseForm.metadata
       });
       await loadBases();
       ElMessage.success('已更新');
@@ -410,7 +492,10 @@ const handleSubmitBase = async () => {
       const base: any = await createKnowledgeBase({
         name: baseForm.name.trim(),
         description: baseForm.description.trim(),
-        category: baseForm.category.trim()
+        category: baseForm.category.trim(),
+        type_keys: baseForm.type_keys,
+        job_position_ids: baseForm.job_position_ids,
+        metadata: baseForm.metadata
       });
       resetBaseForm();
       await loadBases();
@@ -488,7 +573,11 @@ const uploadSingleFile = async (file: File) => {
             is_current_version: uploadForm.is_current_version,
             effective_from: uploadForm.effective_from || null,
             effective_to: uploadForm.effective_to || null,
-            supersedes_document_id: uploadForm.supersedes_document_id.trim() || null
+            supersedes_document_id: uploadForm.supersedes_document_id.trim() || null,
+            content_kind: uploadForm.content_kind.trim() || 'document',
+            question_type: uploadForm.question_type.trim(),
+            difficulty: uploadForm.difficulty.trim(),
+            tags: uploadForm.tags.split(',').map((item) => item.trim()).filter(Boolean)
           },
           { idempotencyKey: createKey }
         ) as Promise<any>,
@@ -564,6 +653,10 @@ watch(selectedBaseId, (id) => {
 });
 
 onMounted(async () => {
+  const [typesResult, positionsResult] = await Promise.allSettled([listKBTypes(), listKBJobPositions()]);
+  kbTypes.value = typesResult.status === 'fulfilled' ? (typesResult.value as any).items || [] : [];
+  jobPositions.value = positionsResult.status === 'fulfilled' ? (positionsResult.value as any).items || [] : [];
+  ensureMetadataDefaults();
   await loadBases();
   if (selectedBaseId.value) {
     await loadDocuments(selectedBaseId.value);

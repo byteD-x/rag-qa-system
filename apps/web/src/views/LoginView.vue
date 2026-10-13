@@ -54,7 +54,7 @@
         >
           <el-icon><User /></el-icon>
           <span>管理员</span>
-          <span class="demo-email">admin@local</span>
+          <span class="demo-email">{{ demoAccounts.admin.email }}</span>
         </button>
         <button
           type="button"
@@ -64,21 +64,22 @@
         >
           <el-icon><User /></el-icon>
           <span>成员</span>
-          <span class="demo-email">member@local</span>
+          <span class="demo-email">{{ demoAccounts.member.email }}</span>
         </button>
       </div>
-      <p class="demo-hint">密码：<span class="demo-password">ChangeMe123!</span></p>
+      <p class="demo-hint">密码：<span class="demo-password">{{ selectedDemoPassword }}</span></p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { Lock, Message, User } from '@element-plus/icons-vue';
 import { login } from '@/api/auth';
 import { useAuthStore } from '@/store/auth';
+import { demoAccounts } from './loginPresets';
 
 const router = useRouter();
 const route = useRoute();
@@ -93,6 +94,16 @@ const form = reactive({
 const selectedPreset = ref<'admin' | 'member' | 'custom'>('custom');
 const loading = ref(false);
 
+const selectedDemoPassword = computed(() => {
+  if (selectedPreset.value === 'admin') {
+    return demoAccounts.admin.password;
+  }
+  if (selectedPreset.value === 'member') {
+    return demoAccounts.member.password;
+  }
+  return '点击账号即可自动填入';
+});
+
 const rules = {
   email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
@@ -100,8 +111,9 @@ const rules = {
 
 const applyPreset = (type: 'admin' | 'member') => {
   selectedPreset.value = type;
-  form.email = type === 'admin' ? 'admin@local' : 'member@local';
-  form.password = 'ChangeMe123!';
+  const account = demoAccounts[type];
+  form.email = account.email;
+  form.password = account.password;
 };
 
 const handleLogin = async () => {

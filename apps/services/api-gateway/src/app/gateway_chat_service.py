@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from shared.auth import CurrentUser
+from shared.auth import CurrentUser, has_permission
 from shared.grounded_answering import fallback_answer
 from shared.langchain_chat import build_chat_model
 from shared.prompt_safety import analyze_prompt_safety, apply_safety_response_policy
@@ -987,6 +987,53 @@ def _semantic_cache_scope_ids(prepared: dict[str, Any]) -> list[str]:
     return sorted(scope_ids)
 
 
+def _semantic_cache_access_context(user: CurrentUser) -> dict[str, Any]:
+    """Build the cache isolation context from the authenticated user only."""
+    department = str(getattr(user, "department", "") or "").strip().lower()
+    return {
+        "department": department,
+        "is_admin": has_permission(user, "kb.manage"),
+    }
+
+
+def _normalize_resume_access_context(value: Any) -> dict[str, Any] | None:
+    """Normalize a persisted access context, rejecting incomplete metadata."""
+    if not isinstance(value, dict):
+        return None
+    department = value.get("department")
+    is_admin = value.get("is_admin")
+    if not isinstance(department, str) or not isinstance(is_admin, bool):
+        return None
+    return {
+        "department": department.strip().lower(),
+        "is_admin": is_admin,
+    }
+
+
+def _resume_access_context_matches(checkpoint: dict[str, Any], user: CurrentUser) -> bool:
+    """Only reuse evidence when its persisted permission scope matches the JWT."""
+    checkpoint_context = _normalize_resume_access_context(checkpoint.get("access_context"))
+    if checkpoint_context is None:
+        return False
+    return checkpoint_context == _semantic_cache_access_context(user)
+
+
+def _semantic_cache_access_key(prepared: dict[str, Any]) -> str:
+    """Return a non-sensitive cache partition key for the current access scope."""
+    context = prepared.get("semantic_cache_access")
+    if not isinstance(context, dict) or "department" not in context or "is_admin" not in context:
+        # Callers constructing a legacy prepared payload must not share a cache
+        # entry with a request whose department is known.
+        return "unknown"
+    if bool(context.get("is_admin")):
+        return "admin"
+    department = str(context.get("department") or "").strip().lower()
+    if not department:
+        return "public"
+    department_hash = hashlib.sha256(department.encode("utf-8")).hexdigest()[:16]
+    return f"department:{department_hash}"
+
+
 def _semantic_cache_model_key(prepared: dict[str, Any]) -> str:
     scope_snapshot = dict(prepared.get("scope_snapshot") or {})
     model_name = str(getattr(runtime_settings, "model", "") or os.getenv("LLM_MODEL") or os.getenv("AI_MODEL") or "")
@@ -996,6 +1043,7 @@ def _semantic_cache_model_key(prepared: dict[str, Any]) -> str:
         model_name,
         str(scope_snapshot.get("prompt_template_id") or ""),
         str(scope_snapshot.get("agent_profile_id") or ""),
+        _semantic_cache_access_key(prepared),
     ]
     return ":".join(parts)
 
@@ -1158,6 +1206,7 @@ def _build_resume_checkpoint(
 ) -> dict[str, Any]:
     checkpoint = {
         "scope_snapshot": dict(prepared.get("scope_snapshot") or {}),
+        "access_context": _normalize_resume_access_context(prepared.get("semantic_cache_access")) or {},
         "execution_mode": str(prepared.get("execution_mode") or ""),
         "history": list(prepared.get("history") or []),
         "evidence": list(prepared.get("evidence") or []),
@@ -1194,10 +1243,17 @@ def _restore_prepared_from_resume_checkpoint(
     payload: Any,
     trace_id: str,
     total_started: float,
+    user: CurrentUser,
     resume_workflow_run: dict[str, Any],
 ) -> dict[str, Any] | None:
     checkpoint = _resume_checkpoint_for_run(resume_workflow_run)
     if not checkpoint:
+        return None
+    if not _resume_access_context_matches(checkpoint, user):
+        logger.info(
+            "resume_checkpoint_not_reused_due_to_access_context run_id=%s",
+            str(resume_workflow_run.get("id") or ""),
+        )
         return None
     resume_started = time.perf_counter()
     resume_state = dict(resume_workflow_run.get("workflow_state") or {})
@@ -1434,9 +1490,13 @@ async def prepare_chat_message(
         payload=payload,
         trace_id=trace_id,
         total_started=total_started,
+        user=user,
         resume_workflow_run=resume_workflow_run or {},
     )
     if resumed is not None:
+        # The current JWT is authoritative even when retrieval is restored from
+        # an earlier workflow run.  Never inherit another user's cache scope.
+        resumed["semantic_cache_access"] = _semantic_cache_access_context(user)
         return resumed
     scope_payload = payload.scope or ChatScopePayload(**(session.get("scope_json") or default_scope_fn()))
     execution_mode = normalize_execution_mode(
@@ -1536,6 +1596,7 @@ async def prepare_chat_message(
         "session_id": session_id,
         "payload": payload,
         "trace_id": trace_id,
+        "semantic_cache_access": _semantic_cache_access_context(user),
         "scope_snapshot": scope_snapshot,
         "execution_mode": execution_mode,
         "history": history,
@@ -1556,12 +1617,8 @@ async def prepare_chat_message(
             "scope_ms": scope_ms,
             "retrieval_ms": retrieval_ms,
         },
-        "resume": {
-            "resumed": False,
-            "source_run_id": "",
-            "source_stage": "",
-            "reused_retrieval": False,
-        },
+        # 未发生恢复时不设置 resume 键:下游用 `if prepared.get("resume")` 判断,
+        # 一个全 False 的字典同样为真,会被误当成「本次是恢复执行」写进审计与工作流状态。
     }
 
 

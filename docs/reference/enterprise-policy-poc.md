@@ -15,6 +15,8 @@
 | `tests/fixtures/evals/enterprise-policy-poc-corpus.txt` | 可上传到知识库的中文企业制度样例语料 |
 | `tests/fixtures/evals/enterprise-policy-poc-retrieval.json` | 离线检索消融 fixture，不依赖 Docker、模型或在线服务 |
 | `tests/fixtures/evals/enterprise-policy-poc-online.json` | 在线问答评测问题集，覆盖正常问答和无依据拒答 |
+| `tests/fixtures/evals/enterprise-policy-quality-v2.json` | 扩展质量集定义：24 个章节、140 道标注题、58 道 holdout（52 道可回答、6 道无证据） |
+| `scripts/evaluation/eval-policy-quality.py` | 从原始语料生成离线质量报告和在线评测 JSON |
 | `tests/fixtures/evals/enterprise-policy-poc-badcases.jsonl` | badcase 记录模板，提交样例格式，不存放真实客户数据 |
 
 ## 一键验证
@@ -43,6 +45,14 @@ python scripts/evaluation/run-enterprise-policy-poc.py `
 ## 离线验证
 
 也可以单独跑离线检索消融，确认候选证据融合、query rewrite 和 rerank 的基础指标没有退化：
+
+扩展质量集的离线诊断直接读取原始语料，不依赖 Docker、模型或在线服务：
+
+```powershell
+python scripts/evaluation/eval-policy-quality.py
+```
+
+它会生成 140 道问题的版本化在线评测 JSON；其中 58 道为 holdout（52 道可回答、6 道无证据），用于观察同义问法、多章节问题和拒答边界是否退化。该脚本是词法回归诊断，线上质量仍需用 eval-long-rag.py 实测。
 
 ```powershell
 python scripts/evaluation/run-retrieval-ablation.py `
@@ -128,5 +138,5 @@ python scripts/evaluation/eval-long-rag.py `
 
 1. token-aware chunking 入库主路径 A/B。
 2. 检索调试页一键保存 badcase。
-3. 文档级或切片级 ACL。
+3. 将现有文档级部门 ACL 继续细化到切片级 ACL（如确有更细粒度隔离需求）。
 4. 飞书、钉钉或本地共享盘的一个深度连接器。

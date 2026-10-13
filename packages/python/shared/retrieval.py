@@ -11,6 +11,9 @@ class EvidencePath:
     vector_rank: int | None = None
     final_rank: int | None = None
     final_score: float = 0.0
+    # dense 单路余弦分:唯一可跨查询比较的绝对相关性信号,供拒答判据使用。
+    # final_score 是 RRF 倒数排名融合分,只反映相对名次,不可作绝对阈值。
+    relevance: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,11 @@ class EvidenceBlock:
     service_type: str = ""
     evidence_kind: str = "text"
     source_kind: str = "text"
+    content_kind: str = "document"
+    question_type: str = ""
+    difficulty: str = ""
+    tags: list[str] = field(default_factory=list)
+    kb_metadata: dict[str, object] = field(default_factory=dict)
     page_number: int | None = None
     asset_id: str = ""
     thumbnail_url: str = ""
@@ -70,6 +78,7 @@ class RetrievalStats:
     retrieval_ms: float = 0.0
     rerank_applied: bool = False
     rerank_provider: str = ""
+    cache_hit: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

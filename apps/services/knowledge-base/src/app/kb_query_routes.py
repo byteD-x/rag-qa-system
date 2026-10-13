@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,7 +13,7 @@ from shared.inflight_limiter import InflightLimiter
 from shared.sse import encode_sse_event
 from shared.tracing import current_trace_id
 
-from .kb_api_support import audit_event, require_kb_permission
+from .kb_api_support import audit_event, can_manage_everything, require_kb_permission
 from .kb_query_helpers import build_query_response, prepare_query_response, serialize_evidence, stream_query_response
 from .kb_resource_store import ensure_base_exists
 from .kb_runtime import (
@@ -23,14 +24,41 @@ from .kb_runtime import (
     KB_READ_PERMISSION,
     KB_RETRIEVE_LATENCY_MS,
     KB_RETRIEVE_REQUESTS_TOTAL,
+    KB_RETRIEVAL_CACHE_TOTAL,
     KB_SAFETY_EVENTS_TOTAL,
 )
 from .kb_schemas import KBQueryRequest, RetrievalDebugRequest, RetrieveRequest
-from .retrieve import retrieve_kb_result, run_retrieval_graph
+from .retrieve import retrieve_kb_result
 
 
 router = APIRouter()
 KB_QUERY_INFLIGHT_LIMITER = InflightLimiter("kb_query")
+
+
+def _retrieve_kb_result_compat(**kwargs: Any) -> Any:
+    """Call retrieval while tolerating older injected implementations.
+
+    Some deployments override the retrieval function for diagnostics or tests.
+    Passing the new generic metadata filter to an older callable should not
+    break the legacy route; production's implementation accepts it normally.
+    """
+    target = retrieve_kb_result
+    try:
+        signature = inspect.signature(target)
+    except (TypeError, ValueError):
+        return target(**kwargs)
+    accepts_kwargs = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
+    if "metadata_filter" not in signature.parameters and not accepts_kwargs:
+        kwargs.pop("metadata_filter", None)
+    return target(**kwargs)
+
+
+def _retrieval_access_kwargs(user: CurrentUser) -> dict[str, Any]:
+    """将认证上下文转换为检索过滤参数；人员权限本身不落库。"""
+    if can_manage_everything(user):
+        return {"is_admin": True}
+    department = str(getattr(user, "department", "") or "").strip()
+    return {"user_department": department} if department else {}
 
 
 def _reject_backpressure(*, request: Request, user: CurrentUser, endpoint: str, base_id: str, scope: str) -> None:
@@ -64,15 +92,19 @@ def _graph_meta(*, entrypoint: str, final_node: str) -> dict[str, Any]:
 @router.post("/api/v1/kb/retrieve")
 def retrieve_kb(payload: RetrieveRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.retrieve", resource_type="knowledge_base", resource_id=payload.base_id)
-    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.retrieve")
-    result = retrieve_kb_result(
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.retrieve", allow_shared_read=True)
+    result = _retrieve_kb_result_compat(
         base_id=payload.base_id,
         question=payload.question,
         document_ids=payload.document_ids,
         limit=payload.limit,
+        metadata_filter=payload.metadata_filter.model_dump(),
+        use_cache=True,
+        **_retrieval_access_kwargs(user),
     )
     degraded = "true" if result.stats.degraded_signals else "false"
     KB_RETRIEVE_REQUESTS_TOTAL.labels("success", degraded).inc()
+    KB_RETRIEVAL_CACHE_TOTAL.labels("hit" if result.stats.cache_hit else "miss").inc()
     KB_RETRIEVE_LATENCY_MS.observe(float(result.stats.retrieval_ms))
     return {
         "items": [serialize_evidence(item, corpus_id=f"kb:{payload.base_id}") for item in result.items],
@@ -84,18 +116,19 @@ def retrieve_kb(payload: RetrieveRequest, request: Request, user: CurrentUser) -
 @router.post("/api/v2/kb/retrieve")
 def retrieve_kb_v2(payload: RetrieveRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.v2.retrieve", resource_type="knowledge_base", resource_id=payload.base_id)
-    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.v2.retrieve")
-    graph_state = run_retrieval_graph(
-        {
-            "base_id": payload.base_id,
-            "question": payload.question,
-            "document_ids": payload.document_ids,
-            "limit": payload.limit,
-        }
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.v2.retrieve", allow_shared_read=True)
+    result = _retrieve_kb_result_compat(
+        base_id=payload.base_id,
+        question=payload.question,
+        document_ids=payload.document_ids,
+        limit=payload.limit,
+        metadata_filter=payload.metadata_filter.model_dump(),
+        use_cache=True,
+        **_retrieval_access_kwargs(user),
     )
-    result = graph_state["result"]
     degraded = "true" if result.stats.degraded_signals else "false"
     KB_RETRIEVE_REQUESTS_TOTAL.labels("success", degraded).inc()
+    KB_RETRIEVAL_CACHE_TOTAL.labels("hit" if result.stats.cache_hit else "miss").inc()
     KB_RETRIEVE_LATENCY_MS.observe(float(result.stats.retrieval_ms))
     return {
         "items": [serialize_evidence(item, corpus_id=f"kb:{payload.base_id}") for item in result.items],
@@ -115,12 +148,14 @@ def retrieve_kb_debug(payload: RetrievalDebugRequest, request: Request, user: Cu
         resource_type="knowledge_base",
         resource_id=payload.base_id,
     )
-    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.retrieve.debug")
-    result = retrieve_kb_result(
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.retrieve.debug", allow_shared_read=True)
+    result = _retrieve_kb_result_compat(
         base_id=payload.base_id,
         question=payload.question,
         document_ids=payload.document_ids,
         limit=payload.limit,
+        metadata_filter=payload.metadata_filter.model_dump(),
+        **_retrieval_access_kwargs(user),
     )
     items = []
     for rank, item in enumerate(result.items, start=1):
@@ -147,7 +182,7 @@ def retrieve_kb_debug(payload: RetrievalDebugRequest, request: Request, user: Cu
 async def query_kb(payload: KBQueryRequest, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.query", resource_type="knowledge_base", resource_id=payload.base_id)
     require_kb_permission(request, user, CHAT_PERMISSION, action="kb.query", resource_type="knowledge_base", resource_id=payload.base_id)
-    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.query")
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.query", allow_shared_read=True)
     decision = KB_QUERY_INFLIGHT_LIMITER.acquire(
         user_key=str(user.user_id),
         global_limit=KB_QUERY_MAX_IN_FLIGHT_GLOBAL,
@@ -156,12 +191,20 @@ async def query_kb(payload: KBQueryRequest, request: Request, user: CurrentUser)
     if not decision.allowed:
         _reject_backpressure(request=request, user=user, endpoint="kb.query", base_id=payload.base_id, scope=decision.scope)
     try:
-        result = await build_query_response(base_id=payload.base_id, question=payload.question, document_ids=payload.document_ids)
+        result = await build_query_response(
+            base_id=payload.base_id,
+            question=payload.question,
+            document_ids=payload.document_ids,
+            metadata_filter=payload.metadata_filter.model_dump(),
+            use_retrieval_cache=True,
+            **_retrieval_access_kwargs(user),
+        )
     finally:
         KB_QUERY_INFLIGHT_LIMITER.release(decision.ticket)
     degraded = "true" if list((result.get("retrieval") or {}).get("degraded_signals") or []) else "false"
     result_label = "refusal" if str(result.get("answer_mode") or "") == "refusal" else "success"
     KB_RETRIEVE_REQUESTS_TOTAL.labels(result_label, degraded).inc()
+    KB_RETRIEVAL_CACHE_TOTAL.labels("hit" if bool((result.get("retrieval") or {}).get("cache_hit")) else "miss").inc()
     KB_RETRIEVE_LATENCY_MS.observe(float((result.get("retrieval") or {}).get("retrieval_ms") or 0.0))
     safety = dict(result.get("safety") or {})
     if str(safety.get("risk_level") or "") in {"medium", "high"}:
@@ -194,7 +237,7 @@ async def query_kb_v2(payload: KBQueryRequest, request: Request, user: CurrentUs
 async def stream_query_kb(payload: KBQueryRequest, request: Request, user: CurrentUser) -> StreamingResponse:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.query.stream", resource_type="knowledge_base", resource_id=payload.base_id)
     require_kb_permission(request, user, CHAT_PERMISSION, action="kb.query.stream", resource_type="knowledge_base", resource_id=payload.base_id)
-    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.query.stream")
+    ensure_base_exists(payload.base_id, user=user, request=request, action="kb.query.stream", allow_shared_read=True)
     decision = KB_QUERY_INFLIGHT_LIMITER.acquire(
         user_key=str(user.user_id),
         global_limit=KB_QUERY_MAX_IN_FLIGHT_GLOBAL,
@@ -204,11 +247,18 @@ async def stream_query_kb(payload: KBQueryRequest, request: Request, user: Curre
         _reject_backpressure(request=request, user=user, endpoint="kb.query.stream", base_id=payload.base_id, scope=decision.scope)
     # 检索+安全分析同步阻塞;放进线程池,避免阻塞事件循环。
     prepared = await run_in_threadpool(
-        prepare_query_response, base_id=payload.base_id, question=payload.question, document_ids=payload.document_ids
+        prepare_query_response,
+        base_id=payload.base_id,
+        question=payload.question,
+        document_ids=payload.document_ids,
+        metadata_filter=payload.metadata_filter.model_dump(),
+        use_retrieval_cache=True,
+        **_retrieval_access_kwargs(user),
     )
     degraded = "true" if list((prepared.get("retrieval") or {}).get("degraded_signals") or []) else "false"
     result_label = "refusal" if str(prepared.get("answer_mode") or "") == "refusal" else "success"
     KB_RETRIEVE_REQUESTS_TOTAL.labels(result_label, degraded).inc()
+    KB_RETRIEVAL_CACHE_TOTAL.labels("hit" if bool((prepared.get("retrieval") or {}).get("cache_hit")) else "miss").inc()
     KB_RETRIEVE_LATENCY_MS.observe(float((prepared.get("retrieval") or {}).get("retrieval_ms") or 0.0))
     safety = dict(prepared.get("safety") or {})
     if str(safety.get("risk_level") or "") in {"medium", "high"}:

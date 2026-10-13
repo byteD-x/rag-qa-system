@@ -6,8 +6,9 @@ ENV PYTHONPATH=/app/packages/python:/app/apps/services/knowledge-base/src
 
 WORKDIR /app
 
+ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY apps/services/knowledge-base/requirements.runtime.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r /tmp/requirements.txt
 
 COPY apps/services/knowledge-base /app/apps/services/knowledge-base
 COPY apps/services/api-gateway/database /app/apps/services/api-gateway/database

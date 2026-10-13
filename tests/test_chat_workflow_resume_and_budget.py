@@ -97,6 +97,7 @@ def test_prepare_chat_message_restores_resume_checkpoint_without_retrieval(monke
                     "allow_common_knowledge": False,
                     "execution_mode": "agent",
                 },
+                "access_context": {"department": "", "is_admin": False},
                 "execution_mode": "agent",
                 "history": [{"role": "user", "content": "previous turn"}],
                 "evidence": [{"unit_id": "chunk-1", "quote": "Need finance approval"}],
@@ -143,6 +144,88 @@ def test_prepare_chat_message_restores_resume_checkpoint_without_retrieval(monke
     assert prepared["timing"]["resume_ms"] >= 0.0
 
 
+def test_prepare_chat_message_does_not_reuse_resume_evidence_after_department_change(monkeypatch) -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    user = auth_module.AuthUser(
+        user_id="u-1",
+        email="member@local",
+        role="kb_viewer",
+        permissions=("kb.read", "chat.use"),
+        department="finance",
+    )
+    calls = {"scope": 0, "retrieval": 0}
+
+    async def resolve_scope_snapshot(current_user, scope_payload):
+        calls["scope"] += 1
+        assert current_user == user
+        return {
+            "mode": "single",
+            "corpus_ids": ["kb:base-1"],
+            "document_ids": [],
+            "documents_by_corpus": {},
+            "allow_common_knowledge": False,
+        }
+
+    async def retrieve_scope_evidence(**kwargs):
+        calls["retrieval"] += 1
+        return [{"unit_id": "finance-chunk", "quote": "Finance approval"}], "finance approval", {
+            "aggregate": {"selected_candidates": 1}
+        }
+
+    resume_workflow_run = {
+        "id": "run-department-change",
+        "workflow_state": {
+            "stage": "failed",
+            "resume_checkpoint": {
+                "access_context": {"department": "hr", "is_admin": False},
+                "scope_snapshot": {
+                    "mode": "single",
+                    "corpus_ids": ["kb:base-1"],
+                    "document_ids": [],
+                    "documents_by_corpus": {},
+                    "allow_common_knowledge": False,
+                    "execution_mode": "grounded",
+                },
+                "execution_mode": "grounded",
+                "history": [],
+                "evidence": [{"unit_id": "hr-secret", "quote": "HR-only policy"}],
+                "contextualized_question": "approval flow",
+                "retrieval_meta": {"aggregate": {"selected_candidates": 1}},
+                "answer_mode": "grounded",
+                "evidence_status": "grounded",
+                "grounding_score": 0.9,
+                "refusal_reason": "",
+                "safety": {"risk_level": "low", "reason_codes": []},
+            },
+        },
+    }
+
+    prepared = asyncio.run(
+        gateway_chat_service.prepare_chat_message(
+            session_id="session-1",
+            payload=SimpleNamespace(question="What is the approval flow?", execution_mode="grounded", scope=None),
+            request=SimpleNamespace(url=SimpleNamespace(path="/api/v1/chat/workflow-runs/run-department-change/retry")),
+            request_scope="chat.workflow_run.retry",
+            user=user,
+            load_session_fn=lambda session_id, current_user, default_scope_fn=None: {
+                "id": session_id,
+                "scope_json": {"mode": "single"},
+            },
+            default_scope_fn=lambda: {"mode": "all"},
+            resolve_scope_snapshot_fn=resolve_scope_snapshot,
+            recent_history_messages_fn=lambda *args, **kwargs: [],
+            retrieve_scope_evidence_fn=retrieve_scope_evidence,
+            fetch_corpus_documents_fn=lambda *args, **kwargs: [],
+            session_cost_summary_fn=lambda sid, current_user: {"assistant_turns": 0, "estimated_cost_total": 0.0},
+            resume_workflow_run=resume_workflow_run,
+        )
+    )
+
+    assert calls == {"scope": 1, "retrieval": 1}
+    assert prepared.get("resume") is None
+    assert prepared["evidence"] == [{"unit_id": "finance-chunk", "quote": "Finance approval"}]
+
+
 def test_prepare_chat_message_restores_generation_checkpoint_for_persistence_resume(monkeypatch) -> None:
     gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
     user = auth_module.AuthUser(user_id="u-1", email="member@local", role="member")
@@ -174,6 +257,7 @@ def test_prepare_chat_message_restores_generation_checkpoint_for_persistence_res
                     "allow_common_knowledge": False,
                     "execution_mode": "agent",
                 },
+                "access_context": {"department": "", "is_admin": False},
                 "execution_mode": "agent",
                 "history": [{"role": "user", "content": "previous turn"}],
                 "evidence": [{"unit_id": "chunk-1", "quote": "Need finance approval"}],
@@ -942,6 +1026,27 @@ def test_lookup_semantic_answer_returns_cache_hit_payload() -> None:
     assert "original_question" not in answer_payload["llm_trace"]
     assert answer_payload["semantic_cache"]["cached_usage"] == {"prompt_tokens": 33, "completion_tokens": 12}
     assert cache_meta["hit"] is True
+
+
+def test_semantic_cache_model_key_is_partitioned_by_department_and_admin_scope() -> None:
+    gateway_chat_service = _load_gateway_module("app.gateway_chat_service")
+    base = {
+        "answer_mode": "grounded",
+        "execution_mode": "grounded",
+        "scope_snapshot": {"prompt_template_id": "", "agent_profile_id": ""},
+    }
+    finance = dict(base, semantic_cache_access={"department": "finance", "is_admin": False})
+    hr = dict(base, semantic_cache_access={"department": "hr", "is_admin": False})
+    admin = dict(base, semantic_cache_access={"department": "finance", "is_admin": True})
+
+    finance_key = gateway_chat_service._semantic_cache_model_key(finance)
+    hr_key = gateway_chat_service._semantic_cache_model_key(hr)
+    admin_key = gateway_chat_service._semantic_cache_model_key(admin)
+
+    assert finance_key != hr_key
+    assert finance_key != admin_key
+    assert admin_key.endswith(":admin")
+    assert "finance" not in finance_key
 
 
 def test_store_semantic_answer_records_grounded_answer() -> None:

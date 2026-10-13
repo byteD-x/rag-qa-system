@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from shared.embeddings import embed_texts, load_embedding_settings
+from shared.grounded_answering import classify_evidence
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath
@@ -78,3 +79,64 @@ def test_trace_headers_use_current_trace_id_and_reset_context() -> None:
 def test_detect_text_encoding_prefers_utf8_without_bom() -> None:
     sample = "第01章：将死之人\n夏德来到这里。".encode("utf-8")
     assert detect_text_encoding_from_bytes(sample) == "utf-8"
+
+
+def _evidence(*, unit_id: str, relevance: float, document_id: str = "doc-1", section_title: str = "章节") -> dict:
+    return {
+        "unit_id": unit_id,
+        "document_id": document_id,
+        "section_title": section_title,
+        "evidence_path": {"relevance": relevance},
+    }
+
+
+def test_classify_evidence_ignores_rrf_final_score() -> None:
+    """RRF 相对分不再是判据:两路信号各有一条高分文档时应判拒答,而非 grounded。"""
+    evidence = [
+        {"unit_id": "a", "document_id": "d1", "section_title": "s1", "evidence_path": {"final_score": 0.0305}},
+        {"unit_id": "b", "document_id": "d2", "section_title": "s2", "evidence_path": {"final_score": 0.0289}},
+    ]
+
+    answer_mode, evidence_status, grounding_score, refusal_reason = classify_evidence(evidence)
+
+    assert answer_mode == "refusal"
+    assert evidence_status == "insufficient"
+    assert grounding_score == 0.0
+    assert refusal_reason == "insufficient_evidence"
+
+
+def test_classify_evidence_grounds_on_two_distinct_strong_sections() -> None:
+    evidence = [
+        _evidence(unit_id="a", relevance=0.78, section_title="年假申请时限"),
+        _evidence(unit_id="b", relevance=0.70, section_title="销假要求"),
+    ]
+
+    answer_mode, evidence_status, grounding_score, _ = classify_evidence(evidence)
+
+    assert answer_mode == "grounded"
+    assert evidence_status == "grounded"
+    assert 0.0 < grounding_score <= 0.95
+
+
+def test_classify_evidence_does_not_double_count_section_and_chunk_granularity() -> None:
+    """同一章节的 section / chunk 两个粒度各返回一条,不能凑成「两条强证据」。"""
+    evidence = [
+        _evidence(unit_id="section-1", relevance=0.78, section_title="年假申请时限"),
+        _evidence(unit_id="chunk-1", relevance=0.78, section_title="年假申请时限"),
+    ]
+
+    answer_mode, evidence_status, _, refusal_reason = classify_evidence(evidence)
+
+    assert answer_mode == "weak_grounded"
+    assert evidence_status == "partial"
+    assert refusal_reason == "partial_evidence"
+
+
+def test_classify_evidence_refuses_when_no_section_reaches_weak_relevance() -> None:
+    evidence = [_evidence(unit_id="a", relevance=0.43), _evidence(unit_id="b", relevance=0.37, document_id="d2")]
+
+    answer_mode, evidence_status, _, refusal_reason = classify_evidence(evidence)
+
+    assert answer_mode == "refusal"
+    assert evidence_status == "insufficient"
+    assert refusal_reason == "insufficient_evidence"

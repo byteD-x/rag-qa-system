@@ -4,6 +4,7 @@ import json
 import os
 import threading
 from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -65,10 +66,17 @@ class GatewayDatabase:
             conn.commit()
 
 
+def _json_default(value: Any) -> str:
+    """psycopg 的 timestamptz 返回 datetime;工作流状态会内嵌会话历史,需在此归一为 ISO 字符串。"""
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    raise TypeError(f"Object of type {value.__class__.__name__} is not JSON serializable")
+
+
 def to_json(data: dict[str, Any] | list[Any] | None) -> str:
     payload: dict[str, Any] | list[Any]
     if data is None:
         payload = {}
     else:
         payload = data
-    return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False, default=_json_default)

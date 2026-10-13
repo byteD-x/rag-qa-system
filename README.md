@@ -21,7 +21,7 @@
 
 ![RAG-QA Architecture](docs/assets/architecture-overview.svg)
 
-一个面向中文场景的**企业级 AI 问答平台**，融合 **Agent 自主决策**、**多源知识治理**、**三层推理优化**、**五层指令体系**与**全链路可观测**的完整 AI 应用工程实践。
+一个面向中文场景的**企业级 AI 问答平台**，融合 **Agent 自主决策**、**多源知识治理**、**推理优化**、**指令治理与评估**与**全链路可观测**的完整 AI 应用工程实践。
 
 如果你不熟悉技术，可以把它理解成一套”企业知识库问答平台”：
 
@@ -100,9 +100,9 @@ make smoke-eval
 - 支持个人视角与管理员视角的运营分析看板
 - 支持提示词版本管理、模型路由、重排、视觉 OCR
 - 支持评测基线、回归门禁和反馈闭环
-- **Agent 自主决策**：任务拆解（DAG 并行执行）、反思闭环（输出自检+失败恢复）、三层记忆系统
-- **推理优化**：回答级缓存体系（L1 精确；L2 相似问法语义命中可选开启；L3 Prompt Cache）、模型健康监控（自动熔断）、请求合并
-- **平台化**：五层分层指令引擎、6 大场景模板（企业 QA/技术支持/合规/培训/数据分析/代码审查）、RAG 幻觉检测与可配置答案校验门禁、Python SDK
+- **Agent 自主决策**：任务拆解（DAG 并行执行）、反思闭环（输出自检+失败恢复）、记忆重要性评分
+- **推理优化**：回答级缓存体系（L1 精确；L2 相似问法语义命中可选开启；L3 Prompt Cache）、模型健康监控（自动熔断）
+- **平台化**：指令 A/B 评估、RAG 幻觉检测与可配置答案校验门禁、Python SDK
 
 ## 技术栈
 
@@ -211,7 +211,7 @@ make init
 它会准备：
 
 - PostgreSQL
-- MinIO
+- 对象存储（默认文件系统落盘；可选 MinIO/S3）
 - Qdrant
 - 数据库迁移和基础初始化
 
@@ -224,20 +224,22 @@ make up
 启动后会运行：
 
 - `postgres`
-- `minio`
 - `qdrant`
-- `kb-service`
-- `kb-worker`
+- `kb-service`（内置后台 worker，`KB_RUN_WORKER` 控制）
 - `api-gateway`
 - 前端开发服务
 
-容器构建使用服务级 Dockerfile：`apps/services/api-gateway/Dockerfile` 与 `apps/services/knowledge-base/Dockerfile`。仓库根目录的 `.dockerignore` 会排除本地 `.env`、虚拟环境、日志、数据目录、报告产物和本地 Agent 状态，只保留已提交的环境变量示例文件用于说明；当前容器边界覆盖 Gateway、KB Service、Worker、readiness 与 eval 脚本所需的 Web API 运行时，不包含桌面客户端或本机自动化能力。
+单机默认对象存储为文件系统落盘，无需独立 MinIO 容器（如需 MinIO/S3 可选后端，设 `OBJECT_STORAGE_PROVIDER=s3` 并自备 MinIO）。容器构建使用服务级 Dockerfile：`apps/services/api-gateway/Dockerfile` 与 `apps/services/knowledge-base/Dockerfile`。仓库根目录的 `.dockerignore` 会排除本地 `.env`、虚拟环境、日志、数据目录、报告产物和本地 Agent 状态，只保留已提交的环境变量示例文件用于说明；当前容器边界覆盖 Gateway、KB Service（含内置 worker）、readiness 与 eval 脚本所需的 Web API 运行时，不包含桌面客户端或本机自动化能力。
 
 ### 5. 停止项目
 
 ```powershell
 make down
 ```
+
+### 低配 Linux 服务器部署
+
+小规格服务器可使用 `ops/deploy/docker-compose.lowmem.yml`：复用宿主机 PostgreSQL，仅运行 Qdrant、KB Service 和 Gateway，后端端口只绑定回环地址，前端由 Nginx 提供。域名、TLS、首次初始化和内存限制见 [低配部署说明](ops/deploy/README.md)。
 
 ## 第一次使用怎么走
 
@@ -285,6 +287,8 @@ make down
 
    - 邮箱：`admin@local`
    - 密码：`ChangeMe123!`
+
+   登录页的“管理员”和“成员”快捷账号会在前端构建时读取 `ADMIN_EMAIL`、`ADMIN_PASSWORD`、`MEMBER_EMAIL`、`MEMBER_PASSWORD`；生产发布不要直接复用上述本地默认密码。
 
 5. 创建知识库。
 
@@ -568,6 +572,7 @@ Gateway 与 KB Service `/readyz` 在关键依赖未就绪时返回 `503`，响�
 - 对象存储：`OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_ACCESS_KEY`、`OBJECT_STORAGE_SECRET_KEY`、`OBJECT_STORAGE_BUCKET`
 - 向量检索：`QDRANT_URL`、`QDRANT_COLLECTION`、`QDRANT_TIMEOUT_SECONDS`、`QDRANT_PREFER_GRPC`、`FASTEMBED_MODEL_NAME`、`FASTEMBED_SPARSE_MODEL_NAME`
 - LLM：`LLM_ENABLED`、`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`
+- 数据库模型配置：`MODEL_CONFIG_ENCRYPTION_KEY`（生产环境必须设置，用于加密平台保存的 API Key）
 
 ### 一份本地可运行的最小示例
 
@@ -631,6 +636,21 @@ LLM_MODEL_ROUTING_JSON='{
 `api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。`fallback_route_key` 会被 Gateway 的回答生成链路用于本地调用抛出 5xx、上游不可用、非法响应或空回答等失败后的备线路由尝试；是否对供应商 4xx 继续尝试取决于调用层映射后的本地异常状态。平台配置摘要只返回 `api_key_configured`，不会返回密钥原文。
 
 平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，前端会调用 `POST /api/v1/platform/llm/models/discover`，后端会规范化 Base URL 并请求 `{base_url}/models` 拉取模型列表，返回可选择的模型 ID 与配置片段。现在配置片段还能生成主/备路由示例，方便演示 `fallback_route_key` 的降级闭环。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入成功响应或审计详情；上游错误消息会作为 `502` 摘要返回，因此生产中转站不应在错误体中包含敏感凭据。生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容，生产环境建议显式配置 allowlist。
+
+### 通用知识库与 AI 面试增量能力
+
+知识库仍复用原有文档解析、切分、向量化和混合检索链路。新增的 `kb_type_registry` 和岗位映射只负责分类，不会复制一套 RAG；新增类型（例如 `legal`、`product`、`medical`）可通过 `POST /api/v1/kb/types` 注册后直接关联到知识库。
+
+- `POST/PATCH /api/v1/kb/bases`：创建或更新知识库类型、岗位映射和 `metadata`
+- `GET/POST/PATCH /api/v1/kb/job-positions`：维护可配置岗位
+- `POST /api/v1/kb/questions`：创建必须绑定现有文档 chunk 的题目；`publish` 前会校验来源可检索
+- `GET /api/v1/kb/bases/{base_id}/question-pool`：只返回已发布、来源仍有效的题目；题量不足返回 `409`，不会让模型补题
+- `POST /api/v1/interviews/sessions`：从题池固化题目快照后开始面试，题目响应不包含参考答案
+- `POST /api/v1/interviews/sessions/{session_id}/questions/{session_question_id}/answer`：提交回答并按配置调用评分模型
+- `GET /api/v1/interviews/sessions/{session_id}/report`：返回维度得分、薄弱点和每题来源追溯
+- `GET/POST/PATCH/DELETE /api/v1/platform/model-configs`：管理加密存储的多模型配置；响应只返回脱敏摘要，环境变量配置仍可作为回退
+
+面试会话会保存 `question_id` 及其来源快照（知识库、文档、chunk），题目来源校验位于知识库服务，网关只消费题池结果。
 
 ### Vercel 展示型 `.env` 模板
 
@@ -1628,10 +1648,9 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - **工具注册中心**：装饰器注册 + OpenAI/LangChain schema 生成 + 结果缓存 + 执行统计，支持只读维护 dry-run 工具、最终回答摘要工具和本机只读 MCP adapter，并对路径/目标引用做脱敏摘要
 - **Planner/Reflect/Repair 工具流**：对受支持的只读维护工具提供规划元数据、失败反思和一次性安全修复
 - **任务拆解引擎**：自动评估复杂度（1-5级），复杂问题拆为 DAG 子任务并行执行
-- **反思闭环**：输出自检（完整性/准确性/引用三维评分） + 失败根因分析 + 策略记忆
-- **三层记忆**：短期（会话窗口）+ 长期（三元组提取+Qdrant检索）+ 工作记忆（Scratchpad）
-- **五层指令体系**：L1系统→L2场景→L3 Agent→L4会话→L5调用级，优先级合并+冲突检测
-- **场景模板库**：6 大预制场景（企业QA/技术支持/合规审查/培训教练/数据分析/代码审查）
+- **反思闭环**：输出自检（完整性/准确性/引用三维评分） + 失败根因分析
+- **记忆重要性评分**：对记忆条目按重要性打分与遗忘曲线衰减，辅助上下文取舍
+- **指令 A/B 评估**：指令版本实验与效果对比评估
 - **RAG 幻觉检测**：引用一致性+数字一致性+LLM深度分析，自动标记可疑内容；可选答案校验门禁可按 `annotate` / `fallback` / `refuse` 处理可疑回答
 - **Python SDK**：同步/异步双客户端，支持问答/流式/知识库管理/Agent模式
 
@@ -1773,6 +1792,11 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `GATEWAY_ANSWER_VERIFIER_ACTION`
 - `KB_QUERY_MAX_IN_FLIGHT_GLOBAL`
 - `KB_QUERY_MAX_IN_FLIGHT_PER_USER`
+- `KB_RETRIEVAL_WORKERS`
+- `KB_DB_POOL_MAX_SIZE`
+- `KB_RETRIEVAL_CACHE_TTL_SECONDS`
+- `KB_RETRIEVAL_CACHE_MAX_ENTRIES`
+- `KB_RETRIEVAL_CACHE_WAIT_SECONDS`
 
 说明：
 - `GATEWAY_AGENT_RUNTIME=simple` 保持现有 Agent 工具检索链路；设为 `enhanced` 时启用任务拆解/反思增强运行时，失败会自动回退 simple。
@@ -1781,6 +1805,7 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `GATEWAY_RESPONSE_CACHE_SEMANTIC_THRESHOLD=0.92` 控制 L2 语义命中的余弦相似度阈值，加载时会裁剪到 `0.0` 到 `1.0`。
 - `GATEWAY_HALLUCINATION_DEEP_CHECK_ENABLED=false` 默认关闭 LLM 深度幻觉检测，避免额外成本；开启后会在规则检测后追加生成后门禁元数据。
 - `GATEWAY_ANSWER_VERIFIER_ENABLED=false` 默认关闭答案校验门禁；开启后根据规则/LLM 幻觉检测结果执行 `GATEWAY_ANSWER_VERIFIER_ACTION`，支持 `annotate`（仅标记）、`fallback`（降级为保守证据回答）和 `refuse`（拒答并清空引用）。
+- `KB_RETRIEVAL_CACHE_TTL_SECONDS=5` 与 `KB_RETRIEVAL_CACHE_MAX_ENTRIES=2048` 控制检索结果短缓存；缓存 key 包含知识库、问题、文档范围和部门 ACL，命中响应会返回 `retrieval.cache_hit=true`，并发相同请求会 single-flight 合并。
 
 ## 评测与回归
 
@@ -2012,6 +2037,14 @@ docs/reference/         API 文档、STAR、面试材料
 
 ## 安全与边界
 
+### 文档级 ACL 与人员部门边界
+
+- 知识库只保存文档的 `allowed_departments`（以及上传会话中的待落库 ACL），不保存人员权限或人员名单；空数组表示公开文档。
+- 查询时由签名 JWT 的 `CurrentUser.department` 提供当前人员部门，Gateway 将认证上下文传给知识库服务；人员部门不会写入知识库。
+- 知识库在解析实际 `document_ids` 后，统一在结构、全文和向量三路召回前按部门过滤；显式传入文档 ID 也只能得到当前用户有权访问的交集。无部门用户只能看到公开文档，管理员可按管理权限绕过部门过滤。
+- Gateway 语义缓存把部门/管理员范围纳入隔离键，避免不同部门复用不应共享的回答。
+- `kb.read` 是共享读取权限：有权限的用户可以列出和查询其他人员创建的知识库及其文档，文档列表和召回结果仍按 `allowed_departments` 过滤；`created_by` 只用于知识库、文档及上传等管理写操作的 owner 边界。
+
 ### 这个项目已经考虑的事情
 
 - 本地默认账号只用于开发环境
@@ -2027,7 +2060,7 @@ docs/reference/         API 文档、STAR、面试材料
 - 不默认附带大量演示文档
 - 不默认承诺生产 SLA
 - Notion 连接器目前不是全量企业级同步方案
-- 当前权限模型还不是检索单元级 ACL 下沉
+- 当前权限模型下沉到文档级部门 ACL；尚未细化到切片/检索单元级 ACL
 
 ## 常见问题
 

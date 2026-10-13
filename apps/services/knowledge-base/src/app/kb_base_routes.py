@@ -11,14 +11,13 @@ from shared.api_errors import raise_api_error
 from shared.auth import CurrentUser
 
 from .db import to_json
-from .kb_api_support import audit_event, require_kb_permission
+from .kb_api_support import audit_event, can_manage_everything, require_kb_permission
 from .kb_chunk_governance import list_document_chunks
 from .kb_resource_store import (
     ensure_base_exists,
     fetch_base_documents,
     load_base,
     load_document,
-    load_document_unscoped,
     load_latest_ingest_job_for_document,
     list_document_versions,
     list_document_visual_assets,
@@ -33,11 +32,108 @@ from .kb_schemas import (
     UpdateBaseRequest,
     UpdateDocumentRequest,
 )
+from .kb_taxonomy import validate_base_metadata
 from .kb_upload_store import cleanup_deleted_resources, list_base_upload_sessions, list_document_upload_sessions
 from .vector_store import delete_base_vectors, delete_document_vectors
 
 
 router = APIRouter()
+
+
+def _validate_base_taxonomy(
+    cur,
+    *,
+    type_keys: list[str],
+    job_position_ids: list[str],
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    """Validate configurable taxonomy references before writing a base mapping."""
+    if type_keys:
+        cur.execute(
+            "SELECT type_key, schema_json FROM kb_type_registry WHERE type_key = ANY(%s::text[]) AND enabled = TRUE",
+            (type_keys,),
+        )
+        type_rows = cur.fetchall()
+        found_types = {str(row["type_key"]) for row in type_rows}
+        missing_types = sorted(set(type_keys) - found_types)
+        if missing_types:
+            raise_api_error(400, "kb_type_not_found", f"unknown or disabled knowledge base type: {', '.join(missing_types)}")
+        validate_base_metadata(
+            schemas=[dict(row.get("schema_json") or {}) for row in type_rows],
+            metadata=dict(metadata or {}),
+        )
+    if job_position_ids:
+        cur.execute("SELECT id::text FROM job_positions WHERE id = ANY(%s::uuid[]) AND status = 'active'", (job_position_ids,))
+        found_jobs = {str(row["id"]) for row in cur.fetchall()}
+        missing_jobs = sorted(set(job_position_ids) - found_jobs)
+        if missing_jobs:
+            raise_api_error(400, "job_position_not_found", f"unknown or disabled job position: {', '.join(missing_jobs)}")
+
+
+def _write_base_taxonomy(
+    cur,
+    *,
+    base_id: str,
+    type_keys: list[str],
+    job_position_ids: list[str],
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    _validate_base_taxonomy(
+        cur,
+        type_keys=type_keys,
+        job_position_ids=job_position_ids,
+        metadata=metadata,
+    )
+    cur.execute("DELETE FROM kb_base_types WHERE base_id = %s", (base_id,))
+    for index, type_key in enumerate(type_keys):
+        cur.execute(
+            "INSERT INTO kb_base_types (base_id, type_key, is_primary) VALUES (%s, %s, %s)",
+            (base_id, type_key, index == 0),
+        )
+    cur.execute("DELETE FROM kb_base_job_positions WHERE base_id = %s", (base_id,))
+    for index, job_position_id in enumerate(job_position_ids):
+        cur.execute(
+            "INSERT INTO kb_base_job_positions (base_id, job_position_id, is_primary) VALUES (%s, %s, %s)",
+            (base_id, job_position_id, index == 0),
+        )
+
+
+def _decorate_base_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    base_ids = [str(row["id"]) for row in rows]
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT bt.base_id::text, bt.type_key, bt.is_primary,
+                       jp.id::text AS job_position_id, jp.code AS job_position_code,
+                       jp.name AS job_position_name
+                FROM kb_base_types bt
+                LEFT JOIN kb_base_job_positions bpj ON bpj.base_id = bt.base_id
+                LEFT JOIN job_positions jp ON jp.id = bpj.job_position_id
+                WHERE bt.base_id = ANY(%s::uuid[])
+                ORDER BY bt.base_id, bt.is_primary DESC, bt.type_key
+                """,
+                (base_ids,),
+            )
+            mappings = cur.fetchall()
+    by_id: dict[str, dict[str, Any]] = {}
+    for mapping in mappings:
+        item = by_id.setdefault(str(mapping["base_id"]), {"type_keys": [], "job_positions": []})
+        type_key = str(mapping.get("type_key") or "")
+        if type_key and type_key not in item["type_keys"]:
+            item["type_keys"].append(type_key)
+        job_id = str(mapping.get("job_position_id") or "")
+        if job_id and not any(str(job.get("id")) == job_id for job in item["job_positions"]):
+            item["job_positions"].append(
+                {
+                    "id": job_id,
+                    "code": str(mapping.get("job_position_code") or ""),
+                    "name": str(mapping.get("job_position_name") or ""),
+                }
+            )
+    return [{**row, **by_id.get(str(row["id"]), {"type_keys": [], "job_positions": []})} for row in rows]
 
 
 def _ensure_same_version_family(anchor: dict[str, Any], candidate: dict[str, Any]) -> None:
@@ -171,6 +267,15 @@ def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, 
         if payload.supersedes_document_id is not None
         else (str(document.get("supersedes_document_id") or "") or None)
     )
+    next_allowed_departments = (
+        list(payload.allowed_departments)
+        if payload.allowed_departments is not None
+        else list(document.get("allowed_departments") or [])
+    )
+    next_content_kind = payload.content_kind if payload.content_kind is not None else str(document.get("content_kind") or "document")
+    next_question_type = payload.question_type if payload.question_type is not None else str(document.get("question_type") or "")
+    next_difficulty = payload.difficulty if payload.difficulty is not None else str(document.get("difficulty") or "")
+    next_tags = list(payload.tags) if payload.tags is not None else list(document.get("tags_json") or [])
     current_stats = dict(document.get("stats_json") or {})
     current_owner_user_id = str(current_stats.get("owner_user_id") or document.get("created_by") or "")
     next_owner_user_id = current_owner_user_id if payload.owner_user_id is None else str(payload.owner_user_id or "").strip()
@@ -251,6 +356,11 @@ def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, 
                     effective_from = %s,
                     effective_to = %s,
                     supersedes_document_id = %s,
+                    allowed_departments = %s,
+                    content_kind = %s,
+                    question_type = %s,
+                    difficulty = %s,
+                    tags_json = %s::jsonb,
                     updated_at = NOW()
                 WHERE id = %s
                 """,
@@ -265,6 +375,11 @@ def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, 
                     next_effective_from,
                     next_effective_to,
                     next_supersedes_document_id,
+                    next_allowed_departments,
+                    next_content_kind,
+                    next_question_type,
+                    next_difficulty,
+                    to_json(next_tags),
                     document_id,
                 ),
             )
@@ -281,6 +396,11 @@ def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, 
                     effective_from = %s,
                     effective_to = %s,
                     supersedes_document_id = %s,
+                    allowed_departments = %s,
+                    content_kind = %s,
+                    question_type = %s,
+                    difficulty = %s,
+                    tags_json = %s::jsonb,
                     updated_at = NOW()
                 WHERE document_id = %s OR id = %s
                 """,
@@ -295,6 +415,11 @@ def _apply_document_update(document_id: str, payload: UpdateDocumentRequest, *, 
                     next_effective_from,
                     next_effective_to,
                     next_supersedes_document_id,
+                    next_allowed_departments,
+                    next_content_kind,
+                    next_question_type,
+                    next_difficulty,
+                    to_json(next_tags),
                     document_id,
                     document.get("upload_session_id"),
                 ),
@@ -359,10 +484,24 @@ def create_base(payload: CreateBaseRequest, request: Request, user: CurrentUser)
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO kb_bases (id, name, description, category, created_by)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO kb_bases (id, name, description, category, status, metadata_json, created_by)
+                VALUES (%s, %s, %s, %s, 'active', %s::jsonb, %s)
                 """,
-                (base_id, payload.name.strip(), payload.description.strip(), payload.category.strip(), user.user_id),
+                (
+                    base_id,
+                    payload.name.strip(),
+                    payload.description.strip(),
+                    payload.category.strip(),
+                    to_json(payload.metadata),
+                    user.user_id,
+                ),
+            )
+            _write_base_taxonomy(
+                cur,
+                base_id=base_id,
+                type_keys=payload.type_keys,
+                job_position_ids=payload.job_position_ids,
+                metadata=payload.metadata,
             )
         conn.commit()
     audit_event(
@@ -374,30 +513,48 @@ def create_base(payload: CreateBaseRequest, request: Request, user: CurrentUser)
         resource_id=base_id,
         scope="owner",
     )
-    return {"id": base_id, "name": payload.name.strip(), "description": payload.description.strip(), "category": payload.category.strip()}
+    return {
+        "id": base_id,
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+        "category": payload.category.strip(),
+        "status": "active",
+        "metadata_json": payload.metadata,
+        "type_keys": payload.type_keys,
+        "job_position_ids": payload.job_position_ids,
+    }
 
 
 @router.get("/api/v1/kb/bases")
 def list_bases(request: Request, user: CurrentUser) -> dict[str, Any]:
-    from .kb_api_support import can_manage_everything
-
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.base.list", resource_type="knowledge_base")
+    department = str(getattr(user, "department", "") or "").strip().lower()
+    can_manage = can_manage_everything(user)
     with db.connect() as conn:
         with conn.cursor() as cur:
-            if can_manage_everything(user):
-                cur.execute("SELECT * FROM kb_bases ORDER BY created_at DESC")
-            else:
-                cur.execute(
-                    """
-                    SELECT *
-                    FROM kb_bases
-                    WHERE created_by = %s
-                    ORDER BY created_at DESC
-                    """,
-                    (user.user_id,),
-                )
+            cur.execute(
+                """
+                SELECT b.*
+                FROM kb_bases b
+                WHERE %s::boolean
+                   OR b.created_by = %s
+                   OR EXISTS (
+                       SELECT 1 FROM kb_documents d
+                       WHERE d.base_id = b.id
+                         AND (
+                             cardinality(COALESCE(d.allowed_departments, ARRAY[]::text[])) = 0
+                             OR (%s <> '' AND EXISTS (
+                                 SELECT 1 FROM unnest(COALESCE(d.allowed_departments, ARRAY[]::text[])) AS allowed(department)
+                                 WHERE lower(trim(allowed.department)) = %s
+                             ))
+                         )
+                   )
+                ORDER BY b.created_at DESC
+                """,
+                (can_manage, user.user_id, department, department),
+            )
             rows = cur.fetchall()
-    return {"items": rows}
+    return {"items": _decorate_base_rows(rows)}
 
 
 @router.get("/api/v1/kb/bases/{base_id}")
@@ -413,6 +570,14 @@ def update_base(base_id: str, payload: UpdateBaseRequest, request: Request, user
     next_name = payload.name.strip() if payload.name is not None else str(current.get("name") or "")
     next_description = payload.description.strip() if payload.description is not None else str(current.get("description") or "")
     next_category = payload.category.strip() if payload.category is not None else str(current.get("category") or "")
+    next_status = payload.status if payload.status is not None else str(current.get("status") or "active")
+    next_metadata = payload.metadata if payload.metadata is not None else dict(current.get("metadata_json") or {})
+    if next_status not in {"active", "inactive", "archived"}:
+        raise_api_error(400, "kb_base_status_invalid", f"unsupported knowledge base status: {next_status}")
+    current_types = list(current.get("type_keys") or ["general"])
+    current_jobs = [str(item.get("id")) for item in list(current.get("job_positions") or []) if item.get("id")]
+    next_types = payload.type_keys if payload.type_keys is not None else current_types
+    next_jobs = payload.job_position_ids if payload.job_position_ids is not None else current_jobs
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -420,10 +585,20 @@ def update_base(base_id: str, payload: UpdateBaseRequest, request: Request, user
                 UPDATE kb_bases
                 SET name = %s,
                     description = %s,
-                    category = %s
+                    category = %s,
+                    status = %s,
+                    metadata_json = %s::jsonb,
+                    updated_at = NOW()
                 WHERE id = %s
                 """,
-                (next_name, next_description, next_category, base_id),
+                (next_name, next_description, next_category, next_status, to_json(next_metadata), base_id),
+            )
+            _write_base_taxonomy(
+                cur,
+                base_id=base_id,
+                type_keys=next_types,
+                job_position_ids=next_jobs,
+                metadata=next_metadata,
             )
         conn.commit()
     audit_event(
@@ -470,8 +645,8 @@ def delete_base(base_id: str, request: Request, user: CurrentUser) -> dict[str, 
 @router.get("/api/v1/kb/bases/{base_id}/documents")
 def list_base_documents(base_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_kb_permission(request, user, KB_READ_PERMISSION, action="kb.document.list", resource_type="knowledge_base", resource_id=base_id)
-    ensure_base_exists(base_id, user=user, request=request, action="kb.document.list")
-    return {"items": fetch_base_documents(base_id, user=user)}
+    ensure_base_exists(base_id, user=user, request=request, action="kb.document.list", allow_shared_read=True)
+    return {"items": fetch_base_documents(base_id, user=user, shared_read=True)}
 
 
 @router.post("/api/v1/kb/documents/batch-update")

@@ -32,6 +32,7 @@ from .kb_connector_routes import (
 )
 from .kb_connector_scheduler import ConnectorSchedulerManager
 from .kb_ingest_routes import router as kb_ingest_router
+from .kb_generic_routes import router as kb_generic_router
 from .kb_index_routes import router as kb_index_router
 from .kb_job_queue_routes import router as kb_job_queue_router
 from .kb_query_routes import router as kb_query_router
@@ -39,6 +40,7 @@ from .kb_rebuild_routes import router as kb_rebuild_router
 from .kb_runtime import db, logger, prepare_runtime, storage
 from .kb_sync_routes import router as kb_sync_router
 from .kb_system_routes import router as kb_system_router
+from .retrieve import close_retrieval_executor
 from .kb_upload_routes import router as kb_upload_router
 from .kb_object_store_routes import router as kb_object_store_router
 from .kb_visual_routes import router as kb_visual_router
@@ -93,6 +95,8 @@ async def lifespan(app: FastAPI):
     if worker_thread is not None:
         worker_thread.join(timeout=10)
     await CONNECTOR_SCHEDULER.shutdown()
+    close_retrieval_executor()
+    db.close()
 
 
 app = FastAPI(title="RAG-QA 2.0 KB Service", version="3.0.0", lifespan=lifespan)
@@ -141,6 +145,7 @@ app.include_router(kb_sync_router)
 app.include_router(kb_upload_router)
 app.include_router(kb_ingest_router)
 app.include_router(kb_query_router)
+app.include_router(kb_generic_router)
 app.include_router(kb_visual_router)
 app.include_router(kb_object_store_router)
 

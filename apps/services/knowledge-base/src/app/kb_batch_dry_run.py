@@ -51,11 +51,18 @@ def parse_knowledge_document_payload(raw: Any, *, index: int) -> dict[str, Any]:
     fallback_id = f"document-{index + 1}"
     doc_id = _safe_leaf_name(raw.get("doc_id") or raw.get("document_id") or fallback_id, fallback=fallback_id)
     file_name = _safe_leaf_name(raw.get("file_name") or raw.get("name") or doc_id, fallback=f"{doc_id}.txt")
+    allowed_departments = _normalize_departments(raw.get("allowed_departments"))
+    tags = _normalize_tags(raw.get("tags"))
 
     return {
         "doc_id": doc_id[:MAX_SAFE_NAME_CHARS],
         "file_name": file_name,
         "content": content,
+        "allowed_departments": allowed_departments,
+        "content_kind": str(raw.get("content_kind") or "document").strip().lower(),
+        "question_type": str(raw.get("question_type") or "").strip().lower(),
+        "difficulty": str(raw.get("difficulty") or "").strip().lower(),
+        "tags": tags,
     }
 
 
@@ -139,3 +146,33 @@ def _safe_leaf_name(raw: Any, *, fallback: str) -> str:
     if not leaf or leaf in {".", ".."}:
         leaf = fallback
     return leaf[:MAX_SAFE_NAME_CHARS]
+
+
+def _normalize_departments(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise KnowledgeBatchPayloadError("knowledge_batch_departments_invalid", "allowed_departments must be a list")
+    normalized: list[str] = []
+    for item in value:
+        department = str(item or "").strip().lower()
+        if department and department not in normalized:
+            normalized.append(department)
+    if len(normalized) > 100:
+        raise KnowledgeBatchPayloadError("knowledge_batch_departments_too_many", "allowed_departments must contain no more than 100 items")
+    return normalized
+
+
+def _normalize_tags(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise KnowledgeBatchPayloadError("knowledge_batch_tags_invalid", "tags must be a list")
+    normalized: list[str] = []
+    for item in value:
+        tag = str(item or "").strip().lower()
+        if tag and tag not in normalized:
+            normalized.append(tag)
+    if len(normalized) > 100:
+        raise KnowledgeBatchPayloadError("knowledge_batch_tags_too_many", "tags must contain no more than 100 items")
+    return normalized

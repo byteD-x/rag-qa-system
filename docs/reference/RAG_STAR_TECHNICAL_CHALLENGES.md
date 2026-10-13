@@ -1,7 +1,7 @@
 # RAG-QA STAR 技术难点与解决方案
 
 > 面向岗位：AI 应用 / RAG 后端工程师  
-> 更新日期：2026-06-08
+> 更新日期：2026-09-27
 > 使用方式：这份文档是面试时讲“我做了什么、难在哪里、怎么解决、如何验证”的主材料。所有结论必须能回到代码、测试、CI 或评测脚本；没有真实业务报告支撑的指标，只能写“待验证”。
 
 ## 口径边界
@@ -9,9 +9,9 @@
 | 分类 | 当前口径 |
 |---|---|
 | 已实现 | 本地 embedding 抽象、FastEmbed/Qdrant 向量召回入口、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、retrieve/debug 调试页、人工接管队列本地原子认领、**Agent自主决策（任务拆解DAG+反思闭环+三层记忆+工具注册中心）、回答级缓存体系、运行时治理指标、模型健康熔断、复杂度驱动路由、模型中转站接入与路由 fallback、五层分层指令体系、6大场景模板、RAG幻觉检测、Python SDK**，以及看板侧 `usage_reconciliation` 诊断口径 |
-| 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项 |
-| 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、并发压测、Redis / 数据库锁生产级人工接管队列 |
-| 不应宣称 | 固定延迟、固定 QPS、真实业务准确率提升、真实幻觉率下降、真实成本节省、自动供应商账单拉取、财务级结算完成、真实中转站端到端压测完成或自动保存模型发现凭据 |
+| 已验证 | 最小 deterministic fixture 可跑 retrieval ablation、embedding benchmark、local ingest benchmark，CI smoke 可触发评测脚本并产出报告，形成可重复的回归门禁 |
+| 可选增强 | 外部 embedding provider、Cross-Encoder rerank、动态权重、多数据集评测、生产级缓存共享、Redis / 数据库锁生产级人工接管队列 |
+| 不应宣称 | 端到端（含 LLM）固定延迟或 QPS、真实业务准确率/幻觉率提升、真实缓存命中率或成本节省、订单/用户/设备规模、自动供应商账单拉取、财务级结算完成、真实中转站端到端稳定性或自动保存模型发现凭据 |
 
 ## STAR 1：把 RAG 演示链路从“能跑”打磨成“能解释”
 
@@ -117,7 +117,7 @@
 **Result**：
 
 - 本地已验证三个评测脚本均可产出报告。
-- `python -m pytest tests -q` 已通过，作为当前回归基线。
+- 相关定向测试与 CI smoke 可重复执行，作为当前回归基线；全量测试结果需以当次验证报告为准。
 
 **技术难点**：
 
@@ -187,6 +187,30 @@
 - 引用是模型生成的，还是系统后处理的？
 - prompt injection 进入知识库怎么办？
 - 如何评估 faithfulness？
+
+## STAR 4.1：文档 ACL 与人员部门上下文分离
+
+**Situation**：企业知识库需要按部门限制文档访问，但人员会变化，不能把人员权限名单复制进知识库；同时结构、全文、向量三路召回和显式文档 ID 都不能出现绕过路径。
+
+**Task**：把文档权限和人员身份解耦，并保证查询、缓存和恢复链路都使用当前认证上下文。
+
+**Action**：
+
+- 在文档和上传会话元数据中持久化 `allowed_departments`；空数组表示公开文档，不持久化人员权限。
+- 从签名 JWT 的 `CurrentUser.department` 取得当前部门，由 Gateway 传给 KB；管理员权限作为认证上下文中的管理标志处理。
+- 在 KB 解析实际文档范围后、三路召回前统一过滤，显式 `document_ids` 只能与有权文档求交；无部门用户仅能访问公开文档。
+- 将部门/管理员范围纳入 Gateway 语义缓存键，并在恢复 checkpoint 时校验访问上下文，避免跨部门复用检索证据或回答。
+
+**Result**：权限边界由认证系统和知识库各自负责，人员变动不需要改写知识库；查询入口、显式文档范围、语义缓存和工作流恢复都保持相同的部门过滤语义。
+
+**证据路径**：
+
+- `packages/python/shared/auth.py`
+- `apps/services/api-gateway/src/app/gateway_chat_service.py`
+- `apps/services/knowledge-base/src/app/kb_query_routes.py`
+- `apps/services/knowledge-base/src/app/retrieve.py`
+- `apps/services/knowledge-base/database/migrations/011_document_department_permissions.sql`
+- `tests/test_auth_department.py`
 
 ## STAR 5：LangGraph 可恢复运行时与分阶段调试
 
@@ -284,9 +308,8 @@
 
 **Result**：
 
-- 复杂问题自动拆解为2-6个可并行子任务，执行效率提升
-- 输出自检能识别80%以上的事实/引用错误
-- 工具调用失败时自动分析根因并尝试恢复
+- 复杂问题可按约束拆解为 2–6 个可并行子任务，工具调用失败时可进入根因分析与恢复建议路径。
+- 输出自检产出完整性、准确性、引用三维评分与策略记忆；该能力已有定向单测支撑，但尚无线上错误识别率或端到端耗时收益数据。
 
 **技术难点**：拆解粒度控制（过细导致开销大，过粗失去并行价值）和子任务间依赖关系正确性。
 
@@ -294,7 +317,7 @@
 
 ---
 
-## STAR 8：三层缓存体系降低推理成本
+## STAR 8：三层缓存体系与模型健康治理
 
 **Situation**：企业场景中大量问答是相同或相似问题（如"退款流程"），每次重复调用LLM浪费Token成本，且缺乏模型健康监控导致故障模型持续消耗资源。
 
@@ -324,6 +347,66 @@
 
 ---
 
+## STAR 9：检索热路径并发优化，把连接与线程池开销从请求链路移出
+
+**Situation**：基线实现每次请求新建 PostgreSQL 连接和三路召回线程池；并发达到 8 以上后 QPS 约在 40 附近饱和，P95 随并发线性劣化，重复问题也会重复消耗检索资源。
+
+**Task**：在不改变检索结果语义的前提下，降低连接、线程池和重复查询开销，并建立可复现的 P95/QPS 对照口径。
+
+**Action**：
+
+- 将 PostgreSQL 连接改为跨请求复用的 `psycopg_pool.ConnectionPool`。
+- 将结构、FTS、向量三路召回改为共享的有界线程池，避免每请求创建 executor。
+- 增加 ACL 感知的 TTL/LRU 检索缓存；相同问题并发请求通过 single-flight 复用 leader 结果，响应返回 `cache_hit`，Prometheus 暴露命中统计。
+- 压测脚本只统计成功请求，加入非空召回率与错误率，并采用同语料、同问题集、每档 500 请求的 ABBA 交替对照。
+
+**Result**：
+
+- 在本地完整服务栈、同一份 1 文档/29 章节语料、140 道问题集上，纯检索接口并发 4–32 的 QPS 提升 **48.8%–59.1%**，P95 降低 **29.0%–36.3%**。
+- ABBA 轮成功率 **100%**、非空检索率 **100%**、错误数 **0**；跨栈结果一致率 135/140（96.4%），与同栈重复查询的自然排序噪声同量级。
+
+**边界**：该结果只覆盖 `POST /api/v1/kb/retrieve` 检索段，不包含 LLM 生成；缓存新增后的真实命中率和成本收益仍待活体 A/B。
+
+**证据路径**：
+
+- `.codex/verification-report-perf-2026-09-27.md`
+- `apps/services/knowledge-base/src/app/retrieval_cache.py`
+- `apps/services/knowledge-base/src/app/retrieve.py`
+- `scripts/evaluation/benchmark-retrieval-concurrency.py`
+
+---
+
+## STAR 10：修复 RRF 分数量纲错误，建立可解释的拒答判据
+
+**Situation**：`weighted_rrf` 产生的是相对排名分，却被 `grounded_answering` 当作绝对相关性阈值；只要检索返回结果，无证据问题就容易被判为 `grounded`。Gateway 还会按文档裁剪证据，直接使用 KB top-k 分布会造成阈值标定偏差。
+
+**Task**：引入与排名分正交的绝对相关性信号，贯通检索与回答判定链路，在降低无证据误答的同时控制可回答题误拒。
+
+**Action**：
+
+- 在 Qdrant 额外执行 dense 单路查询，提取绝对余弦相关性并写入 `EvidencePath.relevance`。
+- 拒答判定改用 `relevance`，并按章节去重，避免 section/chunk 双粒度重复计数。
+- 以端到端 Gateway 证据裁剪后的 140 题数据重新标定 `STRONG_RELEVANCE=0.68`、`WEAK_RELEVANCE=0.62`。
+- 增加 RRF 误用、同章节去重、弱证据与拒答路径回归测试。
+
+**Result**：
+
+- 140 道题（128 可回答、12 无证据）端到端评测中，整体拒答率 **0→2.86%**；无证据题误判 `grounded` 从 **12/12 降至 0/12**，拒答 precision **0.75**、recall **0.25**。
+- 可回答题硬误拒 **1/128（0.8%）**；Recall@1 **0.6179→0.6250**、MRR **0.7536→0.7571**、NDCG@5 **0.7826→0.7852**，检索 Accuracy（`matched` 比例）**0.8643 保持不变**。
+
+**边界**：仍有 9/12 无证据题进入 `weak_grounded`；阈值来自单一脱敏语料和 12 道无证据题，不能直接宣称“拒答已解决”或迁移到生产。
+
+**证据路径**：
+
+- `.codex/verification-report-perf-2026-09-27.md` 附录 B/C
+- `apps/services/knowledge-base/src/app/vector_store.py`
+- `apps/services/knowledge-base/src/app/retrieve.py`
+- `packages/python/shared/retrieval.py`
+- `packages/python/shared/grounded_answering.py`
+- `tests/test_shared_stack.py`
+
+---
+
 ## 可直接放进简历的表述
 
 - 设计并落地低成本 RAG 检索链路，融合结构信号、PostgreSQL FTS 与 Qdrant 向量召回，通过 weighted RRF 和本地启发式 rerank 产出可解释证据排序；外部 embedding / Cross-Encoder 作为可选增强，避免默认演示依赖高成本模型。
@@ -334,6 +417,8 @@
 - 新增人工接管队列本地实现，支持按租户和技能组过滤、按优先级认领待处理会话，并用条件更新避免测试环境重复分配；生产多实例场景建议替换为 Redis sorted set 或数据库 `SKIP LOCKED` 后端。
 - 实现 Agent 任务拆解引擎（复杂度评估 + LLM DAG分解 + 并行执行）和反思闭环（三维输出自检 + 失败根因分析 + 策略记忆），使 Agent 具备自主决策与自我修正能力。
 - 构建回答级缓存体系（L1 精确/L2 可选语义命中/L3 Prompt Cache）与模型健康监控（P50/P95/P99 + 自动熔断），为重复问题降本提供可统计、可压测的工程基础。
+- 针对检索接口每请求建连、建线程池造成的并发瓶颈，落地连接池、有界召回线程池、ACL 感知 TTL/LRU 缓存与 single-flight 合并；在 ABBA 对照压测中，并发 4–32 的检索 QPS 提升 48.8%–59.1%、P95 降低 29.0%–36.3%，成功率 100%。
+- 修复 RRF 相对排名分被当作绝对相关性阈值的问题，引入 dense relevance 并按 Gateway 证据裁剪口径重标拒答阈值；140 题评测中无证据题 grounded 误判由 12/12 降至 0/12，拒答 precision 达 0.75，Accuracy 保持 0.8643。
 - 落地 OpenAI-compatible 模型接入治理，支持 newapi/sub2api 等中转站模型发现、脱敏配置摘要、`fallback_route_key` 备线路由和前端配置片段生成，同时保留凭据不保存与 Host allowlist 的安全边界。
 
 ## 验证命令

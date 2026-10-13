@@ -189,6 +189,27 @@ def test_enterprise_policy_poc_assets_are_complete() -> None:
     assert all(case["dataset_version"] == "enterprise-policy-poc-2026-07-08" for case in online_cases)
 
 
+def test_enterprise_policy_quality_v2_is_large_annotated_and_held_out() -> None:
+    quality = _load_script_module(
+        "policy_quality_v2_test",
+        "scripts/evaluation/eval-policy-quality.py",
+    )
+    suite_path = REPO_ROOT / "tests/fixtures/evals/enterprise-policy-quality-v2.json"
+    suite, sections, cases, hashes = quality.load_suite(suite_path)
+    report = quality.evaluate(cases, sections)
+
+    assert suite["dataset_version"] == "enterprise-policy-quality-v2-2026-09-27"
+    assert len(sections) == 24
+    assert len(cases) == 140
+    assert len({case["question"] for case in cases}) == 140
+    assert len({case["id"] for case in cases}) == 140
+    assert sum(case["split"] == "holdout" for case in cases) == 58
+    assert sum(case["split"] == "holdout" and case["category"] != "policy_unanswerable" for case in cases) == 52
+    assert sum(case["category"] == "policy_unanswerable" for case in cases) == 12
+    assert hashes["suite_sha256"] and hashes["corpus_sha256"]
+    assert report["summary"]["holdout"]["recall_at_3"] == 1.0
+
+
 def test_enterprise_policy_poc_retrieval_fixture_runs_ablation() -> None:
     retrieval_ablation = _load_script_module(
         "retrieval_ablation_enterprise_policy_poc_test",

@@ -5,10 +5,18 @@
 这份材料默认面向 **AI 应用 / RAG 后端工程师** 面试。讲述时建议把能力分成三类：
 
 - **已实现**：本地 embedding 抽象、Qdrant 向量召回、PostgreSQL FTS、结构信号、weighted RRF、启发式 rerank、grounded answer 引用、提示注入防护、LangGraph 可恢复运行时、人工接管队列本地原子认领、Agent 任务拆解/反思/记忆/工具注册、回答级缓存体系（L1 精确，L2 可选语义命中，L3 Prompt Cache）、运行时治理指标、模型健康熔断、五层指令体系、场景模板、RAG 幻觉检测、反馈接口、运营分析看板和 Python SDK。
-- **已验证**：最小 deterministic fixture 可以跑通 retrieval ablation、embedding benchmark、local ingest benchmark，并产出 `recall@K`、`MRR`、`NDCG`、ingest throughput 报告；当前仓库包含 22 个后端 `test_*.py` 与 9 个前端 `*.test.ts`，覆盖 400+ 测试项。
+- **已验证**：最小 deterministic fixture 可以跑通 retrieval ablation、embedding benchmark、local ingest benchmark，并产出 `recall@K`、`MRR`、`NDCG`、ingest throughput 报告；评测脚本已接入 CI smoke，可用于发布前回归判断。
 - **可选增强 / 待优化**：外部 embedding provider、Cross-Encoder rerank、动态权重、Redis / 数据库锁生产级人工接管队列、真实业务压测指标、真实业务标注集与自动事实核查报告。没有报告支撑前，不把延迟、吞吐、命中率提升写成确定收益。
 
 面试主线建议聚焦“低成本但高效”的 RAG 工程路线：本地 embedding / FastEmbed 配置入口 + Qdrant 向量召回 + PostgreSQL FTS + 结构信号 + weighted RRF + 本地启发式 rerank；外部模型只作为增强项，而不是演示闭环的必要条件。
+
+### 文档权限与人员上下文的边界
+
+这套权限模型刻意把“文档能被哪些部门访问”和“当前请求来自哪个部门”分开：知识库只持久化文档级 `allowed_departments`，人员权限和人员部门不进入知识库。查询请求从签名 JWT 的 `CurrentUser.department` 取得部门，由 Gateway 传给 KB；KB 在解析文档范围后，统一在结构、全文和向量召回前做过滤，因此调用方显式传入 `document_ids` 也不能绕过 ACL。空 `allowed_departments` 表示公开文档，无部门用户只能访问公开文档；管理员权限可绕过部门过滤。Gateway 还把部门/管理员范围加入语义缓存隔离键，避免跨部门复用回答。
+
+面试时应明确说明：部门字段是认证上下文，不是知识库中的人员权限数据；知识库负责保存和过滤文档 ACL，认证系统负责提供当前用户部门。
+
+对应证据：`packages/python/shared/auth.py`、`apps/services/api-gateway/src/app/gateway_chat_service.py`、`apps/services/knowledge-base/src/app/kb_query_routes.py`、`apps/services/knowledge-base/src/app/retrieve.py`、`apps/services/knowledge-base/database/migrations/011_document_department_permissions.sql`。
 
 ## STAR 技术难点与追问索引
 

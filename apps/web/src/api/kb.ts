@@ -10,15 +10,37 @@ export function listKnowledgeBases() {
   return request.get('/kb/bases');
 }
 
+export function listKBJobPositions() {
+  return request.get('/kb/job-positions');
+}
+
+export function listKBTypes() {
+  return request.get('/kb/types');
+}
+
+export function listInterviewQuestions(baseId: string, params?: Record<string, string | number>) {
+  return request.get(`/kb/bases/${baseId}/questions`, { params });
+}
+
 export function getKnowledgeBase(baseId: string) {
   return request.get(`/kb/bases/${baseId}`);
 }
 
-export function createKnowledgeBase(data: { name: string; description?: string; category?: string }) {
+export interface KnowledgeBaseMutation {
+  name?: string;
+  description?: string;
+  category?: string;
+  type_keys?: string[];
+  job_position_ids?: string[];
+  metadata?: Record<string, unknown>;
+  status?: string;
+}
+
+export function createKnowledgeBase(data: KnowledgeBaseMutation & { name: string }) {
   return request.post('/kb/bases', data);
 }
 
-export function updateKnowledgeBase(baseId: string, data: { name?: string; description?: string; category?: string }) {
+export function updateKnowledgeBase(baseId: string, data: KnowledgeBaseMutation) {
   return request.patch(`/kb/bases/${baseId}`, data);
 }
 
@@ -435,6 +457,11 @@ export function createKBUpload(data: {
   effective_from?: string | null;
   effective_to?: string | null;
   supersedes_document_id?: string | null;
+  allowed_departments?: string[];
+  content_kind?: string;
+  question_type?: string;
+  difficulty?: string;
+  tags?: string[];
 }, options: { idempotencyKey?: string } = {}) {
   return request.post('/kb/uploads', data, {
     headers: {

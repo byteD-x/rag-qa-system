@@ -1,4 +1,5 @@
 fastapi==0.115.8
+cryptography==48.0.0
 httpx==0.28.1
 langchain-core==0.3.83
 langgraph==0.5.4

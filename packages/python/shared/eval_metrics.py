@@ -29,6 +29,12 @@ def recall_at_k(relevance: list[int], k: int) -> float:
     return round(hits / positives, 4)
 
 
+def recall_at_k_ids(expected_ids: set[str], ranked_ids: list[str], k: int) -> float:
+    if not expected_ids or k <= 0:
+        return 0.0
+    return round(len(expected_ids.intersection(ranked_ids[:k])) / len(expected_ids), 4)
+
+
 def reciprocal_rank(relevance: list[int]) -> float:
     for index, item in enumerate(relevance, start=1):
         if item > 0:

@@ -140,6 +140,7 @@ def _execute_connector(connector: dict[str, Any], *, user: CurrentUser, dry_run:
         "base_id": base_id,
         "category": str(config.get("category") or ""),
         "delete_missing": bool(config.get("delete_missing", True)),
+        "allowed_departments": config.get("allowed_departments"),
         "dry_run": dry_run,
         "user": user,
         "db": db,

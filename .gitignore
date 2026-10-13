@@ -71,6 +71,14 @@ data/
 *.sqlite
 *.db
 
+# Local worktrees and inspection copies
+/rag-qa-baseline/
+/rag-qa-system-inspect/
+
+# Deployment runtime data (keep deployment configuration tracked)
+/ops/deploy/qdrant-data/
+/ops/deploy/kb-data/
+
 # OS
 .DS_Store
 .DS_Store?

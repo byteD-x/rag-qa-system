@@ -10,9 +10,11 @@ x-common-auth-env: &common-auth-env
   ADMIN_USER_ID: ${ADMIN_USER_ID:-11111111-1111-1111-1111-111111111111}
   ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@local}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe123!}
+  ADMIN_DEPARTMENT: ${ADMIN_DEPARTMENT:-}
   MEMBER_USER_ID: ${MEMBER_USER_ID:-22222222-2222-2222-2222-222222222222}
   MEMBER_EMAIL: ${MEMBER_EMAIL:-member@local}
   MEMBER_PASSWORD: ${MEMBER_PASSWORD:-ChangeMe123!}
+  MEMBER_DEPARTMENT: ${MEMBER_DEPARTMENT:-}
 
 x-object-storage-env: &object-storage-env
   OBJECT_STORAGE_ENDPOINT: ${OBJECT_STORAGE_ENDPOINT:-http://minio:9000}
@@ -102,8 +104,10 @@ services:
       <<: [*common-auth-env, *object-storage-env, *embedding-env, *qdrant-env]
       OBJECT_STORAGE_PROVIDER: ${OBJECT_STORAGE_PROVIDER:-filesystem}
       GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/gateway_app}
+      MODEL_CONFIG_ENCRYPTION_KEY: ${MODEL_CONFIG_ENCRYPTION_KEY:-}
       KB_DATABASE_DSN: ${KB_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/kb_app}
       KB_BLOB_ROOT: /data/kb
+      KB_AUTO_REINDEX_AFTER_MIGRATION: ${KB_AUTO_REINDEX_AFTER_MIGRATION:-true}
     volumes:
       - ./data/kb:/data/kb
     depends_on:

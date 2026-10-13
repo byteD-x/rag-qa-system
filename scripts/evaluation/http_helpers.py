@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 
@@ -130,11 +131,21 @@ def presign_parts(
     return response.json()
 
 
+def resolve_part_url(url: str, base_url: str | None) -> str:
+    """S3 预签名为绝对 URL;filesystem 后端返回根相对路径(/api/v1/kb/object-store/...),按 base_url 的 origin 解析。"""
+    if url.startswith(("http://", "https://")):
+        return url
+    if not base_url:
+        raise ValueError(f"presigned part url is relative but base_url is missing: {url}")
+    return urljoin(base_url.rstrip("/") + "/", url)
+
+
 def upload_parts(
     client: httpx.Client,
     *,
     file_path: Path,
     presign_payload: dict[str, Any],
+    base_url: str | None = None,
 ) -> list[dict[str, Any]]:
     uploaded_parts = list(presign_payload.get("uploaded_parts", []) or [])
     chunk_size = int(presign_payload.get("chunk_size_bytes") or CHUNK_SIZE_BYTES)
@@ -144,7 +155,8 @@ def upload_parts(
             start = (part_number - 1) * chunk_size
             handle.seek(start)
             data = handle.read(chunk_size)
-            response = client.put(str(item["url"]), content=data, headers={"Content-Type": "application/octet-stream"})
+            part_url = resolve_part_url(str(item["url"]), base_url)
+            response = client.put(part_url, content=data, headers={"Content-Type": "application/octet-stream"})
             response.raise_for_status()
             etag = response.headers.get("etag") or response.headers.get("ETag") or ""
             if not etag:
@@ -300,7 +312,7 @@ def upload_and_wait(
         upload_id=upload_id,
         part_numbers=build_part_numbers(file_path),
     )
-    parts = upload_parts(client, file_path=file_path, presign_payload=presign_payload)
+    parts = upload_parts(client, file_path=file_path, presign_payload=presign_payload, base_url=base_url)
     complete_payload = complete_upload(
         client,
         base_url=base_url,

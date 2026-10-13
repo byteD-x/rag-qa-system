@@ -167,7 +167,7 @@ def ingest_inline_knowledge_document(
                     created_by, stats_json, upload_session_id,
                     source_type, source_uri, source_metadata_json,
                     version_family_key, version_label, version_number, version_status,
-                    is_current_version
+                    is_current_version, allowed_departments, content_kind, question_type, difficulty, tags_json
                 )
                 VALUES (
                     %s, %s, %s, 'txt', %s, '',
@@ -175,7 +175,7 @@ def ingest_inline_knowledge_document(
                     %s, %s::jsonb, NULL,
                     'batch_ingest', '', %s::jsonb,
                     %s, 'v1', 1, 'active',
-                    TRUE
+                    TRUE, %s, %s, %s, %s, %s::jsonb
                 )
                 """,
                 (
@@ -188,6 +188,11 @@ def ingest_inline_knowledge_document(
                     to_json(stats),
                     to_json({"input_doc_id": str(document.get("doc_id") or ""), "file_name": file_name}),
                     document_id,
+                    list(document.get("allowed_departments") or []),
+                    str(document.get("content_kind") or "document"),
+                    str(document.get("question_type") or ""),
+                    str(document.get("difficulty") or ""),
+                    to_json(list(document.get("tags") or [])),
                 ),
             )
             _insert_sections(cur, document_id, parsed.sections)

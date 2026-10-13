@@ -6,8 +6,9 @@ ENV PYTHONPATH=/app/packages/python:/app/apps/services/api-gateway/src
 
 WORKDIR /app
 
+ARG PIP_INDEX_URL=https://pypi.org/simple
 COPY apps/services/api-gateway/requirements.runtime.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" -r /tmp/requirements.txt
 
 COPY apps/services/api-gateway /app/apps/services/api-gateway
 COPY packages/python /app/packages/python

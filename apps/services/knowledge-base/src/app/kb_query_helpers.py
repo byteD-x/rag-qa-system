@@ -34,13 +34,26 @@ def serialize_evidence(item: Any, *, corpus_id: str) -> dict[str, Any]:
     return payload
 
 
-def prepare_query_response(*, base_id: str, question: str, document_ids: list[str]) -> dict[str, Any]:
+def prepare_query_response(
+    *,
+    base_id: str,
+    question: str,
+    document_ids: list[str],
+    user_department: str = "",
+    is_admin: bool = False,
+    use_retrieval_cache: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     strategy = detect_strategy(question)
     retrieval = retrieve_kb_result(
         base_id=base_id,
         question=question,
         document_ids=document_ids,
         limit=8,
+        user_department=user_department,
+        is_admin=is_admin,
+        use_cache=use_retrieval_cache,
+        metadata_filter=metadata_filter,
     )
     citations = [serialize_evidence(item, corpus_id=f"kb:{base_id}") for item in retrieval.items]
     answer_mode, evidence_status, grounding_score, refusal_reason = classify_evidence(
@@ -76,10 +89,26 @@ def prepare_query_response(*, base_id: str, question: str, document_ids: list[st
     }
 
 
-async def build_query_response(*, base_id: str, question: str, document_ids: list[str]) -> dict[str, Any]:
+async def build_query_response(
+    *,
+    base_id: str,
+    question: str,
+    document_ids: list[str],
+    user_department: str = "",
+    is_admin: bool = False,
+    use_retrieval_cache: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     # 检索+安全分析是同步阻塞;在 async 路由里放进线程池,避免阻塞事件循环。
     prepared = await run_in_threadpool(
-        prepare_query_response, base_id=base_id, question=question, document_ids=document_ids
+        prepare_query_response,
+        base_id=base_id,
+        question=question,
+        document_ids=document_ids,
+        user_department=user_department,
+        is_admin=is_admin,
+        use_retrieval_cache=use_retrieval_cache,
+        metadata_filter=metadata_filter,
     )
     answer = await _generate_query_answer(prepared=prepared)
     return _finalize_query_response(prepared=prepared, answer=answer)

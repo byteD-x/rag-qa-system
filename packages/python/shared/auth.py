@@ -55,6 +55,8 @@ class AuthUser:
     role: str
     permissions: tuple[str, ...] = ()
     role_version: int = ROLE_VERSION
+    # 用户部门来自认证目录（本地开发时来自对应环境变量），不是知识库权限数据。
+    department: str = ""
 
 
 def normalize_role(role: str) -> str:
@@ -85,6 +87,7 @@ def serialize_user(user: AuthUser) -> dict[str, Any]:
         "role": user.role,
         "permissions": list(user.permissions),
         "role_version": user.role_version,
+        "department": user.department,
     }
 
 
@@ -119,12 +122,14 @@ def build_local_users() -> dict[str, dict[str, str]]:
             "role": "platform_admin",
             "user_id": os.getenv("ADMIN_USER_ID", "11111111-1111-1111-1111-111111111111").strip()
             or "11111111-1111-1111-1111-111111111111",
+            "department": os.getenv("ADMIN_DEPARTMENT", "").strip(),
         },
         (os.getenv("MEMBER_EMAIL", DEFAULT_MEMBER_EMAIL).strip() or DEFAULT_MEMBER_EMAIL).lower(): {
             "password": os.getenv("MEMBER_PASSWORD", DEFAULT_LOCAL_PASSWORD).strip() or DEFAULT_LOCAL_PASSWORD,
             "role": "kb_editor",
             "user_id": os.getenv("MEMBER_USER_ID", "22222222-2222-2222-2222-222222222222").strip()
             or "22222222-2222-2222-2222-222222222222",
+            "department": os.getenv("MEMBER_DEPARTMENT", "").strip(),
         },
     }
 
@@ -182,6 +187,7 @@ def authenticate_local_user(email: str, password: str) -> AuthUser | None:
         role=role,
         permissions=permissions_for_role(role),
         role_version=ROLE_VERSION,
+        department=candidate.get("department", "").strip(),
     )
 
 
@@ -193,6 +199,7 @@ def create_access_token(user: AuthUser) -> str:
         "role": user.role,
         "permissions": list(user.permissions),
         "role_version": int(user.role_version or ROLE_VERSION),
+        "department": user.department,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=_jwt_ttl_minutes())).timestamp()),
     }
@@ -225,6 +232,8 @@ def decode_access_token(token: str) -> AuthUser:
         role_version = int(role_version_raw)
     except (TypeError, ValueError):
         role_version = ROLE_VERSION
+    # 旧 token 没有 department claim 时按无部门处理，保持向后兼容。
+    department = str(payload.get("department", "") or "").strip()
     if not user_id or not email:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -236,6 +245,7 @@ def decode_access_token(token: str) -> AuthUser:
         role=role,
         permissions=tuple(dict.fromkeys(permissions or permissions_for_role(role))),
         role_version=role_version,
+        department=department,
     )
 
 

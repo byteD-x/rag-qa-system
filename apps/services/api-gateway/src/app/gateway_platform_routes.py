@@ -8,6 +8,13 @@ from shared.auth import CurrentUser
 
 from .gateway_audit_support import require_permission, write_gateway_audit_event
 from .gateway_llm_models import discover_openai_compatible_models, llm_config_summary
+from .gateway_model_config import (
+    create_model_config,
+    disable_model_config,
+    list_model_configs,
+    load_model_config,
+    update_model_config,
+)
 from .gateway_runtime import CHAT_PERMISSION
 from .governance_metrics import get_governance_metrics
 from .gateway_platform_store import (
@@ -27,15 +34,65 @@ from .gateway_platform_store import (
 from .gateway_schemas import (
     AgentProfileRequest,
     LLMModelDiscoveryRequest,
+    ModelProviderConfigRequest,
     PromptTemplateRequest,
     ToolWorkflowRequest,
     UpdateAgentProfileRequest,
     UpdatePromptTemplateRequest,
+    UpdateModelProviderConfigRequest,
 )
 from .tool_workflow import run_tool_workflow
 
 
 router = APIRouter()
+
+
+def _require_model_admin(request: Request, user: CurrentUser, *, action: str, resource_id: str = "") -> None:
+    require_permission(request, user, "kb.manage", action=action, resource_type="model_provider_config", resource_id=resource_id)
+
+
+@router.get("/api/v1/platform/model-configs")
+async def get_model_configs(request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_config.list")
+    return {"items": list_model_configs()}
+
+
+@router.post("/api/v1/platform/model-configs")
+async def post_model_config(payload: ModelProviderConfigRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_config.create")
+    item = create_model_config(payload=payload.model_dump(), user_id=user.user_id)
+    write_gateway_audit_event(action="platform.model_config.create", outcome="success", request=request, user=user, resource_type="model_provider_config", resource_id=str(item.get("id") or ""), scope="managed")
+    return item
+
+
+@router.patch("/api/v1/platform/model-configs/{config_id}")
+async def patch_model_config(config_id: str, payload: UpdateModelProviderConfigRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_config.update", resource_id=config_id)
+    item = update_model_config(config_id, payload=payload.model_dump(exclude_unset=True))
+    write_gateway_audit_event(action="platform.model_config.update", outcome="success", request=request, user=user, resource_type="model_provider_config", resource_id=config_id, scope="managed")
+    return item
+
+
+@router.delete("/api/v1/platform/model-configs/{config_id}")
+async def remove_model_config(config_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_config.disable", resource_id=config_id)
+    disable_model_config(config_id)
+    write_gateway_audit_event(action="platform.model_config.disable", outcome="success", request=request, user=user, resource_type="model_provider_config", resource_id=config_id, scope="managed")
+    return {"disabled": True, "config_id": config_id}
+
+
+@router.post("/api/v1/platform/model-configs/{config_id}/test")
+async def test_model_config(config_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_config.test", resource_id=config_id)
+    row = load_model_config(config_id, include_secret=True)
+    result = await discover_openai_compatible_models(
+        provider=str(row.get("provider_type") or "openai-compatible"),
+        base_url=str(row.get("base_url") or ""),
+        credential=str(row.get("api_key") or ""),
+        max_models=1,
+    )
+    write_gateway_audit_event(action="platform.model_config.test", outcome="success", request=request, user=user, resource_type="model_provider_config", resource_id=config_id, scope="connectivity", details={"provider": result.get("provider", "")})
+    return {"ok": True, "provider": result.get("provider", ""), "model_count": result.get("count", 0)}
 
 
 @router.post("/api/v1/agents/tool-workflow")

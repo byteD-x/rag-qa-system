@@ -10,10 +10,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, envDir, '');
   const gatewayPort = env.GATEWAY_HOST_PORT || '8080';
   const gatewayOrigin = env.VITE_GATEWAY_ORIGIN || `http://localhost:${gatewayPort}`;
+  const demoAdminEmail = env.VITE_DEMO_ADMIN_EMAIL || env.ADMIN_EMAIL || 'admin@local';
+  const demoAdminPassword = env.VITE_DEMO_ADMIN_PASSWORD || env.ADMIN_PASSWORD || 'ChangeMe123!';
+  const demoMemberEmail = env.VITE_DEMO_MEMBER_EMAIL || env.MEMBER_EMAIL || 'member@local';
+  const demoMemberPassword = env.VITE_DEMO_MEMBER_PASSWORD || env.MEMBER_PASSWORD || 'ChangeMe123!';
 
   return {
     envDir,
     plugins: [vue()],
+    define: {
+      'import.meta.env.VITE_DEMO_ADMIN_EMAIL': JSON.stringify(demoAdminEmail),
+      'import.meta.env.VITE_DEMO_ADMIN_PASSWORD': JSON.stringify(demoAdminPassword),
+      'import.meta.env.VITE_DEMO_MEMBER_EMAIL': JSON.stringify(demoMemberEmail),
+      'import.meta.env.VITE_DEMO_MEMBER_PASSWORD': JSON.stringify(demoMemberPassword)
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src')

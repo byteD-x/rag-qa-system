@@ -344,6 +344,12 @@ SSE 流式回答，事件顺序：
 - `PATCH /api/v1/kb/bases/{base_id}`
 - `DELETE /api/v1/kb/bases/{base_id}`
 
+读取与管理边界：
+
+- `GET /api/v1/kb/bases`、`GET /api/v1/kb/bases/{base_id}/documents` 以及检索/问答接口使用 `kb.read` 共享读取范围，不按知识库或文档的 `created_by` 限制读取对象。
+- 文档列表和检索结果仍只返回当前用户按文档 `allowed_departments` 可见的内容：空数组表示公开文档；无部门用户只能看到公开文档；管理员可按管理权限查看全部文档。
+- `created_by` 仅作为更新、删除、上传和其他治理写操作的 owner 边界；它不是人员权限数据，也不会写入知识库 ACL。
+
 ### 文档
 
 - `GET /api/v1/kb/bases/{base_id}/documents`
@@ -738,6 +744,8 @@ SSE 流式回答，事件顺序：
 - `retrieval`
 - `trace_id`
 
+其中 `retrieval.cache_hit` 表示是否命中 KB 进程内 ACL 感知短 TTL 检索缓存；命中时会跳过本次三路召回与重排，但不改变 `items` 契约。
+
 ### `POST /api/v2/kb/retrieve`
 
 LangGraph 编排版检索接口。
@@ -809,7 +817,7 @@ LangGraph 编排版知识库问答接口。
 
 版本选择规则：
 
-- 当请求显式传入 `document_ids` 时，系统会严格按这些文档 ID 检索。企业用户可以手动指定旧制度、旧合同、旧手册做追溯查询。
+- 当请求显式传入 `document_ids` 时，系统会先将这些 ID 与当前用户按文档 `allowed_departments` 过滤后的可见集合求交，再按交集检索；显式 ID 不能绕过部门 ACL。企业用户可以手动指定有权访问的旧制度、旧合同、旧手册做追溯查询。
 - 当请求不传 `document_ids` 时，系统默认只在“当前生效版本”中检索，也就是同时满足：
   - `query_ready = true`
   - `source_deleted_at IS NULL`

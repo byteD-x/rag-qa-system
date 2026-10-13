@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,8 +62,18 @@ def parse_document(
     token_overlap: int | None = None,
 ) -> ParsedKB:
     normalized = file_type.lower()
-    if normalized == "txt":
+    if normalized in {"txt", "md", "markdown", "csv", "json"}:
         text = read_text_with_fallback(path)
+        if normalized == "json":
+            try:
+                text = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid JSON document: {exc.msg}") from exc
+        elif normalized == "csv":
+            text = _normalize_csv_text(text)
+        return _parse_text_sections(text, max_tokens=max_tokens, token_overlap=token_overlap)
+    if normalized in {"xlsx", "xls"}:
+        text = _read_spreadsheet(path, normalized)
         return _parse_text_sections(text, max_tokens=max_tokens, token_overlap=token_overlap)
     if normalized == "pdf":
         from pypdf import PdfReader
@@ -77,6 +89,36 @@ def parse_document(
     if normalized in {"png", "jpg", "jpeg"}:
         return ParsedKB(sections=[], chunks=[])
     raise ValueError(f"unsupported file type: {file_type}")
+
+
+def _normalize_csv_text(text: str) -> str:
+    rows = list(csv.reader(text.splitlines()))
+    return "\n".join(" | ".join(str(cell).strip() for cell in row) for row in rows if any(str(cell).strip() for cell in row))
+
+
+def _read_spreadsheet(path: Path, file_type: str) -> str:
+    rows: list[str] = []
+    if file_type == "xlsx":
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        for sheet in workbook.worksheets:
+            rows.append(f"## {sheet.title}")
+            for values in sheet.iter_rows(values_only=True):
+                cells = [str(value).strip() for value in values if value is not None and str(value).strip()]
+                if cells:
+                    rows.append(" | ".join(cells))
+        return "\n".join(rows)
+    import xlrd
+
+    workbook = xlrd.open_workbook(path, on_demand=True)
+    for sheet in workbook.sheets():
+        rows.append(f"## {sheet.name}")
+        for index in range(sheet.nrows):
+            cells = [str(value).strip() for value in sheet.row_values(index) if str(value).strip()]
+            if cells:
+                rows.append(" | ".join(cells))
+    return "\n".join(rows)
 
 
 def parse_text_content(

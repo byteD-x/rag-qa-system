@@ -21,6 +21,7 @@ from .gateway_audit_support import merge_audit_event_lists as _merge_audit_event
 from .gateway_auth_routes import router as gateway_auth_router
 from .gateway_chat_graph_routes import router as gateway_chat_graph_router
 from .gateway_chat_routes import router as gateway_chat_router
+from .gateway_interview_routes import router as gateway_interview_router
 from .gateway_config import load_gateway_runtime_settings
 from .gateway_graph import ensure_gateway_graph_schema
 from .gateway_idempotency import IdempotencyState
@@ -129,6 +130,7 @@ def _estimate_usage_cost(usage: dict[str, Any]) -> dict[str, Any]:
 app.include_router(gateway_auth_router)
 app.include_router(gateway_system_router)
 app.include_router(gateway_chat_router)
+app.include_router(gateway_interview_router)
 app.include_router(gateway_chat_graph_router)
 app.include_router(gateway_admin_router)
 app.include_router(gateway_platform_router)

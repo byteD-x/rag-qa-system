@@ -55,6 +55,11 @@ def create_upload(payload: CreateUploadRequest, request: Request, user: CurrentU
             "effective_from": payload.effective_from.isoformat() if payload.effective_from else "",
             "effective_to": payload.effective_to.isoformat() if payload.effective_to else "",
             "supersedes_document_id": payload.supersedes_document_id,
+            "allowed_departments": payload.allowed_departments,
+            "content_kind": payload.content_kind,
+            "question_type": payload.question_type,
+            "difficulty": payload.difficulty,
+            "tags": payload.tags,
         },
     )
     if state.replay_payload is not None:
@@ -84,12 +89,13 @@ def create_upload(payload: CreateUploadRequest, request: Request, user: CurrentU
                         id, base_id, file_name, file_type, size_bytes, category,
                         storage_key, s3_upload_id, status, created_by, expires_at,
                         version_family_key, version_label, version_number, version_status,
-                        is_current_version, effective_from, effective_to, supersedes_document_id
+                        is_current_version, effective_from, effective_to, supersedes_document_id,
+                        allowed_departments, content_kind, question_type, difficulty, tags_json
                     )
                     VALUES (
                         %s, %s, %s, %s, %s, %s,
                         %s, %s, 'pending_upload', %s, NOW() + INTERVAL '1 hour',
-                        %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -110,6 +116,11 @@ def create_upload(payload: CreateUploadRequest, request: Request, user: CurrentU
                         payload.effective_from,
                         payload.effective_to,
                         payload.supersedes_document_id,
+                        payload.allowed_departments,
+                        payload.content_kind,
+                        payload.question_type,
+                        payload.difficulty,
+                        to_json(payload.tags),
                     ),
                 )
             conn.commit()
@@ -289,12 +300,13 @@ def complete_upload(upload_id: str, payload: CompleteUploadRequest, request: Req
                         storage_key, size_bytes, status, query_ready, enhancement_status,
                         created_by, stats_json, upload_session_id,
                         version_family_key, version_label, version_number, version_status,
-                        is_current_version, effective_from, effective_to, supersedes_document_id
+                        is_current_version, effective_from, effective_to, supersedes_document_id,
+                        allowed_departments, content_kind, question_type, difficulty, tags_json
                     )
                     VALUES (
                         %s, %s, %s, %s, %s, %s,
                         %s, %s, 'uploaded', FALSE, '', %s, %s::jsonb, %s,
-                        %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -322,6 +334,11 @@ def complete_upload(upload_id: str, payload: CompleteUploadRequest, request: Req
                         effective_from,
                         session.get("effective_to"),
                         supersedes_document_id,
+                        list(session.get("allowed_departments") or []),
+                        str(session.get("content_kind") or "document"),
+                        str(session.get("question_type") or ""),
+                        str(session.get("difficulty") or ""),
+                        to_json(list(session.get("tags_json") or [])),
                     ),
                 )
                 cur.execute(

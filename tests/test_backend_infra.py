@@ -4337,8 +4337,8 @@ def test_create_upload_request_rejects_unknown_type() -> None:
     try:
         kb_schemas.CreateUploadRequest(
             base_id="base-1",
-            file_name="sheet.xlsx",
-            file_type="xlsx",
+            file_name="archive.yaml",
+            file_type="yaml",
             size_bytes=12,
             category="images",
         )
@@ -6062,13 +6062,23 @@ def test_retrieve_debug_route_serializes_evidence_and_debug_meta(monkeypatch) ->
 
     captured: dict[str, object] = {}
 
-    def fake_retrieve_kb_result(*, base_id: str, question: str, document_ids: list[str], limit: int):
+    def fake_retrieve_kb_result(
+        *,
+        base_id: str,
+        question: str,
+        document_ids: list[str],
+        limit: int,
+        user_department: str = "",
+        is_admin: bool = False,
+    ):
         captured.update(
             {
                 "base_id": base_id,
                 "question": question,
                 "document_ids": document_ids,
                 "limit": limit,
+                "user_department": user_department,
+                "is_admin": is_admin,
             }
         )
         return RetrievalResult(
@@ -6129,6 +6139,8 @@ def test_retrieve_debug_route_serializes_evidence_and_debug_meta(monkeypatch) ->
         "question": "Who signs expense approvals?",
         "document_ids": ["doc-policy"],
         "limit": 5,
+        "user_department": "",
+        "is_admin": False,
     }
     assert payload["query"] == "Who signs expense approvals?"
     assert payload["trace_id"].startswith("kb-")

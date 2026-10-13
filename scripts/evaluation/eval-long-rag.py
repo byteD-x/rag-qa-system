@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import defaultdict
@@ -15,7 +16,7 @@ import httpx
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "packages/python"))
 
-from shared.eval_metrics import ndcg_at_k, precision, recall_at_k, reciprocal_rank, refusal_scores, summarize_latencies
+from shared.eval_metrics import ndcg_at_k, precision, reciprocal_rank, refusal_scores, summarize_latencies
 from shared.text_search import normalize_text, tokenize_text
 
 
@@ -138,6 +139,14 @@ def rank_relevance(case: dict[str, Any], response: dict[str, Any]) -> tuple[list
     return relevance, expected_hits
 
 
+def _section_recall_at_k(case: dict[str, Any], citations: list[dict[str, Any]], k: int) -> float:
+    expected = {str(item) for item in case.get("expected_sections", []) if str(item)}
+    if not expected or k <= 0:
+        return 0.0
+    titles = [str(item.get("section_title") or "") for item in citations[:k]]
+    return round(sum(any(section in title for title in titles) for section in expected) / len(expected), 4)
+
+
 def score_case(case: dict[str, Any], response: dict[str, Any], *, latency_ms: float) -> dict[str, Any]:
     citations = response.get("citations", []) or []
     answer_text = str(response.get("answer") or "")
@@ -145,6 +154,8 @@ def score_case(case: dict[str, Any], response: dict[str, Any], *, latency_ms: fl
     answer_mode = str(response.get("answer_mode", ""))
     retrieval = dict(response.get("retrieval") or {})
     llm_trace = dict(response.get("llm_trace") or {})
+    usage_meta = dict((response.get("usage") or {}).get("_meta") or {})
+    cost = dict(response.get("cost") or usage_meta.get("cost") or {})
     relevance, expected_hits = rank_relevance(case, response)
     min_citations = int(case.get("min_citations", 0) or 0)
     citation_ok = len(citations) >= min_citations
@@ -183,9 +194,9 @@ def score_case(case: dict[str, Any], response: dict[str, Any], *, latency_ms: fl
         "correctness": correctness,
         "answer_term_recall": answer_term_recall,
         "forbidden_term_hits": forbidden_term_hits,
-        "recall_at_1": recall_at_k(relevance, 1),
-        "recall_at_3": recall_at_k(relevance, 3),
-        "recall_at_5": recall_at_k(relevance, 5),
+        "recall_at_1": _section_recall_at_k(case, citations, 1),
+        "recall_at_3": _section_recall_at_k(case, citations, 3),
+        "recall_at_5": _section_recall_at_k(case, citations, 5),
         "mrr": reciprocal_rank(relevance),
         "ndcg_at_5": ndcg_at_k(relevance, 5),
         "evidence_status": evidence_status,
@@ -195,6 +206,8 @@ def score_case(case: dict[str, Any], response: dict[str, Any], *, latency_ms: fl
         "refused": refused,
         "refused_when_expected": refused if expected_refusal else None,
         "latency_ms": round(latency_ms, 4),
+        "estimated_cost": float(cost.get("estimated_cost") or 0.0),
+        "cost_currency": str(cost.get("currency") or ""),
         "trace_id": str(response.get("trace_id") or ""),
         "retrieval": retrieval,
     }
@@ -236,6 +249,8 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     prompt_versions: set[str] = set()
     model_versions: set[str] = set()
     execution_modes: set[str] = set()
+    estimated_cost_by_currency: dict[str, float] = defaultdict(float)
+    cost_count_by_currency: dict[str, int] = defaultdict(int)
 
     for result in results:
         category = str(result["category"])
@@ -271,6 +286,10 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
             model_versions.add(str(result.get("model_version") or "").strip())
         if str(result.get("execution_mode") or "").strip():
             execution_modes.add(str(result.get("execution_mode") or "").strip())
+        currency = str(result.get("cost_currency") or "").strip()
+        if currency:
+            estimated_cost_by_currency[currency] += float(result.get("estimated_cost") or 0.0)
+            cost_count_by_currency[currency] += 1
 
         retrieval = dict(result.get("retrieval") or {})
         retrieval_ms_values.append(float(retrieval.get("aggregate", {}).get("retrieval_ms", retrieval.get("retrieval_ms", 0.0)) or 0.0))
@@ -346,10 +365,19 @@ def summarize_results(results: list[dict[str, Any]]) -> dict[str, Any]:
                 false_positive=refusal_fp,
                 false_negative=refusal_fn,
             ),
+            "refusal_rate": round(sum(bool(item.get("refused")) for item in results) / len(results), 4) if results else 0.0,
             "dataset_versions": sorted(dataset_versions),
             "prompt_versions": sorted(prompt_versions),
             "model_versions": sorted(model_versions),
             "execution_modes": sorted(execution_modes),
+            "estimated_cost_total_by_currency": {
+                currency: round(total, 6) for currency, total in sorted(estimated_cost_by_currency.items())
+            },
+            "estimated_cost_sample_count_by_currency": dict(sorted(cost_count_by_currency.items())),
+            "estimated_cost_per_1000_requests": {
+                currency: round(total * 1000.0 / cost_count_by_currency[currency], 6)
+                for currency, total in sorted(estimated_cost_by_currency.items())
+            },
         },
         "by_category": per_category,
     }
@@ -386,14 +414,19 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
         f"| mean selected candidates | {summary['retrieval']['mean_selected_candidates']:.2f} |",
         f"| refusal precision | {summary['refusal']['precision']:.4f} |",
         f"| refusal recall | {summary['refusal']['recall']:.4f} |",
+        f"| refusal rate | {summary['refusal_rate']:.4f} |",
         f"| prompt versions | {', '.join(summary['prompt_versions']) or 'n/a'} |",
         f"| model versions | {', '.join(summary['model_versions']) or 'n/a'} |",
+    ]
+    for currency, value in summary["estimated_cost_per_1000_requests"].items():
+        lines.append(f"| estimated cost / 1000 requests ({currency}) | {value:.6f} |")
+    lines.extend([
         "",
         "## By Category",
         "",
         "| category | accuracy | correctness | faithfulness | citation alignment | mrr | recall@3 | p95 latency (ms) |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    ])
     for category, metrics in report["summary"]["by_category"].items():
         lines.append(
             f"| {category} | {metrics['accuracy']:.4f} | {metrics['correctness']:.4f} | {metrics['faithfulness']:.4f} | "
@@ -461,7 +494,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate unified chat RAG behavior.")
     parser.add_argument("--base-url", default="http://localhost:8080/api/v1")
     parser.add_argument("--email", default="admin@local")
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--password", default=None, help="Defaults to BENCHMARK_PASSWORD environment variable.")
     parser.add_argument("--eval-file", required=True)
     parser.add_argument("--scope-mode", choices=["single", "multi", "all"], default="single")
     parser.add_argument("--corpus-id", action="append", default=[], help="repeatable; format kb:<uuid>")
@@ -470,11 +503,14 @@ def main() -> int:
     parser.add_argument("--output", default="artifacts/reports/long_rag_eval_report.json")
     parser.add_argument("--summary-output", default="artifacts/reports/long_rag_eval_report.md")
     args = parser.parse_args()
+    password = args.password or os.getenv("BENCHMARK_PASSWORD", "")
+    if not password:
+        raise SystemExit("--password or BENCHMARK_PASSWORD is required")
 
     report = run_eval_job(
         base_url=args.base_url,
         email=args.email,
-        password=args.password,
+        password=password,
         eval_file=args.eval_file,
         scope_mode=args.scope_mode,
         corpus_ids=args.corpus_id,

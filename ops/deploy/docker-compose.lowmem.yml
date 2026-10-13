@@ -1,0 +1,107 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.3
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.60
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - ./qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "/usr/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  stack-init:
+    image: deploy_kb-service:latest
+    build:
+      context: ../..
+      dockerfile: apps/services/knowledge-base/Dockerfile
+      args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+    env_file:
+      - ../../.env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_PREFER_GRPC: "false"
+      KB_BLOB_ROOT: /data/kb
+      OBJECT_STORAGE_PROVIDER: filesystem
+      KB_AUTO_REINDEX_AFTER_MIGRATION: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb-data:/data/kb
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: "no"
+
+  kb-service:
+    image: deploy_kb-service:latest
+    build:
+      context: ../..
+      dockerfile: apps/services/knowledge-base/Dockerfile
+      args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+    restart: unless-stopped
+    mem_limit: 560m
+    cpus: 0.85
+    env_file:
+      - ../../.env
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_PREFER_GRPC: "false"
+      KB_BLOB_ROOT: /data/kb
+      OBJECT_STORAGE_PROVIDER: filesystem
+      KB_RUN_WORKER: "true"
+      FASTEMBED_THREADS: "1"
+      FASTEMBED_BATCH_SIZE: "16"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./kb-data:/data/kb
+    ports:
+      - "127.0.0.1:8300:8200"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  gateway:
+    image: deploy_gateway:latest
+    build:
+      context: ../..
+      dockerfile: apps/services/api-gateway/Dockerfile
+      args:
+        PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple/
+    restart: unless-stopped
+    mem_limit: 420m
+    cpus: 0.75
+    env_file:
+      - ../../.env
+    environment:
+      KB_SERVICE_URL: http://kb-service:8200
+      GATEWAY_TIMEOUT_SECONDS: "120"
+      CHAT_MAX_EVIDENCE: "6"
+      CHAT_HISTORY_MESSAGES: "6"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      kb-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s

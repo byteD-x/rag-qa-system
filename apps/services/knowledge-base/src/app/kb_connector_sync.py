@@ -13,6 +13,22 @@ from .kb_version_assist import build_version_assist
 from .vector_store import delete_document_vectors
 
 
+def _normalize_allowed_departments(value: list[str] | None) -> list[str] | None:
+    """Normalize connector ACLs while preserving omitted versus public values."""
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("allowed_departments must be a list")
+    normalized: list[str] = []
+    for item in value:
+        department = str(item or "").strip().lower()
+        if department and department not in normalized:
+            normalized.append(department)
+    if len(normalized) > 100:
+        raise ValueError("allowed_departments must contain no more than 100 items")
+    return normalized
+
+
 @dataclass(frozen=True)
 class ConnectorSyncCandidate:
     file_name: str
@@ -155,9 +171,11 @@ def execute_connector_sync(
     db: Any,
     storage: Any,
     storage_service: str,
+    allowed_departments: list[str] | None = None,
     ignored_files: list[str] | None = None,
     extra_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    allowed_departments = _normalize_allowed_departments(allowed_departments)
     ignored = list(ignored_files or [])
     with db.connect() as conn:
         with conn.cursor() as cur:
@@ -212,6 +230,11 @@ def execute_connector_sync(
                 if item.action == "skip":
                     existing = existing_documents.get(item.source_uri) or {}
                     candidate = existing_by_source_uri[item.source_uri]
+                    effective_allowed_departments = (
+                        list(allowed_departments)
+                        if allowed_departments is not None
+                        else list(existing.get("allowed_departments") or [])
+                    )
                     cur.execute(
                         """
                         UPDATE kb_documents
@@ -219,12 +242,14 @@ def execute_connector_sync(
                             source_updated_at = %s,
                             source_deleted_at = NULL,
                             source_metadata_json = %s::jsonb,
+                            allowed_departments = %s,
                             updated_at = NOW()
                         WHERE id = %s
                         """,
                         (
                             candidate.source_updated_at,
                             to_json(candidate.source_metadata),
+                            effective_allowed_departments,
                             existing.get("id"),
                         ),
                     )
@@ -279,6 +304,11 @@ def execute_connector_sync(
 
                 candidate = existing_by_source_uri[item.source_uri]
                 existing = existing_documents.get(item.source_uri) or {}
+                effective_allowed_departments = (
+                    list(allowed_departments)
+                    if allowed_departments is not None
+                    else list(existing.get("allowed_departments") or [])
+                )
                 create_new_version = item.action == "create" or item.reason == "content_changed"
                 document_id = str(uuid4()) if create_new_version else str(existing.get("id") or uuid4())
                 job_id = str(uuid4())
@@ -330,6 +360,8 @@ def execute_connector_sync(
                         None,
                     )
                     if matched_document is not None:
+                        if allowed_departments is None:
+                            effective_allowed_departments = list(matched_document.get("allowed_departments") or [])
                         create_version_family_key = str(
                             version_assist.get("suggested_version_family_key")
                             or matched_document.get("version_family_key")
@@ -364,12 +396,12 @@ def execute_connector_sync(
                             created_by, stats_json, source_type, source_uri, source_updated_at,
                             source_deleted_at, last_synced_at, source_metadata_json,
                             version_family_key, version_label, version_number, version_status,
-                            is_current_version, effective_from, supersedes_document_id
+                            is_current_version, effective_from, supersedes_document_id, allowed_departments
                         )
                         VALUES (
                             %s, %s, %s, %s, %s, '',
                             %s, %s, 'uploaded', FALSE, '', %s, %s::jsonb, %s, %s, %s,
-                            NULL, NOW(), %s::jsonb, %s, %s, %s, 'active', TRUE, %s, NULL
+                            NULL, NOW(), %s::jsonb, %s, %s, %s, 'active', TRUE, %s, %s, %s
                         )
                         """,
                         (
@@ -391,6 +423,7 @@ def execute_connector_sync(
                             create_version_number,
                             candidate.source_updated_at,
                             create_supersedes_document_id,
+                            effective_allowed_departments,
                         ),
                     )
                 elif item.reason == "content_changed":
@@ -420,12 +453,12 @@ def execute_connector_sync(
                             created_by, stats_json, source_type, source_uri, source_updated_at,
                             source_deleted_at, last_synced_at, source_metadata_json,
                             version_family_key, version_label, version_number, version_status,
-                            is_current_version, effective_from, supersedes_document_id
+                            is_current_version, effective_from, supersedes_document_id, allowed_departments
                         )
                         VALUES (
                             %s, %s, %s, %s, %s, '',
                             %s, %s, 'uploaded', FALSE, '', %s, %s::jsonb, %s, %s, %s,
-                            NULL, NOW(), %s::jsonb, %s, %s, %s, 'active', TRUE, %s, %s
+                            NULL, NOW(), %s::jsonb, %s, %s, %s, 'active', TRUE, %s, %s, %s
                         )
                         """,
                         (
@@ -447,6 +480,7 @@ def execute_connector_sync(
                             next_version_number,
                             candidate.source_updated_at,
                             existing.get("id"),
+                            effective_allowed_departments,
                         ),
                     )
                 else:
@@ -467,6 +501,7 @@ def execute_connector_sync(
                             last_synced_at = NOW(),
                             source_metadata_json = %s::jsonb,
                             stats_json = %s::jsonb,
+                            allowed_departments = %s,
                             updated_at = NOW()
                         WHERE id = %s
                         """,
@@ -479,6 +514,7 @@ def execute_connector_sync(
                             candidate.source_updated_at,
                             to_json(candidate.source_metadata),
                             to_json(next_stats),
+                            effective_allowed_departments,
                             document_id,
                         ),
                     )
@@ -534,6 +570,7 @@ def execute_connector_sync(
                             "version_number": create_version_number,
                             "updated_at": candidate.source_updated_at,
                             "is_current_version": True,
+                            "allowed_departments": effective_allowed_departments,
                         },
                     )
         conn.commit()

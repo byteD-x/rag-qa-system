@@ -34,6 +34,44 @@
         </div>
       </div>
 
+      <section class="panel model-config-panel">
+        <div class="panel-header">
+          <h2>已保存模型配置</h2>
+          <el-button type="primary" size="small" @click="showModelConfig = true">新增配置</el-button>
+        </div>
+        <el-table :data="modelConfigs" size="small">
+          <el-table-column prop="name" label="名称" width="150" />
+          <el-table-column prop="provider_type" label="提供商" width="150" />
+          <el-table-column prop="model_name" label="模型" min-width="160" show-overflow-tooltip />
+          <el-table-column label="默认用途" min-width="150">
+            <template #default="{ row }">{{ row.default_purposes?.join('、') || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="密钥" width="110">
+            <template #default="{ row }"><el-tag size="small" :type="row.api_key_configured ? 'success' : 'warning'" effect="plain">{{ row.api_key_configured ? row.api_key_hint : '未配置' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="操作" width="180">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="testSavedConfig(row.id)">测试</el-button>
+              <el-button link type="danger" @click="disableSavedConfig(row.id)">停用</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </section>
+
+      <el-dialog v-model="showModelConfig" title="新增模型配置" width="560px">
+        <el-form label-position="top">
+          <el-form-item label="名称"><el-input v-model="modelForm.name" placeholder="例如：面试评分模型" /></el-form-item>
+          <div class="form-row">
+            <el-form-item label="提供商"><el-input v-model="modelForm.provider_type" placeholder="openai-compatible / ollama" /></el-form-item>
+            <el-form-item label="模型名"><el-input v-model="modelForm.model_name" /></el-form-item>
+          </div>
+          <el-form-item label="Base URL"><el-input v-model="modelForm.base_url" placeholder="https://api.example.com/v1" /></el-form-item>
+          <el-form-item label="API Key"><el-input v-model="modelForm.api_key" show-password placeholder="只在提交时发送，后端加密保存" /></el-form-item>
+          <el-form-item label="默认用途"><el-checkbox-group v-model="modelForm.default_purposes"><el-checkbox label="chat">对话</el-checkbox><el-checkbox label="embedding">嵌入</el-checkbox><el-checkbox label="interview">面试</el-checkbox><el-checkbox label="scoring">评分</el-checkbox></el-checkbox-group></el-form-item>
+        </el-form>
+        <template #footer><el-button @click="showModelConfig = false">取消</el-button><el-button type="primary" :loading="modelSaving" @click="saveModelConfig">保存</el-button></template>
+      </el-dialog>
+
       <div class="provider-layout">
         <section class="panel">
           <div class="panel-header">
@@ -184,9 +222,14 @@ import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import {
   discoverLlmModels,
   getLlmConfig,
+  listModelProviderConfigs,
+  createModelProviderConfig,
+  disableModelProviderConfig,
+  testModelProviderConfig,
   type LlmConfigSummary,
   type LlmModelDiscoveryResult,
-  type LlmModelItem
+  type LlmModelItem,
+  type ModelProviderConfig
 } from '@/api/platform';
 
 const config = ref<LlmConfigSummary | null>(null);
@@ -196,6 +239,10 @@ const routeKey = ref('grounded');
 const fallbackRouteKey = ref('grounded_backup');
 const configLoading = ref(false);
 const discovering = ref(false);
+const modelConfigs = ref<ModelProviderConfig[]>([]);
+const showModelConfig = ref(false);
+const modelSaving = ref(false);
+const modelForm = reactive({ name: '', provider_type: 'openai-compatible', api_key: '', base_url: '', model_name: '', default_purposes: ['chat'] });
 
 const form = reactive({
   provider: 'openai-compatible',
@@ -268,9 +315,39 @@ async function loadConfig() {
     const payload: any = await getLlmConfig();
     config.value = payload;
     applyConfigDefaults(payload);
+    const stored: any = await listModelProviderConfigs().catch(() => ({ items: [] }));
+    modelConfigs.value = stored.items || [];
   } finally {
     configLoading.value = false;
   }
+}
+
+async function saveModelConfig() {
+  if (!modelForm.name.trim() || !modelForm.base_url.trim() || !modelForm.model_name.trim()) {
+    ElMessage.warning('请填写名称、Base URL 和模型名');
+    return;
+  }
+  modelSaving.value = true;
+  try {
+    const result: any = await createModelProviderConfig({ ...modelForm });
+    modelConfigs.value.unshift(result);
+    showModelConfig.value = false;
+    modelForm.api_key = '';
+    ElMessage.success('模型配置已保存');
+  } finally {
+    modelSaving.value = false;
+  }
+}
+
+async function testSavedConfig(configId: string) {
+  await testModelProviderConfig(configId);
+  ElMessage.success('连接测试成功');
+}
+
+async function disableSavedConfig(configId: string) {
+  await disableModelProviderConfig(configId);
+  modelConfigs.value = modelConfigs.value.filter(item => item.id !== configId);
+  ElMessage.success('模型配置已停用');
 }
 
 async function discoverModels() {

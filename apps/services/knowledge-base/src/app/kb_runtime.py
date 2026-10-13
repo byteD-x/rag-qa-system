@@ -36,6 +36,11 @@ KB_RETRIEVE_LATENCY_MS = Histogram(
     "KB retrieval latency in milliseconds.",
     buckets=(10, 25, 50, 100, 250, 500, 1000, 2000, 5000),
 )
+KB_RETRIEVAL_CACHE_TOTAL = Counter(
+    "rag_kb_retrieval_cache_total",
+    "KB retrieval cache outcomes.",
+    labelnames=("result",),
+)
 KB_INGEST_JOBS_GAUGE = Gauge(
     "rag_kb_ingest_jobs_total",
     "Current KB ingest jobs by status.",
@@ -75,6 +80,7 @@ __all__ = [
     "KB_READ_PERMISSION",
     "KB_RETRIEVE_LATENCY_MS",
     "KB_RETRIEVE_REQUESTS_TOTAL",
+    "KB_RETRIEVAL_CACHE_TOTAL",
     "KB_QUERY_MAX_IN_FLIGHT_GLOBAL",
     "KB_QUERY_MAX_IN_FLIGHT_PER_USER",
     "KB_SAFETY_EVENTS_TOTAL",

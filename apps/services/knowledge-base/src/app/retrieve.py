@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import concurrent.futures
+import os
+import threading
 import time
 from datetime import datetime
+from dataclasses import replace
 from functools import lru_cache
 from typing import Any, TypedDict
 
@@ -17,6 +20,7 @@ from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalResult, Retri
 from shared.text_search import build_simple_tsquery
 
 from .query import compact_quote
+from .retrieval_cache import build_retrieval_cache_key, retrieval_result_cache
 from .runtime import db
 from .vector_store import search_vector_documents
 
@@ -27,6 +31,28 @@ FUSION_WEIGHTS = {
     "fts": 1.0,
     "vector": 0.9,
 }
+_retrieval_executor: concurrent.futures.ThreadPoolExecutor | None = None
+_retrieval_executor_lock = threading.Lock()
+
+
+def _get_retrieval_executor() -> concurrent.futures.ThreadPoolExecutor:
+    global _retrieval_executor
+    if _retrieval_executor is None:
+        with _retrieval_executor_lock:
+            if _retrieval_executor is None:
+                workers = max(int(os.getenv("KB_RETRIEVAL_WORKERS", "12") or "12"), 3)
+                _retrieval_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=workers, thread_name_prefix="kb-retrieve"
+                )
+    return _retrieval_executor
+
+
+def close_retrieval_executor() -> None:
+    global _retrieval_executor
+    with _retrieval_executor_lock:
+        if _retrieval_executor is not None:
+            _retrieval_executor.shutdown(wait=True)
+            _retrieval_executor = None
 
 
 def _evidence_kind_from_source_kind(source_kind: str) -> str:
@@ -44,6 +70,9 @@ class RetrievalGraphState(TypedDict, total=False):
     question: str
     limit: int
     document_ids: list[str]
+    user_department: str
+    is_admin: bool
+    metadata_filter: dict[str, Any]
     rewrite: Any
     doc_ids: list[str]
     signal_documents: dict[str, list[Document]]
@@ -73,6 +102,11 @@ class StructureRetriever(BaseRetriever):
                         d.base_id::text AS base_id,
                         c.document_id,
                         d.file_name AS document_title,
+                        d.content_kind,
+                        d.question_type,
+                        d.difficulty,
+                        d.tags_json,
+                        b.metadata_json,
                         d.version_family_key,
                         d.version_label,
                         d.version_number,
@@ -98,6 +132,7 @@ class StructureRetriever(BaseRetriever):
                     FROM kb_chunks c
                     JOIN kb_sections s ON s.id = c.section_id
                     JOIN kb_documents d ON d.id = c.document_id
+                    JOIN kb_bases b ON b.id = d.base_id
                     LEFT JOIN LATERAL (
                         SELECT region_label, bbox_json, confidence
                         FROM kb_visual_asset_regions region
@@ -160,6 +195,11 @@ class FTSRetriever(BaseRetriever):
                         d.base_id::text AS base_id,
                         c.document_id,
                         d.file_name AS document_title,
+                        d.content_kind,
+                        d.question_type,
+                        d.difficulty,
+                        d.tags_json,
+                        b.metadata_json,
                         d.version_family_key,
                         d.version_label,
                         d.version_number,
@@ -181,6 +221,7 @@ class FTSRetriever(BaseRetriever):
                     FROM kb_chunks c
                     JOIN kb_sections s ON s.id = c.section_id
                     JOIN kb_documents d ON d.id = c.document_id
+                    JOIN kb_bases b ON b.id = d.base_id
                     LEFT JOIN LATERAL (
                         SELECT region_label, bbox_json, confidence
                         FROM kb_visual_asset_regions region
@@ -213,12 +254,20 @@ def retrieve_kb_evidence(
     question: str,
     document_ids: list[str] | None = None,
     limit: int = 8,
+    user_department: str = "",
+    is_admin: bool = False,
+    use_cache: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
 ) -> list[EvidenceBlock]:
     return retrieve_kb_result(
         base_id=base_id,
         question=question,
         document_ids=document_ids,
         limit=limit,
+        user_department=user_department,
+        is_admin=is_admin,
+        use_cache=use_cache,
+        metadata_filter=metadata_filter,
     ).items
 
 
@@ -228,15 +277,50 @@ def retrieve_kb_result(
     question: str,
     document_ids: list[str] | None = None,
     limit: int = 8,
+    user_department: str = "",
+    is_admin: bool = False,
+    use_cache: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
 ) -> RetrievalResult:
-    return run_retrieval_graph(
-        {
-            "base_id": base_id,
-            "question": question,
-            "document_ids": list(document_ids or []),
-            "limit": limit,
-        }
-    )["result"]
+    normalized_department = str(user_department or "").strip().lower()
+    normalized_admin = bool(is_admin)
+    payload = {
+        "base_id": base_id,
+        "question": question,
+        "document_ids": list(document_ids or []),
+        "limit": limit,
+        "user_department": normalized_department,
+        "is_admin": normalized_admin,
+        "metadata_filter": _normalize_metadata_filter(metadata_filter),
+    }
+
+    def _compute() -> RetrievalResult:
+        return run_retrieval_graph(payload)["result"]
+
+    if not use_cache:
+        return _compute()
+
+    cache_key = build_retrieval_cache_key(
+        base_id=base_id,
+        question=question,
+        document_ids=list(document_ids or []),
+        limit=limit,
+        user_department=normalized_department,
+        is_admin=normalized_admin,
+        metadata_filter=payload["metadata_filter"],
+    )
+    started = time.perf_counter()
+    result, cache_hit = retrieval_result_cache.get_or_compute(cache_key, _compute)
+    if not cache_hit:
+        return result
+    # Never expose the original computation's latency for a cache hit; this is
+    # what makes endpoint P95 and cache savings observable in the API report.
+    stats = replace(
+        result.stats,
+        retrieval_ms=round((time.perf_counter() - started) * 1000.0, 3),
+        cache_hit=True,
+    )
+    return RetrievalResult(items=result.items, stats=stats)
 
 
 def run_retrieval_graph(payload: dict[str, Any]) -> RetrievalGraphState:
@@ -262,12 +346,24 @@ def _prepare_request(payload: dict[str, Any]) -> dict[str, Any]:
     question = str(payload["question"])
     limit = int(payload["limit"])
     rewrite = rewrite_query(question)
-    doc_ids = _resolve_document_ids(base_id=base_id, document_ids=list(payload.get("document_ids") or []))
+    user_department = str(payload.get("user_department") or "").strip().lower()
+    is_admin = bool(payload.get("is_admin"))
+    metadata_filter = _normalize_metadata_filter(payload.get("metadata_filter"))
+    doc_ids = _resolve_document_ids(
+        base_id=base_id,
+        document_ids=list(payload.get("document_ids") or []),
+        user_department=user_department,
+        is_admin=is_admin,
+        metadata_filter=metadata_filter,
+    )
     return {
         "started": started,
         "base_id": base_id,
         "question": question,
         "limit": limit,
+        "user_department": user_department,
+        "is_admin": is_admin,
+        "metadata_filter": metadata_filter,
         "rewrite": rewrite,
         "doc_ids": doc_ids,
     }
@@ -284,8 +380,7 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
 
     tsquery = build_simple_tsquery(rewrite.retrieval_query)
 
-    # 三路信号相互独立且各自阻塞(structure/fts 打 Postgres,vector 打 Qdrant),
-    # 各检索器内部独立开连接,可并发。用线程池并发跑,总耗时约等于最慢一路而非三路之和。
+    # 三路信号独立执行；跨请求复用有界线程池，避免高并发时每个请求再创建三个线程。
     def _run_structure() -> list[Document]:
         return StructureRetriever(
             base_id=state["base_id"],
@@ -308,13 +403,14 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
             limit=40,
         )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        structure_future = executor.submit(_run_structure)
-        fts_future = executor.submit(_run_fts)
-        vector_future = executor.submit(_run_vector)
-        structure_docs = structure_future.result()
-        fts_docs = fts_future.result()
-        vector_docs, degraded_signals, warnings = vector_future.result()
+    executor = _get_retrieval_executor()
+    structure_future = executor.submit(_run_structure)
+    fts_future = executor.submit(_run_fts)
+    vector_future = executor.submit(_run_vector)
+    concurrent.futures.wait((structure_future, fts_future, vector_future))
+    structure_docs = structure_future.result()
+    fts_docs = fts_future.result()
+    vector_docs, degraded_signals, warnings = vector_future.result()
 
     state["signal_documents"] = {
         "structure": structure_docs,
@@ -379,6 +475,11 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 service_type=block.service_type,
                 evidence_kind=block.evidence_kind,
                 source_kind=block.source_kind,
+                content_kind=block.content_kind,
+                question_type=block.question_type,
+                difficulty=block.difficulty,
+                tags=list(block.tags),
+                kb_metadata=dict(block.kb_metadata),
                 page_number=block.page_number,
                 asset_id=block.asset_id,
                 thumbnail_url=block.thumbnail_url,
@@ -389,6 +490,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                     vector_rank=_rank_of(signal_lists.get("vector", []), unit_id),
                     final_rank=final_rank,
                     final_score=round(float(final_score), 6),
+                    relevance=block.evidence_path.relevance,
                 ),
             )
         )
@@ -430,6 +532,11 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 service_type=block.service_type,
                 evidence_kind=block.evidence_kind,
                 source_kind=block.source_kind,
+                content_kind=block.content_kind,
+                question_type=block.question_type,
+                difficulty=block.difficulty,
+                tags=list(block.tags),
+                kb_metadata=dict(block.kb_metadata),
             page_number=block.page_number,
             asset_id=block.asset_id,
             thumbnail_url=block.thumbnail_url,
@@ -442,6 +549,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                     vector_rank=block.evidence_path.vector_rank,
                     final_rank=final_rank,
                     final_score=block.evidence_path.final_score,
+                    relevance=block.evidence_path.relevance,
                 ),
             )
         )
@@ -471,39 +579,89 @@ def _fuse_and_rerank_node(state: dict[str, Any]) -> dict[str, RetrievalResult]:
     return {"result": _fuse_and_rerank(state)}
 
 
-def _resolve_document_ids(*, base_id: str, document_ids: list[str]) -> list[str]:
+def _resolve_document_ids(
+    *,
+    base_id: str,
+    document_ids: list[str],
+    user_department: str = "",
+    is_admin: bool = False,
+    metadata_filter: dict[str, Any] | None = None,
+) -> list[str]:
+    normalized_department = str(user_department or "").strip().lower()
+    normalized_filter = _normalize_metadata_filter(metadata_filter)
+    conditions = [
+        "base_id = %s",
+        "query_ready = TRUE",
+        "source_deleted_at IS NULL",
+        "EXISTS (SELECT 1 FROM kb_bases b WHERE b.id = kb_documents.base_id AND b.status = 'active')",
+    ]
+    params: list[Any] = [base_id]
+    if document_ids:
+        conditions.append("id = ANY(%s::uuid[])")
+        params.append(document_ids)
+    else:
+        conditions.extend(
+            [
+                "version_status = 'active'",
+                "is_current_version = TRUE",
+                "(effective_from IS NULL OR effective_from <= NOW())",
+                "(effective_to IS NULL OR effective_to >= NOW())",
+            ]
+        )
+    if normalized_filter["content_kind"]:
+        conditions.append("content_kind = %s")
+        params.append(normalized_filter["content_kind"])
+    if normalized_filter["question_type"]:
+        conditions.append("question_type = %s")
+        params.append(normalized_filter["question_type"])
+    if normalized_filter["difficulties"]:
+        conditions.append("difficulty = ANY(%s::text[])")
+        params.append(normalized_filter["difficulties"])
+    if normalized_filter["tags"]:
+        conditions.append("tags_json ?| %s::text[]")
+        params.append(normalized_filter["tags"])
+    if normalized_filter["job_position_id"]:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM kb_base_job_positions bpj "
+            "WHERE bpj.base_id = kb_documents.base_id AND bpj.job_position_id = %s::uuid)"
+        )
+        params.append(normalized_filter["job_position_id"])
+    access_clause = """
+                      AND (
+                          %s::boolean
+                          OR cardinality(COALESCE(allowed_departments, ARRAY[]::text[])) = 0
+                          OR (
+                              %s <> ''
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM unnest(COALESCE(allowed_departments, ARRAY[]::text[])) AS allowed(department)
+                                  WHERE lower(trim(allowed.department)) = %s
+                              )
+                          )
+                      )
+                    """
+    params.extend([bool(is_admin), normalized_department, normalized_department])
+    where_clause = " AND ".join(conditions)
     with db.connect() as conn:
         with conn.cursor() as cur:
-            if document_ids:
-                cur.execute(
-                    """
-                    SELECT id::text
-                    FROM kb_documents
-                    WHERE base_id = %s
-                      AND id = ANY(%s::uuid[])
-                      AND query_ready = TRUE
-                      AND source_deleted_at IS NULL
-                    ORDER BY created_at DESC
-                    """,
-                    (base_id, document_ids),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id::text
-                    FROM kb_documents
-                    WHERE base_id = %s
-                      AND query_ready = TRUE
-                      AND source_deleted_at IS NULL
-                      AND version_status = 'active'
-                      AND is_current_version = TRUE
-                      AND (effective_from IS NULL OR effective_from <= NOW())
-                      AND (effective_to IS NULL OR effective_to >= NOW())
-                    ORDER BY version_number DESC, created_at DESC
-                    """,
-                    (base_id,),
-                )
+            cur.execute(
+                f"SELECT id::text FROM kb_documents WHERE {where_clause} "
+                + access_clause
+                + " ORDER BY version_number DESC, created_at DESC",
+                tuple(params),
+            )
             return [str(row["id"]) for row in cur.fetchall()]
+
+
+def _normalize_metadata_filter(value: dict[str, Any] | None) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    return {
+        "job_position_id": str(raw.get("job_position_id") or "").strip(),
+        "content_kind": str(raw.get("content_kind") or "").strip().lower(),
+        "question_type": str(raw.get("question_type") or "").strip().lower(),
+        "difficulties": sorted({str(item).strip().lower() for item in (raw.get("difficulties") or []) if str(item).strip()}),
+        "tags": sorted({str(item).strip().lower() for item in (raw.get("tags") or []) if str(item).strip()}),
+    }
 
 
 def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -> Document:
@@ -531,6 +689,11 @@ def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -
             "raw_text": str(row.get("text_content") or ""),
             "base_id": str(row.get("base_id") or ""),
             "source_kind": str(row.get("source_kind") or "text"),
+            "content_kind": str(row.get("content_kind") or "document"),
+            "question_type": str(row.get("question_type") or ""),
+            "difficulty": str(row.get("difficulty") or ""),
+            "tags": list(row.get("tags_json") or []),
+            "kb_metadata": dict(row.get("metadata_json") or {}),
             "page_number": int(row["page_number"]) if row.get("page_number") is not None else None,
             "asset_id": asset_id,
             "thumbnail_url": _thumbnail_url_from_asset_id(asset_id),
@@ -586,6 +749,11 @@ def _merge_documents(
             service_type="kb",
             evidence_kind=_evidence_kind_from_source_kind(str(metadata.get("source_kind") or "")),
             source_kind=str(metadata.get("source_kind") or "text"),
+            content_kind=str(metadata.get("content_kind") or "document"),
+            question_type=str(metadata.get("question_type") or ""),
+            difficulty=str(metadata.get("difficulty") or ""),
+            tags=[str(item) for item in list(metadata.get("tags") or [])],
+            kb_metadata=dict(metadata.get("kb_metadata") or {}),
             page_number=int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
             asset_id=str(metadata.get("asset_id") or ""),
             thumbnail_url=str(metadata.get("thumbnail_url") or ""),
@@ -596,6 +764,7 @@ def _merge_documents(
                 structure_hit=bool(evidence_path.get("structure_hit") or False),
                 fts_rank=int(evidence_path["fts_rank"]) if evidence_path.get("fts_rank") is not None else existing.evidence_path.fts_rank if existing else None,
                 vector_rank=int(evidence_path["vector_rank"]) if evidence_path.get("vector_rank") is not None else existing.evidence_path.vector_rank if existing else None,
+                relevance=float(signal_scores.get("relevance") or 0.0),
             ),
         )
 

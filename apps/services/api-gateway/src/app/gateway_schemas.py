@@ -118,6 +118,93 @@ class LLMModelDiscoveryRequest(BaseModel):
         return value.strip()
 
 
+class ModelProviderConfigRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    provider_type: str = Field(default="openai-compatible", min_length=1, max_length=64)
+    api_key: str = Field(default="", max_length=4096)
+    base_url: str = Field(default="", max_length=512)
+    model_name: str = Field(default="", max_length=256)
+    embedding_model: str = Field(default="", max_length=256)
+    temperature: float = Field(default=0.7, ge=0, le=2)
+    max_tokens: int = Field(default=2048, ge=128, le=200000)
+    timeout_seconds: float = Field(default=120, ge=1, le=600)
+    proxy_url: str = Field(default="", max_length=512)
+    enabled: bool = True
+    default_purposes: list[str] = Field(default_factory=list, max_length=8)
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name", "provider_type", "api_key", "base_url", "model_name", "embedding_model", "proxy_url")
+    @classmethod
+    def normalize_model_config_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("default_purposes")
+    @classmethod
+    def normalize_default_purposes(cls, value: list[str]) -> list[str]:
+        allowed = {"chat", "embedding", "interview", "scoring"}
+        return list(dict.fromkeys(item.strip().lower() for item in value if item.strip() in allowed))
+
+
+class UpdateModelProviderConfigRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    provider_type: str | None = Field(default=None, min_length=1, max_length=64)
+    api_key: str | None = Field(default=None, max_length=4096)
+    base_url: str | None = Field(default=None, max_length=512)
+    model_name: str | None = Field(default=None, max_length=256)
+    embedding_model: str | None = Field(default=None, max_length=256)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=128, le=200000)
+    timeout_seconds: float | None = Field(default=None, ge=1, le=600)
+    proxy_url: str | None = Field(default=None, max_length=512)
+    enabled: bool | None = None
+    default_purposes: list[str] | None = Field(default=None, max_length=8)
+    extra: dict[str, Any] | None = None
+
+    @field_validator("name", "provider_type", "api_key", "base_url", "model_name", "embedding_model", "proxy_url")
+    @classmethod
+    def normalize_optional_model_config_text(cls, value: str | None) -> str | None:
+        return None if value is None else value.strip()
+
+    @field_validator("default_purposes")
+    @classmethod
+    def normalize_optional_default_purposes(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        allowed = {"chat", "embedding", "interview", "scoring"}
+        return list(dict.fromkeys(item.strip().lower() for item in value if item.strip() in allowed))
+
+
+class InterviewStartRequest(BaseModel):
+    base_id: str = Field(min_length=1, max_length=64)
+    job_position_id: str = Field(min_length=1, max_length=64)
+    question_count: int = Field(default=5, ge=1, le=50)
+    difficulty: str = Field(default="", max_length=64)
+    question_type: str = Field(default="", max_length=64)
+    duration_seconds: int = Field(default=1800, ge=60, le=86400)
+    allow_follow_up: bool = False
+    enable_scoring: bool = True
+    scoring_dimensions: list[str] = Field(default_factory=lambda: ["accuracy", "depth", "logic", "expression"])
+
+    @field_validator("base_id", "job_position_id", "difficulty", "question_type")
+    @classmethod
+    def normalize_interview_filter_text(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("scoring_dimensions")
+    @classmethod
+    def normalize_scoring_dimensions(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(item.strip().lower() for item in value if item.strip()))[:12]
+
+
+class InterviewAnswerRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=30000)
+
+    @field_validator("answer")
+    @classmethod
+    def normalize_interview_answer(cls, value: str) -> str:
+        return value.strip()
+
+
 class ClaimHandoffSessionRequest(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=128)
     skill_group: str = Field(default="general", min_length=1, max_length=64)

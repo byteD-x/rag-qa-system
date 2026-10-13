@@ -6,7 +6,20 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-ALLOWED_KB_FILE_TYPES = {"txt", "pdf", "docx", "png", "jpg", "jpeg"}
+ALLOWED_KB_FILE_TYPES = {
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "csv",
+    "xlsx",
+    "xls",
+    "pdf",
+    "docx",
+    "png",
+    "jpg",
+    "jpeg",
+}
 ALLOWED_CONNECTOR_TYPES = {
     "local_directory",
     "notion",
@@ -28,16 +41,100 @@ def _normalize_optional_text(value: str | None, *, field_name: str, allow_blank:
     return normalized
 
 
+def _normalize_departments(value: list[str] | None) -> list[str]:
+    """Normalize document ACL departments without accepting blank entries."""
+    if value is None:
+        return []
+    normalized: list[str] = []
+    for item in value:
+        department = str(item or "").strip().lower()
+        if department and department not in normalized:
+            normalized.append(department)
+    return normalized
+
+
+def _normalize_string_list(value: list[str] | None, *, field_name: str, lowercase: bool = False) -> list[str]:
+    if value is None:
+        return []
+    normalized: list[str] = []
+    for item in value:
+        candidate = str(item or "").strip()
+        if lowercase:
+            candidate = candidate.lower()
+        if candidate and candidate not in normalized:
+            normalized.append(candidate)
+    if len(normalized) > 100:
+        raise ValueError(f"{field_name} must contain at most 100 items")
+    return normalized
+
+
+class RetrievalMetadataFilter(BaseModel):
+    """Optional, generic metadata constraints applied before hybrid retrieval."""
+
+    job_position_id: str = Field(default="", max_length=64)
+    content_kind: str = Field(default="", max_length=64)
+    question_type: str = Field(default="", max_length=64)
+    difficulties: list[str] = Field(default_factory=list, max_length=16)
+    tags: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("job_position_id", "content_kind", "question_type")
+    @classmethod
+    def normalize_filter_text(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("difficulties")
+    @classmethod
+    def normalize_difficulties(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="difficulties", lowercase=True)
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_filter_tags(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="tags", lowercase=True)
+
+
 class CreateBaseRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=2000)
     category: str = Field(default="", max_length=120)
+    type_keys: list[str] = Field(default_factory=lambda: ["general"], max_length=16)
+    job_position_ids: list[str] = Field(default_factory=list, max_length=32)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("type_keys")
+    @classmethod
+    def normalize_type_keys(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="type_keys", lowercase=True) or ["general"]
+
+    @field_validator("job_position_ids")
+    @classmethod
+    def normalize_job_position_ids(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="job_position_ids")
 
 
 class UpdateBaseRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     category: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(default=None, max_length=32)
+    type_keys: list[str] | None = Field(default=None, max_length=16)
+    job_position_ids: list[str] | None = Field(default=None, max_length=32)
+    metadata: dict[str, Any] | None = None
+
+    @field_validator("status")
+    @classmethod
+    def normalize_base_status(cls, value: str | None) -> str | None:
+        return None if value is None else value.strip().lower()
+
+    @field_validator("type_keys")
+    @classmethod
+    def normalize_optional_type_keys(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else (_normalize_string_list(value, field_name="type_keys", lowercase=True) or ["general"])
+
+    @field_validator("job_position_ids")
+    @classmethod
+    def normalize_optional_job_position_ids(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_string_list(value, field_name="job_position_ids")
 
 
 class CreateUploadRequest(BaseModel):
@@ -54,6 +151,11 @@ class CreateUploadRequest(BaseModel):
     effective_from: datetime | None = None
     effective_to: datetime | None = None
     supersedes_document_id: str | None = Field(default=None, max_length=64)
+    allowed_departments: list[str] = Field(default_factory=list, max_length=100)
+    content_kind: str = Field(default="document", max_length=64)
+    question_type: str = Field(default="", max_length=64)
+    difficulty: str = Field(default="", max_length=64)
+    tags: list[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("file_type")
     @classmethod
@@ -88,6 +190,21 @@ class CreateUploadRequest(BaseModel):
     def normalize_supersedes_document_id(cls, value: str | None) -> str | None:
         return _normalize_optional_text(value, field_name="supersedes_document_id")
 
+    @field_validator("allowed_departments")
+    @classmethod
+    def normalize_allowed_departments(cls, value: list[str]) -> list[str]:
+        return _normalize_departments(value)
+
+    @field_validator("content_kind", "question_type", "difficulty")
+    @classmethod
+    def normalize_content_metadata_text(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_content_metadata_tags(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="tags", lowercase=True)
+
     @model_validator(mode="after")
     def validate_version_window(self):
         if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
@@ -117,6 +234,7 @@ class RetrieveRequest(BaseModel):
     question: str = Field(min_length=1, max_length=12000)
     document_ids: list[str] = Field(default_factory=list)
     limit: int = Field(default=8, ge=1, le=20)
+    metadata_filter: RetrievalMetadataFilter = Field(default_factory=RetrievalMetadataFilter)
 
 
 class RetrievalDebugRequest(RetrieveRequest):
@@ -128,6 +246,108 @@ class KBQueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=12000)
     document_ids: list[str] = Field(default_factory=list)
     debug: bool = False
+    metadata_filter: RetrievalMetadataFilter = Field(default_factory=RetrievalMetadataFilter)
+
+
+class CreateJobPositionRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    locale: str = Field(default="zh-CN", max_length=32)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("code")
+    @classmethod
+    def normalize_job_code(cls, value: str) -> str:
+        normalized = value.strip().lower().replace(" ", "_")
+        if not normalized:
+            raise ValueError("code must not be blank")
+        return normalized
+
+
+class UpdateJobPositionRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None, max_length=32)
+    locale: str | None = Field(default=None, max_length=32)
+    metadata: dict[str, Any] | None = None
+
+
+class CreateKBTypeRequest(BaseModel):
+    type_key: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    config_schema: dict[str, Any] = Field(default_factory=dict, alias="schema")
+    enabled: bool = True
+
+    @field_validator("type_key")
+    @classmethod
+    def normalize_type_key(cls, value: str) -> str:
+        normalized = value.strip().lower().replace(" ", "_")
+        if not normalized:
+            raise ValueError("type_key must not be blank")
+        return normalized
+
+
+class UpdateKBTypeRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+    config_schema: dict[str, Any] | None = Field(default=None, alias="schema")
+    enabled: bool | None = None
+
+
+class InterviewQuestionSourceRequest(BaseModel):
+    document_id: str = Field(min_length=1, max_length=64)
+    chunk_id: str = Field(min_length=1, max_length=64)
+    quote: str = Field(default="", max_length=4000)
+    is_primary: bool = False
+
+
+class CreateInterviewQuestionRequest(BaseModel):
+    base_id: str = Field(min_length=1, max_length=64)
+    stem: str = Field(min_length=1, max_length=12000)
+    reference_answer: str = Field(default="", max_length=30000)
+    explanation: str = Field(default="", max_length=30000)
+    question_type: str = Field(min_length=1, max_length=64)
+    difficulty: str = Field(min_length=1, max_length=64)
+    tags: list[str] = Field(default_factory=list, max_length=100)
+    job_position_ids: list[str] = Field(default_factory=list, max_length=32)
+    locale: str = Field(default="zh-CN", max_length=32)
+    source_type: str = Field(default="manual", max_length=64)
+    source_note: str = Field(default="", max_length=2000)
+    sources: list[InterviewQuestionSourceRequest] = Field(min_length=1, max_length=16)
+
+    @field_validator("question_type", "difficulty", "locale", "source_type")
+    @classmethod
+    def normalize_question_enum_text(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_question_tags(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="tags", lowercase=True)
+
+    @field_validator("job_position_ids")
+    @classmethod
+    def normalize_question_job_positions(cls, value: list[str]) -> list[str]:
+        return _normalize_string_list(value, field_name="job_position_ids")
+
+
+class UpdateInterviewQuestionRequest(BaseModel):
+    stem: str | None = Field(default=None, min_length=1, max_length=12000)
+    reference_answer: str | None = Field(default=None, max_length=30000)
+    explanation: str | None = Field(default=None, max_length=30000)
+    question_type: str | None = Field(default=None, max_length=64)
+    difficulty: str | None = Field(default=None, max_length=64)
+    tags: list[str] | None = Field(default=None, max_length=100)
+    job_position_ids: list[str] | None = Field(default=None, max_length=32)
+    status: str | None = Field(default=None, max_length=32)
+    source_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("job_position_ids")
+    @classmethod
+    def normalize_optional_question_job_positions(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_string_list(value, field_name="job_position_ids")
 
 
 class UpdateDocumentRequest(BaseModel):
@@ -144,6 +364,11 @@ class UpdateDocumentRequest(BaseModel):
     owner_user_id: str | None = Field(default=None, max_length=128)
     review_status: str | None = Field(default=None, max_length=32)
     reviewer_note: str | None = Field(default=None, max_length=1000)
+    allowed_departments: list[str] | None = Field(default=None, max_length=100)
+    content_kind: str | None = Field(default=None, max_length=64)
+    question_type: str | None = Field(default=None, max_length=64)
+    difficulty: str | None = Field(default=None, max_length=64)
+    tags: list[str] | None = Field(default=None, max_length=100)
 
     @field_validator("version_family_key")
     @classmethod
@@ -193,6 +418,21 @@ class UpdateDocumentRequest(BaseModel):
         if value is None:
             return None
         return value.strip()
+
+    @field_validator("allowed_departments")
+    @classmethod
+    def normalize_optional_allowed_departments(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_departments(value)
+
+    @field_validator("content_kind", "question_type", "difficulty")
+    @classmethod
+    def normalize_optional_content_metadata_text(cls, value: str | None) -> str | None:
+        return None if value is None else value.strip().lower()
+
+    @field_validator("tags")
+    @classmethod
+    def normalize_optional_content_metadata_tags(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_string_list(value, field_name="tags", lowercase=True)
 
     @model_validator(mode="after")
     def validate_document_version_window(self):
@@ -288,7 +528,12 @@ class LocalDirectorySyncRequest(BaseModel):
     delete_missing: bool = True
     dry_run: bool = False
     max_files: int | None = Field(default=None, ge=1, le=5000)
+    allowed_departments: list[str] | None = Field(default=None, max_length=100)
 
+    @field_validator("allowed_departments")
+    @classmethod
+    def normalize_allowed_departments(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_departments(value)
 
 class NotionSyncRequest(BaseModel):
     base_id: str
@@ -297,6 +542,7 @@ class NotionSyncRequest(BaseModel):
     delete_missing: bool = True
     dry_run: bool = False
     max_pages: int | None = Field(default=None, ge=1, le=256)
+    allowed_departments: list[str] | None = Field(default=None, max_length=100)
 
     @field_validator("page_ids")
     @classmethod
@@ -305,6 +551,11 @@ class NotionSyncRequest(BaseModel):
         if not normalized:
             raise ValueError("page_ids must not be empty")
         return normalized
+
+    @field_validator("allowed_departments")
+    @classmethod
+    def normalize_allowed_departments(cls, value: list[str] | None) -> list[str] | None:
+        return None if value is None else _normalize_departments(value)
 
 
 class ConnectorScheduleRequest(BaseModel):

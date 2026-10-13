@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,8 @@ KB_MIGRATIONS_DIR = REPO_ROOT / "apps" / "services" / "knowledge-base" / "databa
 GATEWAY_DATABASE_DSN = os.getenv("GATEWAY_DATABASE_DSN", "postgresql://rag:rag@postgres:5432/gateway_app?sslmode=disable")
 KB_DATABASE_DSN = os.getenv("KB_DATABASE_DSN", "postgresql://rag:rag@postgres:5432/kb_app?sslmode=disable")
 KB_BLOB_ROOT = Path(os.getenv("KB_BLOB_ROOT", "/data/kb")).resolve()
+KB_SRC = REPO_ROOT / "apps" / "services" / "knowledge-base" / "src"
+KB_VECTOR_PAYLOAD_SCHEMA_VERSION = "1"
 INIT_RETRY_SECONDS = max(float(os.getenv("STACK_INIT_RETRY_SECONDS", "2")), 0.5)
 INIT_RETRY_COUNT = max(int(os.getenv("STACK_INIT_RETRY_COUNT", "30")), 1)
 
@@ -113,7 +117,7 @@ def _select_pending_migrations(files: list[MigrationFile], applied: dict[str, st
     return pending
 
 
-def _apply_migrations(dsn: str, migrations_dir: Path) -> dict[str, int]:
+def _apply_migrations(dsn: str, migrations_dir: Path) -> dict[str, object]:
     files = _load_migration_files(migrations_dir)
     with psycopg.connect(dsn, row_factory=dict_row) as conn:
         with conn.cursor() as cur:
@@ -140,6 +144,73 @@ def _apply_migrations(dsn: str, migrations_dir: Path) -> dict[str, int]:
         "available": len(files),
         "applied": len(pending),
         "already_applied": len(files) - len(pending),
+        "applied_versions": [migration.version for migration in pending],
+    }
+
+
+def _auto_rebuild_kb_vectors_if_needed() -> dict[str, object]:
+    """Rebuild existing Qdrant payloads once after a vector payload migration.
+
+    New documents are indexed by the normal ingest worker. Existing documents
+    need one explicit pass because their stored Qdrant payload predates the
+    generic knowledge-base metadata fields.
+    """
+    if os.getenv("KB_AUTO_REINDEX_AFTER_MIGRATION", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return {"status": "skipped", "reason": "disabled_by_config"}
+    sys.path.insert(0, str(KB_SRC))
+    runtime = importlib.import_module("app.runtime")
+    vector_store = importlib.import_module("app.vector_store")
+    with runtime.db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT state_value FROM kb_vector_index_state WHERE state_key = 'payload_schema_version' FOR UPDATE"
+            )
+            state = cur.fetchone()
+            if state is None:
+                return {"status": "not_required", "reason": "state_not_registered"}
+            current = str(state.get("state_value") or "")
+            if current == KB_VECTOR_PAYLOAD_SCHEMA_VERSION:
+                return {"status": "already_ready", "version": current, "documents": 0}
+            cur.execute(
+                """
+                SELECT id::text AS document_id
+                FROM kb_documents
+                WHERE source_deleted_at IS NULL
+                  AND (query_ready = TRUE OR status = 'ready')
+                ORDER BY created_at ASC
+                """
+            )
+            document_ids = [str(row["document_id"]) for row in cur.fetchall()]
+
+    vector_store.ensure_vector_store()
+    rebuilt = 0
+    indexed_sections = 0
+    indexed_chunks = 0
+    for document_id in document_ids:
+        vector_store.delete_document_vectors(document_id)
+        section_stats = vector_store.index_document_sections(document_id)
+        chunk_stats = vector_store.index_document_chunks(document_id)
+        rebuilt += 1
+        indexed_sections += int(section_stats.get("indexed") or 0)
+        indexed_chunks += int(chunk_stats.get("indexed") or 0)
+
+    with runtime.db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE kb_vector_index_state
+                SET state_value = %s, updated_at = NOW()
+                WHERE state_key = 'payload_schema_version'
+                """,
+                (KB_VECTOR_PAYLOAD_SCHEMA_VERSION,),
+            )
+        conn.commit()
+    return {
+        "status": "rebuilt",
+        "version": KB_VECTOR_PAYLOAD_SCHEMA_VERSION,
+        "documents": rebuilt,
+        "indexed_sections": indexed_sections,
+        "indexed_chunks": indexed_chunks,
     }
 
 
@@ -154,6 +225,7 @@ def main() -> int:
     storage = create_object_storage_client()
     storage.ensure_bucket()
     vector_store = _wait_for_vector_store()
+    vector_rebuild = _auto_rebuild_kb_vectors_if_needed()
 
     print(
         json.dumps(
@@ -162,8 +234,9 @@ def main() -> int:
                 "gateway_migrations": gateway_migrations,
                 "kb_migrations": kb_migrations,
                 "blob_root": str(KB_BLOB_ROOT),
-                "bucket": storage.settings.bucket,
+                "bucket": getattr(storage.settings, "bucket", "filesystem"),
                 "vector_store": vector_store,
+                "vector_rebuild": vector_rebuild,
             },
             ensure_ascii=False,
         )

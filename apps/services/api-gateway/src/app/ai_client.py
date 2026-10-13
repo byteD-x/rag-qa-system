@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -174,21 +174,22 @@ class LLMSettings:
 
     @property
     def configured(self) -> bool:
-        return self.enabled and bool(self.base_url and self.api_key and self.model)
+        no_key_provider = self.provider.strip().lower() in {"ollama", "localai", "vllm", "local", "openai-compatible-local"}
+        return self.enabled and bool(self.base_url and self.model and (self.api_key or no_key_provider))
 
     @property
     def chat_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
 
 
-def load_llm_settings() -> LLMSettings:
+def load_llm_settings(*, purpose: str = "chat") -> LLMSettings:
     api_key = _read_env("LLM_API_KEY", "AI_API_KEY", "DASHSCOPE_API_KEY")
     default_max_tokens = max(_read_int("LLM_MAX_TOKENS", "AI_DEFAULT_MAX_TOKENS", default=2048), 128)
     common_knowledge_max_tokens = max(
         _read_int("LLM_COMMON_KNOWLEDGE_MAX_TOKENS", default=min(default_max_tokens, 512)),
         64,
     )
-    return LLMSettings(
+    settings = LLMSettings(
         enabled=_read_bool("LLM_ENABLED", "AI_CHAT_ENABLED", default=True),
         provider=_read_env("LLM_PROVIDER", "AI_PROVIDER", default="openai-compatible"),
         base_url=_read_env("LLM_BASE_URL", "AI_BASE_URL").rstrip("/"),
@@ -204,6 +205,27 @@ def load_llm_settings() -> LLMSettings:
         system_prompt=_read_env("LLM_SYSTEM_PROMPT", "AI_SYSTEM_PROMPT"),
         extra_body=_parse_extra_body(_read_env("LLM_EXTRA_BODY_JSON", "AI_EXTRA_BODY_JSON", default="{}")),
         model_routing=_parse_model_routing(_read_env("LLM_MODEL_ROUTING_JSON", "AI_MODEL_ROUTING_JSON", default="{}")),
+    )
+    # Database-backed provider settings are optional. If the migration has not
+    # been applied or no enabled provider exists, preserve the legacy env path.
+    try:
+        from .gateway_model_config import load_active_model_config
+
+        configured = load_active_model_config(purpose=purpose)
+    except Exception:
+        configured = None
+    if not configured:
+        return settings
+    return replace(
+        settings,
+        enabled=bool(configured.get("enabled", True)),
+        provider=str(configured.get("provider_type") or settings.provider),
+        base_url=str(configured.get("base_url") or settings.base_url).rstrip("/"),
+        api_key=str(configured.get("api_key") or settings.api_key),
+        model=str(configured.get("model_name") or settings.model),
+        default_temperature=float(configured.get("temperature") or settings.default_temperature),
+        default_max_tokens=max(int(configured.get("max_tokens") or settings.default_max_tokens), 128),
+        timeout_seconds=max(float(configured.get("timeout_seconds") or settings.timeout_seconds), 1.0),
     )
 
 
@@ -235,10 +257,9 @@ async def create_llm_completion(
     if settings.extra_body:
         request_body.update(settings.extra_body)
 
-    headers = {
-        "Authorization": f"Bearer {settings.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if settings.api_key:
+        headers["Authorization"] = f"Bearer {settings.api_key}"
 
     timeout = httpx.Timeout(settings.timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -330,10 +351,9 @@ async def create_llm_completion_stream(
         request_body.update(settings.extra_body)
         request_body["stream"] = True
 
-    headers = {
-        "Authorization": f"Bearer {settings.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if settings.api_key:
+        headers["Authorization"] = f"Bearer {settings.api_key}"
 
     timeout = httpx.Timeout(settings.timeout_seconds)
     answer_parts: list[str] = []

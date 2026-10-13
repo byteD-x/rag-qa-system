@@ -59,6 +59,17 @@ const routes = [
         }
       },
       {
+        path: 'interview',
+        name: 'InterviewView',
+        component: () => import('@/views/interview/InterviewView.vue'),
+        meta: {
+          requiresPermission: 'chat.use',
+          title: 'AI 模拟面试',
+          subtitle: '',
+          breadcrumb: ['工作台', 'AI 模拟面试']
+        }
+      },
+      {
         path: 'kb/upload',
         name: 'KBUploadView',
         component: () => import('@/views/kb/KBUploadView.vue'),

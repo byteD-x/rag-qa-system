@@ -66,6 +66,40 @@ def langchain_messages_to_dicts(messages: list[BaseMessage]) -> list[dict[str, s
     return payload
 
 
+# 拒答判据用绝对相关性(evidence_path.relevance = dense 单路余弦分,0~1),可跨查询比较。
+# 阈值由 140 道标注题(128 可回答 / 12 无证据)在**真实 gateway 链路**上标定,
+# 见 .codex/verification-report-perf-2026-09-27.md 附录 C。
+# 注意:不要改用 evidence_path.final_score。它是 RRF 倒数排名融合分,只反映相对名次,
+# 与相关性无绝对关系,任何固定阈值都会被无条件越过(证明见附录 C)。
+# 注意:标定必须在端到端链路上做。gateway 会按文档截断证据(每文档最多 2 条),
+# 直接读 kb-service 的 top-k 会得到与线上不同的计数,标出的阈值不可用。
+# 实测该标注集:两组 top1 在 [0.567, 0.702] 上重叠,WEAK 取 0.62 是「可回答误拒 1/128」
+# 与「无证据硬拒答 3/12」的折中;语料为单一合成文档,换真实语料必须重标。
+STRONG_RELEVANCE = 0.68
+WEAK_RELEVANCE = 0.62
+STRONG_EVIDENCE_COUNT = 2
+
+
+def _evidence_relevance(item: dict[str, Any]) -> float:
+    """取绝对相关性;缺失(信号降级或非 KB 证据)按 0.0 处理。"""
+    raw = (item.get("evidence_path") or {}).get("relevance")
+    if raw is None:
+        raw = (item.get("signal_scores") or {}).get("relevance")
+    try:
+        return float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _evidence_group_key(item: dict[str, Any]) -> str:
+    """同一章节会有 section / chunk 两个粒度各返回一条,按章节归并后计数才有意义。"""
+    document = str(item.get("document_id") or item.get("corpus_id") or "")
+    section = str(item.get("section_title") or "")
+    if document or section:
+        return f"{document}\x1f{section}"
+    return str(item.get("unit_id") or "")
+
+
 def classify_evidence(
     evidence: list[dict[str, Any]],
     *,
@@ -75,15 +109,22 @@ def classify_evidence(
         if allow_common_knowledge:
             return "common_knowledge", "ungrounded", 0.0, ""
         return "refusal", "insufficient", 0.0, "insufficient_evidence"
-    scores = [float(((item.get("evidence_path") or {}).get("final_score") or 0.0)) for item in evidence]
-    top_score = scores[0]
-    strong_items = [score for score in scores if score >= 0.02]
-    if len(strong_items) >= 2 and top_score >= 0.02:
-        return "grounded", "grounded", min(0.95, 0.62 + len(strong_items) * 0.04 + top_score), ""
+    best_by_group: dict[str, float] = {}
+    for item in evidence:
+        key = _evidence_group_key(item)
+        value = _evidence_relevance(item)
+        if value > best_by_group.get(key, 0.0):
+            best_by_group[key] = value
+    relevances = sorted(best_by_group.values(), reverse=True)
+    top_relevance = relevances[0] if relevances else 0.0
+    strong_count = sum(1 for value in relevances if value >= STRONG_RELEVANCE)
+    if top_relevance >= STRONG_RELEVANCE and strong_count >= STRONG_EVIDENCE_COUNT:
+        score = min(0.95, 0.55 + strong_count * 0.05 + top_relevance * 0.35)
+        return "grounded", "grounded", round(score, 4), ""
     if allow_common_knowledge:
         return "common_knowledge", "ungrounded", 0.0, ""
-    if top_score >= 0.01:
-        return "weak_grounded", "partial", min(0.72, 0.45 + top_score), "partial_evidence"
+    if top_relevance >= WEAK_RELEVANCE:
+        return "weak_grounded", "partial", round(min(0.72, 0.30 + top_relevance * 0.40), 4), "partial_evidence"
     return "refusal", "insufficient", 0.0, "insufficient_evidence"
 
 
@@ -249,6 +290,11 @@ def kb_documents_to_prompt_payload(documents: list[Document], *, corpus_id: str)
                 "service_type": "kb",
                 "evidence_kind": evidence_kind,
                 "source_kind": source_kind,
+                "content_kind": str(metadata.get("content_kind") or "document"),
+                "question_type": str(metadata.get("question_type") or ""),
+                "difficulty": str(metadata.get("difficulty") or ""),
+                "tags": [str(value) for value in list(metadata.get("tags") or [])],
+                "kb_metadata": dict(metadata.get("kb_metadata") or {}),
                 "page_number": int(metadata["page_number"]) if metadata.get("page_number") is not None else None,
                 "region_label": str(metadata.get("region_label") or ""),
                 "asset_id": str(metadata.get("asset_id") or ""),

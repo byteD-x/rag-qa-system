@@ -16,6 +16,7 @@
 - `apps/services/api-gateway/src/app/gateway_auth_routes.py`
 - `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py`
 - `apps/services/api-gateway/src/app/gateway_chat_routes.py`
+- `apps/services/api-gateway/src/app/gateway_interview_routes.py`
 - `apps/services/api-gateway/src/app/gateway_mcp_routes.py`
 - `apps/services/api-gateway/src/app/gateway_platform_routes.py`
 - `apps/services/api-gateway/src/app/gateway_system_routes.py`
@@ -27,6 +28,7 @@
 - `apps/services/knowledge-base/src/app/kb_batch_ingest_routes.py`
 - `apps/services/knowledge-base/src/app/kb_chunk_routes.py`
 - `apps/services/knowledge-base/src/app/kb_connector_routes.py`
+- `apps/services/knowledge-base/src/app/kb_generic_routes.py`
 - `apps/services/knowledge-base/src/app/kb_index_routes.py`
 - `apps/services/knowledge-base/src/app/kb_ingest_routes.py`
 - `apps/services/knowledge-base/src/app/kb_job_queue_routes.py`
@@ -39,7 +41,7 @@
 - `apps/services/knowledge-base/src/app/kb_visual_routes.py`
 - `apps/services/knowledge-base/src/app/main.py`
 
-## 路由总览（116 条）
+## 路由总览（137 条）
 
 | service | methods | path | handler | source |
 |---|---|---|---|---|
@@ -60,7 +62,7 @@
 | api-gateway | `GET` | `/api/knowledge_base/status` | `proxy_knowledge_status` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:163` |
 | knowledge-base | `GET` | `/api/knowledge_base/status` | `get_knowledge_status` | `apps/services/knowledge-base/src/app/kb_job_queue_routes.py:53` |
 | api-gateway | `POST` | `/api/v1/admin/costs/provider-billing-records` | `import_provider_billing` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:81` |
-| api-gateway | `POST` | `/api/v1/agents/tool-workflow` | `post_tool_workflow` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:41` |
+| api-gateway | `POST` | `/api/v1/agents/tool-workflow` | `post_tool_workflow` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:98` |
 | api-gateway | `GET` | `/api/v1/analytics/dashboard` | `get_dashboard` | `apps/services/api-gateway/src/app/gateway_analytics_routes.py:645` |
 | api-gateway | `GET` | `/api/v1/audit/events` | `list_audit_events` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:34` |
 | api-gateway | `POST` | `/api/v1/auth/login` | `login` | `apps/services/api-gateway/src/app/gateway_auth_routes.py:15` |
@@ -80,69 +82,90 @@
 | api-gateway | `GET` | `/api/v1/chat/sessions/{session_id}/workflow-runs` | `list_chat_workflow_runs` | `apps/services/api-gateway/src/app/gateway_chat_routes.py:297` |
 | api-gateway | `GET` | `/api/v1/chat/workflow-runs/{run_id}` | `get_chat_workflow_run` | `apps/services/api-gateway/src/app/gateway_chat_routes.py:309` |
 | api-gateway | `POST` | `/api/v1/chat/workflow-runs/{run_id}/retry` | `retry_chat_workflow_run` | `apps/services/api-gateway/src/app/gateway_chat_routes.py:315` |
+| api-gateway | `POST` | `/api/v1/interviews/sessions` | `start_interview` | `apps/services/api-gateway/src/app/gateway_interview_routes.py:173` |
+| api-gateway | `POST` | `/api/v1/interviews/sessions/{session_id}/questions/{session_question_id}/answer` | `answer_interview_question` | `apps/services/api-gateway/src/app/gateway_interview_routes.py:207` |
+| api-gateway | `GET` | `/api/v1/interviews/sessions/{session_id}/report` | `interview_report` | `apps/services/api-gateway/src/app/gateway_interview_routes.py:258` |
 | knowledge-base | `GET` | `/api/v1/kb/analytics/dashboard` | `get_kb_dashboard` | `apps/services/knowledge-base/src/app/kb_analytics_routes.py:1148` |
 | knowledge-base | `GET` | `/api/v1/kb/analytics/governance` | `get_kb_governance` | `apps/services/knowledge-base/src/app/kb_analytics_routes.py:1206` |
 | knowledge-base | `GET` | `/api/v1/kb/analytics/governance/batch-events` | `get_kb_governance_batch_events` | `apps/services/knowledge-base/src/app/kb_analytics_routes.py:1235` |
 | knowledge-base | `GET` | `/api/v1/kb/analytics/governance/batch-events/{task_id}` | `get_kb_governance_batch_event_detail` | `apps/services/knowledge-base/src/app/kb_analytics_routes.py:1263` |
 | knowledge-base | `GET` | `/api/v1/kb/analytics/operations` | `get_kb_operations` | `apps/services/knowledge-base/src/app/kb_analytics_routes.py:1177` |
 | knowledge-base | `GET` | `/api/v1/kb/audit/events` | `list_kb_audit_events` | `apps/services/knowledge-base/src/app/kb_system_routes.py:43` |
-| knowledge-base | `GET` | `/api/v1/kb/bases` | `list_bases` | `apps/services/knowledge-base/src/app/kb_base_routes.py:380` |
-| knowledge-base | `POST` | `/api/v1/kb/bases` | `create_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:354` |
-| knowledge-base | `DELETE` | `/api/v1/kb/bases/{base_id}` | `delete_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:441` |
-| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}` | `get_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:403` |
-| knowledge-base | `PATCH` | `/api/v1/kb/bases/{base_id}` | `update_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:409` |
-| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}/documents` | `list_base_documents` | `apps/services/knowledge-base/src/app/kb_base_routes.py:470` |
+| knowledge-base | `GET` | `/api/v1/kb/bases` | `list_bases` | `apps/services/knowledge-base/src/app/kb_base_routes.py:503` |
+| knowledge-base | `POST` | `/api/v1/kb/bases` | `create_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:455` |
+| knowledge-base | `DELETE` | `/api/v1/kb/bases/{base_id}` | `delete_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:585` |
+| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}` | `get_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:535` |
+| knowledge-base | `PATCH` | `/api/v1/kb/bases/{base_id}` | `update_base` | `apps/services/knowledge-base/src/app/kb_base_routes.py:541` |
+| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}/documents` | `list_base_documents` | `apps/services/knowledge-base/src/app/kb_base_routes.py:614` |
+| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}/question-pool` | `question_pool` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:417` |
+| knowledge-base | `GET` | `/api/v1/kb/bases/{base_id}/questions` | `list_questions` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:262` |
 | knowledge-base | `POST` | `/api/v1/kb/chunks/merge` | `merge_document_chunks` | `apps/services/knowledge-base/src/app/kb_chunk_routes.py:59` |
 | knowledge-base | `PATCH` | `/api/v1/kb/chunks/{chunk_id}` | `patch_chunk` | `apps/services/knowledge-base/src/app/kb_chunk_routes.py:39` |
 | knowledge-base | `POST` | `/api/v1/kb/chunks/{chunk_id}/split` | `split_document_chunk` | `apps/services/knowledge-base/src/app/kb_chunk_routes.py:53` |
-| knowledge-base | `GET` | `/api/v1/kb/connectors` | `list_connectors` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:244` |
-| knowledge-base | `POST` | `/api/v1/kb/connectors` | `create_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:276` |
+| knowledge-base | `GET` | `/api/v1/kb/connectors` | `list_connectors` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:245` |
+| knowledge-base | `POST` | `/api/v1/kb/connectors` | `create_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:277` |
 | knowledge-base | `POST` | `/api/v1/kb/connectors/local-directory/sync` | `sync_local_directory` | `apps/services/knowledge-base/src/app/kb_sync_routes.py:20` |
-| knowledge-base | `POST` | `/api/v1/kb/connectors/notion/sync` | `sync_notion_pages` | `apps/services/knowledge-base/src/app/kb_sync_routes.py:61` |
-| knowledge-base | `POST` | `/api/v1/kb/connectors/run-due` | `run_due_connectors` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:463` |
-| knowledge-base | `DELETE` | `/api/v1/kb/connectors/{connector_id}` | `delete_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:384` |
-| knowledge-base | `GET` | `/api/v1/kb/connectors/{connector_id}` | `get_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:327` |
-| knowledge-base | `PATCH` | `/api/v1/kb/connectors/{connector_id}` | `update_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:333` |
-| knowledge-base | `GET` | `/api/v1/kb/connectors/{connector_id}/runs` | `list_connector_runs` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:405` |
-| knowledge-base | `POST` | `/api/v1/kb/connectors/{connector_id}/sync` | `run_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:425` |
-| knowledge-base | `POST` | `/api/v1/kb/documents/batch-update` | `batch_update_documents` | `apps/services/knowledge-base/src/app/kb_base_routes.py:477` |
-| knowledge-base | `DELETE` | `/api/v1/kb/documents/{document_id}` | `delete_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:604` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}` | `get_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:542` |
-| knowledge-base | `PATCH` | `/api/v1/kb/documents/{document_id}` | `update_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:598` |
+| knowledge-base | `POST` | `/api/v1/kb/connectors/notion/sync` | `sync_notion_pages` | `apps/services/knowledge-base/src/app/kb_sync_routes.py:62` |
+| knowledge-base | `POST` | `/api/v1/kb/connectors/run-due` | `run_due_connectors` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:464` |
+| knowledge-base | `DELETE` | `/api/v1/kb/connectors/{connector_id}` | `delete_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:385` |
+| knowledge-base | `GET` | `/api/v1/kb/connectors/{connector_id}` | `get_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:328` |
+| knowledge-base | `PATCH` | `/api/v1/kb/connectors/{connector_id}` | `update_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:334` |
+| knowledge-base | `GET` | `/api/v1/kb/connectors/{connector_id}/runs` | `list_connector_runs` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:406` |
+| knowledge-base | `POST` | `/api/v1/kb/connectors/{connector_id}/sync` | `run_connector` | `apps/services/knowledge-base/src/app/kb_connector_routes.py:426` |
+| knowledge-base | `POST` | `/api/v1/kb/documents/batch-update` | `batch_update_documents` | `apps/services/knowledge-base/src/app/kb_base_routes.py:621` |
+| knowledge-base | `DELETE` | `/api/v1/kb/documents/{document_id}` | `delete_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:748` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}` | `get_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:686` |
+| knowledge-base | `PATCH` | `/api/v1/kb/documents/{document_id}` | `update_document` | `apps/services/knowledge-base/src/app/kb_base_routes.py:742` |
 | knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/chunks` | `get_document_chunks` | `apps/services/knowledge-base/src/app/kb_chunk_routes.py:17` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/events` | `get_document_events` | `apps/services/knowledge-base/src/app/kb_base_routes.py:633` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions` | `get_document_versions` | `apps/services/knowledge-base/src/app/kb_base_routes.py:548` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions/{version_id}/content` | `get_document_version_content` | `apps/services/knowledge-base/src/app/kb_base_routes.py:554` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions/{version_id}/diff` | `get_document_version_diff` | `apps/services/knowledge-base/src/app/kb_base_routes.py:570` |
-| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/visual-assets` | `get_document_visual_assets` | `apps/services/knowledge-base/src/app/kb_base_routes.py:652` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/events` | `get_document_events` | `apps/services/knowledge-base/src/app/kb_base_routes.py:777` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions` | `get_document_versions` | `apps/services/knowledge-base/src/app/kb_base_routes.py:692` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions/{version_id}/content` | `get_document_version_content` | `apps/services/knowledge-base/src/app/kb_base_routes.py:698` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/versions/{version_id}/diff` | `get_document_version_diff` | `apps/services/knowledge-base/src/app/kb_base_routes.py:714` |
+| knowledge-base | `GET` | `/api/v1/kb/documents/{document_id}/visual-assets` | `get_document_visual_assets` | `apps/services/knowledge-base/src/app/kb_base_routes.py:796` |
 | knowledge-base | `GET` | `/api/v1/kb/ingest-jobs/{job_id}` | `get_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:17` |
 | knowledge-base | `POST` | `/api/v1/kb/ingest-jobs/{job_id}/retry` | `retry_ingest_job` | `apps/services/knowledge-base/src/app/kb_ingest_routes.py:26` |
+| knowledge-base | `GET` | `/api/v1/kb/job-positions` | `list_job_positions` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:196` |
+| knowledge-base | `POST` | `/api/v1/kb/job-positions` | `create_job_position` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:209` |
+| knowledge-base | `PATCH` | `/api/v1/kb/job-positions/{position_id}` | `update_job_position` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:231` |
 | knowledge-base | `GET` | `/api/v1/kb/object-store/object` | `read_object` | `apps/services/knowledge-base/src/app/kb_object_store_routes.py:52` |
 | knowledge-base | `PUT` | `/api/v1/kb/object-store/parts` | `upload_object_part` | `apps/services/knowledge-base/src/app/kb_object_store_routes.py:32` |
-| knowledge-base | `POST` | `/api/v1/kb/query` | `query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:146` |
-| knowledge-base | `POST` | `/api/v1/kb/query/stream` | `stream_query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:193` |
-| knowledge-base | `POST` | `/api/v1/kb/retrieve` | `retrieve_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:64` |
-| knowledge-base | `POST` | `/api/v1/kb/retrieve/debug` | `retrieve_kb_debug` | `apps/services/knowledge-base/src/app/kb_query_routes.py:108` |
+| knowledge-base | `POST` | `/api/v1/kb/query` | `query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:181` |
+| knowledge-base | `POST` | `/api/v1/kb/query/stream` | `stream_query_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:236` |
+| knowledge-base | `POST` | `/api/v1/kb/questions` | `create_question` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:300` |
+| knowledge-base | `DELETE` | `/api/v1/kb/questions/{question_id}` | `delete_question` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:405` |
+| knowledge-base | `GET` | `/api/v1/kb/questions/{question_id}` | `get_question` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:336` |
+| knowledge-base | `PATCH` | `/api/v1/kb/questions/{question_id}` | `update_question` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:344` |
+| knowledge-base | `POST` | `/api/v1/kb/questions/{question_id}/publish` | `publish_question` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:388` |
+| knowledge-base | `POST` | `/api/v1/kb/retrieve` | `retrieve_kb` | `apps/services/knowledge-base/src/app/kb_query_routes.py:92` |
+| knowledge-base | `POST` | `/api/v1/kb/retrieve/debug` | `retrieve_kb_debug` | `apps/services/knowledge-base/src/app/kb_query_routes.py:141` |
+| knowledge-base | `GET` | `/api/v1/kb/types` | `list_kb_types` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:131` |
+| knowledge-base | `POST` | `/api/v1/kb/types` | `create_kb_type` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:144` |
+| knowledge-base | `PATCH` | `/api/v1/kb/types/{type_key}` | `update_kb_type` | `apps/services/knowledge-base/src/app/kb_generic_routes.py:166` |
 | knowledge-base | `POST` | `/api/v1/kb/uploads` | `create_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:37` |
-| knowledge-base | `GET` | `/api/v1/kb/uploads/{upload_id}` | `get_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:136` |
-| knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/complete` | `complete_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:168` |
-| knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/parts/presign` | `presign_upload_parts` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:143` |
+| knowledge-base | `GET` | `/api/v1/kb/uploads/{upload_id}` | `get_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:147` |
+| knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/complete` | `complete_upload` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:179` |
+| knowledge-base | `POST` | `/api/v1/kb/uploads/{upload_id}/parts/presign` | `presign_upload_parts` | `apps/services/knowledge-base/src/app/kb_upload_routes.py:154` |
 | knowledge-base | `GET` | `/api/v1/kb/visual-assets/{asset_id}/regions` | `get_visual_asset_regions` | `apps/services/knowledge-base/src/app/kb_visual_routes.py:24` |
 | knowledge-base | `GET` | `/api/v1/kb/visual-assets/{asset_id}/thumbnail` | `get_visual_asset_thumbnail` | `apps/services/knowledge-base/src/app/kb_visual_routes.py:15` |
 | api-gateway | `DELETE, GET, OPTIONS, PATCH, POST, PUT` | `/api/v1/kb/{path:path}` | `proxy_kb` | `apps/services/api-gateway/src/app/gateway_admin_routes.py:172` |
 | api-gateway | `POST` | `/api/v1/mcp` | `post_mcp` | `apps/services/api-gateway/src/app/gateway_mcp_routes.py:17` |
-| api-gateway | `GET` | `/api/v1/platform/agent-profiles` | `get_agent_profiles` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:166` |
-| api-gateway | `POST` | `/api/v1/platform/agent-profiles` | `post_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:172` |
-| api-gateway | `DELETE` | `/api/v1/platform/agent-profiles/{profile_id}` | `remove_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:212` |
-| api-gateway | `GET` | `/api/v1/platform/agent-profiles/{profile_id}` | `get_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:188` |
-| api-gateway | `PATCH` | `/api/v1/platform/agent-profiles/{profile_id}` | `patch_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:195` |
-| api-gateway | `GET` | `/api/v1/platform/llm/config` | `get_llm_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:83` |
-| api-gateway | `POST` | `/api/v1/platform/llm/models/discover` | `post_discover_llm_models` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:89` |
-| api-gateway | `GET` | `/api/v1/platform/prompt-templates` | `get_prompt_templates` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:115` |
-| api-gateway | `POST` | `/api/v1/platform/prompt-templates` | `post_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:121` |
-| api-gateway | `DELETE` | `/api/v1/platform/prompt-templates/{template_id}` | `remove_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:158` |
-| api-gateway | `GET` | `/api/v1/platform/prompt-templates/{template_id}` | `get_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:136` |
-| api-gateway | `PATCH` | `/api/v1/platform/prompt-templates/{template_id}` | `patch_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:142` |
+| api-gateway | `GET` | `/api/v1/platform/agent-profiles` | `get_agent_profiles` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:223` |
+| api-gateway | `POST` | `/api/v1/platform/agent-profiles` | `post_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:229` |
+| api-gateway | `DELETE` | `/api/v1/platform/agent-profiles/{profile_id}` | `remove_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:269` |
+| api-gateway | `GET` | `/api/v1/platform/agent-profiles/{profile_id}` | `get_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:245` |
+| api-gateway | `PATCH` | `/api/v1/platform/agent-profiles/{profile_id}` | `patch_agent_profile` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:252` |
+| api-gateway | `GET` | `/api/v1/platform/llm/config` | `get_llm_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:140` |
+| api-gateway | `POST` | `/api/v1/platform/llm/models/discover` | `post_discover_llm_models` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:146` |
+| api-gateway | `GET` | `/api/v1/platform/model-configs` | `get_model_configs` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:54` |
+| api-gateway | `POST` | `/api/v1/platform/model-configs` | `post_model_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:60` |
+| api-gateway | `DELETE` | `/api/v1/platform/model-configs/{config_id}` | `remove_model_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:76` |
+| api-gateway | `PATCH` | `/api/v1/platform/model-configs/{config_id}` | `patch_model_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:68` |
+| api-gateway | `POST` | `/api/v1/platform/model-configs/{config_id}/test` | `test_model_config` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:84` |
+| api-gateway | `GET` | `/api/v1/platform/prompt-templates` | `get_prompt_templates` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:172` |
+| api-gateway | `POST` | `/api/v1/platform/prompt-templates` | `post_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:178` |
+| api-gateway | `DELETE` | `/api/v1/platform/prompt-templates/{template_id}` | `remove_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:215` |
+| api-gateway | `GET` | `/api/v1/platform/prompt-templates/{template_id}` | `get_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:193` |
+| api-gateway | `PATCH` | `/api/v1/platform/prompt-templates/{template_id}` | `patch_prompt_template` | `apps/services/api-gateway/src/app/gateway_platform_routes.py:199` |
 | api-gateway | `GET` | `/api/v1/system/metrics-summary` | `metrics_summary` | `apps/services/api-gateway/src/app/gateway_system_routes.py:117` |
 | api-gateway | `POST` | `/api/v2/chat/interrupts/{interrupt_id}/submit` | `submit_chat_interrupt` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:259` |
 | api-gateway | `GET` | `/api/v2/chat/runs/{run_id}` | `get_chat_run` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:218` |
@@ -151,8 +174,8 @@
 | api-gateway | `GET` | `/api/v2/chat/threads/{thread_id}` | `get_chat_thread` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:160` |
 | api-gateway | `GET` | `/api/v2/chat/threads/{thread_id}/messages` | `list_chat_thread_messages` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:166` |
 | api-gateway | `POST` | `/api/v2/chat/threads/{thread_id}/runs` | `create_chat_run` | `apps/services/api-gateway/src/app/gateway_chat_graph_routes.py:178` |
-| knowledge-base | `POST` | `/api/v2/kb/query` | `query_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:186` |
-| knowledge-base | `POST` | `/api/v2/kb/retrieve` | `retrieve_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:84` |
+| knowledge-base | `POST` | `/api/v2/kb/query` | `query_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:229` |
+| knowledge-base | `POST` | `/api/v2/kb/retrieve` | `retrieve_kb_v2` | `apps/services/knowledge-base/src/app/kb_query_routes.py:116` |
 | api-gateway | `GET` | `/healthz` | `healthz` | `apps/services/api-gateway/src/app/gateway_system_routes.py:22` |
 | knowledge-base | `GET` | `/healthz` | `healthz` | `apps/services/knowledge-base/src/app/kb_system_routes.py:18` |
 | api-gateway | `GET` | `/metrics` | `metrics` | `apps/services/api-gateway/src/app/gateway_system_routes.py:122` |

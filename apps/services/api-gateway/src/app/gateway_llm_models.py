@@ -150,13 +150,16 @@ async def discover_openai_compatible_models(
     resolved_provider = (provider or effective.provider or "openai-compatible").strip()
     resolved_base_url = (base_url or effective.base_url).strip()
     resolved_credential = (credential or effective.api_key).strip()
-    if not resolved_credential:
+    no_key_providers = {"ollama", "localai", "vllm", "local", "openai-compatible-local"}
+    if not resolved_credential and resolved_provider.lower() not in no_key_providers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM credential is required for model discovery")
 
     normalized_base_url = _normalize_base_url(resolved_base_url)
     _ensure_model_discovery_host_allowed(normalized_base_url)
     url = _models_url(normalized_base_url)
-    headers = {"Authorization": "Bearer " + resolved_credential, "Accept": "application/json"}
+    headers = {"Accept": "application/json"}
+    if resolved_credential:
+        headers["Authorization"] = "Bearer " + resolved_credential
     max_items = min(max(int(max_models or DEFAULT_MAX_MODELS), 1), 1000)
 
     timeout = httpx.Timeout(min(max(float(effective.timeout_seconds or 30.0), 5.0), 30.0))
@@ -180,7 +183,7 @@ async def discover_openai_compatible_models(
         "provider": resolved_provider,
         "base_url": normalized_base_url,
         "models_url": url,
-        "api_key_configured": True,
+        "api_key_configured": bool(resolved_credential),
         "current_model": effective.model,
         "models": models,
         "count": len(models),

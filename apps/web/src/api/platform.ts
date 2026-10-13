@@ -97,6 +97,43 @@ export function discoverLlmModels(data: LlmModelDiscoveryPayload) {
   return request.post<LlmModelDiscoveryResult>('/platform/llm/models/discover', data);
 }
 
+export interface ModelProviderConfig {
+  id: string;
+  name: string;
+  provider_type: string;
+  base_url: string;
+  model_name: string;
+  embedding_model: string;
+  temperature: number;
+  max_tokens: number;
+  timeout_seconds: number;
+  proxy_url: string;
+  enabled: boolean;
+  default_purposes: string[];
+  api_key_configured: boolean;
+  api_key_hint: string;
+}
+
+export function listModelProviderConfigs() {
+  return request.get<{ items: ModelProviderConfig[] }>('/platform/model-configs');
+}
+
+export function createModelProviderConfig(data: Record<string, unknown>) {
+  return request.post<ModelProviderConfig>('/platform/model-configs', data);
+}
+
+export function updateModelProviderConfig(configId: string, data: Record<string, unknown>) {
+  return request.patch<ModelProviderConfig>(`/platform/model-configs/${configId}`, data);
+}
+
+export function disableModelProviderConfig(configId: string) {
+  return request.delete(`/platform/model-configs/${configId}`);
+}
+
+export function testModelProviderConfig(configId: string) {
+  return request.post(`/platform/model-configs/${configId}/test`);
+}
+
 // ---- Tool Registry ----
 export interface ToolRegistrySummary {
   registered_tools: number;

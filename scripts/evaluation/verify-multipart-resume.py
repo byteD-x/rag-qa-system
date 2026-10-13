@@ -64,6 +64,7 @@ def main() -> int:
 
         uploaded_after_first_pass = upload_parts(
             client,
+            base_url=args.base_url,
             file_path=file_path,
             presign_payload={
                 **initial_presign,
@@ -90,7 +91,7 @@ def main() -> int:
         resumed_part_numbers = [
             int(item["part_number"]) for item in resume_presign.get("presigned_parts", []) or []
         ]
-        completed_parts = upload_parts(client, file_path=file_path, presign_payload=resume_presign)
+        completed_parts = upload_parts(client, file_path=file_path, presign_payload=resume_presign, base_url=args.base_url)
         complete_payload = complete_upload(
             client,
             base_url=args.base_url,

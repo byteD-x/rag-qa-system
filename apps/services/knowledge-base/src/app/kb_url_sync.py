@@ -147,6 +147,7 @@ def execute_url_sync(
     delete_missing: bool,
     dry_run: bool,
     max_urls: int | None,
+    allowed_departments: list[str] | None = None,
     user: CurrentUser,
     db: Any,
     storage: Any,
@@ -177,7 +178,7 @@ def execute_url_sync(
         db=db,
         storage=storage,
         storage_service=f"kb-connector-{connector_type}",
+        allowed_departments=allowed_departments,
         ignored_files=[],
         extra_result={"urls": normalized_urls},
     )
-
