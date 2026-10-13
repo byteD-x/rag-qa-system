@@ -9,7 +9,13 @@
     </PageHeaderCompact>
 
     <div class="upload-layout">
-      <div class="upload-left">
+      <div
+        class="upload-left"
+        data-testid="kb-upload-scroll-region"
+        role="region"
+        aria-label="上传与版本设置"
+        tabindex="0"
+      >
         <div class="kb-select-row">
           <el-select
             v-model="selectedBaseId"
@@ -699,6 +705,10 @@ onBeforeUnmount(clearPoller);
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-width: thin;
 }
 
 .kb-select-row {
@@ -899,8 +909,18 @@ onBeforeUnmount(clearPoller);
 }
 
 @media (max-width: 900px) {
+  .upload-page {
+    overflow-y: auto;
+  }
+
   .upload-layout {
     grid-template-columns: 1fr;
+    flex: 0 0 auto;
+  }
+
+  .upload-left {
+    overflow: visible;
+    padding-right: 0;
   }
 }
 </style>
