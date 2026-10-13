@@ -131,6 +131,7 @@ class PIIDetector:
             (PIType.ID_CARD.value, _ID_CARD_PATTERN),
             (PIType.PHONE.value, _PHONE_PATTERN),
             (PIType.EMAIL.value, _EMAIL_PATTERN),
+            (PIType.BANK_CARD.value, _BANK_CARD_PATTERN),
             (PIType.CREDIT_CARD.value, _CREDIT_CARD_PATTERN),
             (PIType.LICENSE_PLATE.value, _LICENSE_PLATE_PATTERN),
             (PIType.PASSPORT.value, _PASSPORT_PATTERN),

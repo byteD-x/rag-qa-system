@@ -12,6 +12,12 @@
         <span>加载数据源...</span>
       </div>
 
+      <div v-else-if="loadError" class="error-state" role="alert">
+        <strong>加载数据源失败</strong>
+        <span>暂时无法获取数据源，请检查网络后重试。</span>
+        <el-button type="primary" plain data-testid="retry-connectors" @click="loadData">重新加载</el-button>
+      </div>
+
       <EnhancedEmpty
         v-else-if="!connectors.length"
         variant="document"
@@ -55,12 +61,12 @@
 
     <!-- Create/Edit Dialog -->
     <el-dialog v-model="dialogVisible" :title="editingConnector ? '编辑数据源' : '添加数据源'" width="500px">
-      <el-form label-position="top">
-        <el-form-item label="数据源名称">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
+        <el-form-item label="数据源名称" prop="name">
           <el-input v-model="form.name" placeholder="例如：飞书技术文档同步" />
         </el-form-item>
         
-        <el-form-item label="目标知识库">
+        <el-form-item label="目标知识库" prop="base_id">
           <el-select v-model="form.base_id" style="width: 100%;">
             <el-option v-for="b in bases" :key="b.id" :label="b.name" :value="b.id" />
           </el-select>
@@ -146,6 +152,7 @@ import { listConnectors, createConnector, updateConnector, deleteConnector, sync
 const connectors = ref<any[]>([]);
 const bases = ref<any[]>([]);
 const loading = ref(false);
+const loadError = ref('');
 const syncResultVisible = ref(false);
 const syncResult = ref<any | null>(null);
 
@@ -153,6 +160,7 @@ const dialogVisible = ref(false);
 const saving = ref(false);
 const editingConnector = ref<any>(null);
 
+const formRef = ref<any>();
 const form = ref({
   name: '',
   base_id: '',
@@ -160,19 +168,26 @@ const form = ref({
   schedule_enabled: false,
   schedule_interval: 60
 });
+const rules = {
+  name: [{ required: true, message: '请输入数据源名称', trigger: 'blur' }],
+  base_id: [{ required: true, message: '请选择目标知识库', trigger: 'change' }]
+};
 const configJson = ref('{}');
 
 const connector_id = (conn: any) => conn.id || conn.connector_id;
 
 const loadData = async () => {
   loading.value = true;
+  loadError.value = '';
   try {
     const [basesRes, connsRes]: any = await Promise.all([
-      listKnowledgeBases(),
-      listConnectors()
+      listKnowledgeBases({ skipErrorHandler: true }),
+      listConnectors(undefined, { skipErrorHandler: true })
     ]);
     bases.value = basesRes.items || [];
     connectors.value = connsRes.items || [];
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : 'request_failed';
   } finally {
     loading.value = false;
   }
@@ -237,11 +252,18 @@ const openEditDialog = (conn: any) => {
 };
 
 const saveConnector = async () => {
+  if (!(await formRef.value?.validate())) {
+    return;
+  }
   let parsedConfig = {};
   try {
     parsedConfig = JSON.parse(configJson.value);
   } catch (e) {
     ElMessage.error('配置 JSON 格式错误');
+    return;
+  }
+  if (!parsedConfig || typeof parsedConfig !== 'object' || Array.isArray(parsedConfig)) {
+    ElMessage.error('配置 JSON 必须是对象');
     return;
   }
 
@@ -322,6 +344,23 @@ onMounted(() => {
   gap: 12px;
   padding: 48px;
   color: var(--text-muted);
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 32px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.error-state strong {
+  color: var(--text-primary);
+  font-size: 16px;
 }
 
 .connector-list {

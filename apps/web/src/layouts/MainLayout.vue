@@ -75,7 +75,7 @@
       <div class="workspace-main-frame">
         <header class="workspace-topbar">
           <div class="topbar-leading">
-            <el-button circle class="mobile-nav-button" @click="mobileDrawerVisible = true">
+            <el-button circle class="mobile-nav-button" aria-label="打开主导航" @click="mobileDrawerVisible = true">
               <el-icon><Grid /></el-icon>
             </el-button>
 
@@ -335,6 +335,7 @@ const handleLogout = () => {
 .workspace-shell {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
 }
@@ -345,6 +346,7 @@ const handleLogout = () => {
   flex: 0 0 280px;
   width: 280px;
   height: 100vh;
+  height: 100dvh;
   padding: 16px;
   background: var(--bg-panel);
   border-right: 1px solid var(--border-color);
@@ -615,6 +617,7 @@ const handleLogout = () => {
 .workspace-content {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   padding: 18px 0 4px;
   display: flex;
   flex-direction: column;
@@ -693,11 +696,17 @@ const handleLogout = () => {
 
 @media (max-width: 1100px) {
   .workspace-shell {
-    display: block;
+    display: flex;
+    height: 100%;
   }
 
   .workspace-sidebar {
     display: none;
+  }
+
+  .workspace-main {
+    width: 100%;
+    height: 100%;
   }
 
   .workspace-main-frame {

@@ -13,43 +13,14 @@
           <el-option label="近 30 天" :value="30" />
         </el-select>
         <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
-        <el-button plain @click="go('/workspace/kb/upload')">知识库治理</el-button>
-        <el-button v-if="authStore.hasPermission('kb.manage')" plain @click="go('/workspace/kb/operations')">知识库运维</el-button>
       </template>
     </PageHeaderCompact>
 
     <div class="entry-content">
-      <section class="quick-actions">
-        <h3 class="section-label">快捷操作</h3>
-        <div class="action-row">
-          <button type="button" class="action-btn" @click="go('/workspace/chat')">
-            <el-icon :size="22"><ChatDotRound /></el-icon>
-            <span>快速问答</span>
-          </button>
-          <button type="button" class="action-btn" @click="go('/workspace/kb/upload')">
-            <el-icon :size="22"><UploadFilled /></el-icon>
-            <span>上传文档</span>
-          </button>
-          <button type="button" class="action-btn" @click="go('/workspace/kb/upload')">
-            <el-icon :size="22"><FolderOpened /></el-icon>
-            <span>知识库管理</span>
-          </button>
-          <button
-            v-if="authStore.hasPermission('kb.manage')"
-            type="button"
-            class="action-btn"
-            @click="go('/workspace/kb/operations')"
-          >
-            <el-icon :size="22"><Monitor /></el-icon>
-            <span>运维值班</span>
-          </button>
-        </div>
-      </section>
-
       <!-- Dashboard Section -->
-      <section v-if="loadingDashboard" class="dashboard-loading">
+      <section v-if="loadingDashboard" class="dashboard-loading" role="status" aria-live="polite">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载数据大盘...</span>
+        <span>加载数据大盘…</span>
       </section>
 
       <template v-else>
@@ -160,17 +131,17 @@
               </div>
               <div class="quality-bars" v-if="dashboardData.qa_quality.summary.assistant_answers > 0">
                 <div class="q-bar-row">
-                  <span class="q-label">Grounded (有据)</span>
+                  <span class="q-label">有依据</span>
                   <div class="q-track"><div class="q-fill success" :style="{ width: percent(dashboardData.qa_quality.summary.grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
                   <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
                 </div>
                 <div class="q-bar-row">
-                  <span class="q-label">Weak / Partial</span>
+                  <span class="q-label">依据不足</span>
                   <div class="q-track"><div class="q-fill warning" :style="{ width: percent(dashboardData.qa_quality.summary.weak_grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
                   <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.weak_grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
                 </div>
                 <div class="q-bar-row">
-                  <span class="q-label">Refusal (无据拒答)</span>
+                  <span class="q-label">无依据拒答</span>
                   <div class="q-track"><div class="q-fill danger" :style="{ width: percent(dashboardData.qa_quality.summary.refusal_answers, dashboardData.qa_quality.summary.assistant_answers) }"></div></div>
                   <span class="q-percent">{{ percent(dashboardData.qa_quality.summary.refusal_answers, dashboardData.qa_quality.summary.assistant_answers) }}</span>
                 </div>
@@ -248,7 +219,7 @@
                 <span class="q-text" :title="q.query">{{ q.query }}</span>
                 <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
               </li>
-              <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">暂无无命中查询，知识库覆盖良好</li>
+              <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">当前时间窗口暂无无命中查询</li>
             </ul>
           </div>
 
@@ -364,7 +335,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChatDotRound, UploadFilled, FolderOpened, Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled, Monitor } from '@element-plus/icons-vue';
+import { Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
 import { listKnowledgeBases } from '@/api/kb';
@@ -479,36 +450,6 @@ const go = (path: string) => {
   font-size: var(--text-body, 0.9375rem);
   font-weight: 600;
   color: var(--text-secondary);
-}
-
-.quick-actions {
-  flex-shrink: 0;
-}
-
-.action-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  font-size: var(--text-body, 0.9375rem);
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color var(--transition-base), background var(--transition-base);
-}
-
-.action-btn:hover {
-  border-color: var(--blue-600);
-  background: var(--blue-50);
 }
 
 /* Dashboard Grid */

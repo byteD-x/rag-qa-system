@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from shared.embeddings import embed_texts, load_embedding_settings
-from shared.grounded_answering import classify_evidence
+from shared.grounded_answering import classify_evidence, dedupe_citations, public_citations
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath
@@ -140,3 +140,41 @@ def test_classify_evidence_refuses_when_no_section_reaches_weak_relevance() -> N
     assert answer_mode == "refusal"
     assert evidence_status == "insufficient"
     assert refusal_reason == "insufficient_evidence"
+
+
+def test_classify_evidence_accepts_strong_rerank_signal_for_known_fact() -> None:
+    evidence = [
+        {
+            "unit_id": "policy-chunk",
+            "document_id": "policy",
+            "section_title": "报销审批",
+            "quote": "超过 1000 RMB 需要部门负责人审批和财务复核。",
+            "evidence_path": {"relevance": 0.49},
+            "signal_scores": {"rerank": 5.1},
+        }
+    ]
+
+    answer_mode, evidence_status, _, refusal_reason = classify_evidence(evidence)
+
+    assert answer_mode == "weak_grounded"
+    assert evidence_status == "partial"
+    assert refusal_reason == "partial_evidence"
+
+
+def test_dedupe_citations_keeps_best_chunk_per_section() -> None:
+    citations = [
+        {"unit_id": "section", "document_id": "doc", "version_label": "v1", "section_title": "审批", "evidence_path": {"relevance": 0.6}},
+        {"unit_id": "chunk", "document_id": "doc", "version_label": "v1", "section_title": "审批", "evidence_path": {"relevance": 0.8}},
+        {"unit_id": "other", "document_id": "doc", "version_label": "v1", "section_title": "提交", "evidence_path": {"relevance": 0.7}},
+    ]
+
+    result = dedupe_citations(citations)
+
+    assert [item["unit_id"] for item in result] == ["chunk", "other"]
+
+
+def test_refusal_citations_are_not_public() -> None:
+    citations = [{"unit_id": "candidate"}]
+
+    assert public_citations(citations, answer_mode="refusal", refusal_reason="insufficient_evidence") == []
+    assert public_citations(citations, answer_mode="weak_grounded", refusal_reason="partial_evidence") == citations

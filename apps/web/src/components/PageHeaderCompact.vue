@@ -2,8 +2,8 @@
   <header class="page-header-compact">
     <div class="page-header-compact__main">
       <h1 v-if="title" class="page-header-compact__title">{{ title }}</h1>
-      <div v-if="$slots.subtitle" class="page-header-compact__subtitle">
-        <slot name="subtitle" />
+      <div v-if="$slots.subtitle || subtitle" class="page-header-compact__subtitle">
+        <slot name="subtitle">{{ subtitle }}</slot>
       </div>
     </div>
     <div v-if="$slots.actions" class="page-header-compact__actions">
@@ -15,6 +15,7 @@
 <script setup lang="ts">
 defineProps<{
   title?: string;
+  subtitle?: string;
 }>();
 </script>
 

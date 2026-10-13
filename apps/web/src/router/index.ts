@@ -27,6 +27,20 @@ const routes = [
     ]
   },
   {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/layouts/AuthLayout.vue'),
+    meta: { title: '注册', subtitle: '' },
+    children: [{ path: '', name: 'RegisterView', component: () => import('@/views/RegisterView.vue') }]
+  },
+  {
+    path: '/password-reset',
+    name: 'PasswordReset',
+    component: () => import('@/layouts/AuthLayout.vue'),
+    meta: { title: '找回密码', subtitle: '' },
+    children: [{ path: '', name: 'PasswordResetView', component: () => import('@/views/PasswordResetView.vue') }]
+  },
+  {
     path: '/workspace',
     name: 'WorkspaceRoot',
     component: () => import('@/layouts/MainLayout.vue'),
@@ -45,6 +59,16 @@ const routes = [
           title: '业务总览',
           subtitle: '',
           breadcrumb: ['工作台', '业务总览']
+        }
+      },
+      {
+        path: 'forbidden',
+        name: 'AccessDeniedView',
+        component: () => import('@/views/AccessDeniedView.vue'),
+        meta: {
+          title: '无权限',
+          subtitle: '',
+          breadcrumb: ['工作台', '无权限']
         }
       },
       {
@@ -260,7 +284,7 @@ const routes = [
         name: 'ApiKeyManagerView',
         component: () => import('@/views/platform/ApiKeyManagerView.vue'),
         meta: {
-          requiresPermission: 'chat.use',
+          requiresPermission: 'kb.manage',
           title: 'API Key 管理',
           subtitle: '',
           breadcrumb: ['工作台', 'API Key 管理']
@@ -271,7 +295,7 @@ const routes = [
         name: 'WebhookManagerView',
         component: () => import('@/views/platform/WebhookManagerView.vue'),
         meta: {
-          requiresPermission: 'chat.use',
+          requiresPermission: 'kb.manage',
           title: 'Webhook 管理',
           subtitle: '',
           breadcrumb: ['工作台', 'Webhook 管理']
@@ -282,7 +306,7 @@ const routes = [
         name: 'PiiConfigView',
         component: () => import('@/views/platform/PiiConfigView.vue'),
         meta: {
-          requiresPermission: 'chat.use',
+          requiresPermission: 'kb.manage',
           title: 'PII 脱敏配置',
           subtitle: '',
           breadcrumb: ['工作台', 'PII 脱敏']
@@ -304,7 +328,7 @@ const routes = [
         name: 'AbExperimentView',
         component: () => import('@/views/platform/AbExperimentView.vue'),
         meta: {
-          requiresPermission: 'chat.use',
+          requiresPermission: 'kb.manage',
           title: 'A/B 实验',
           subtitle: '',
           breadcrumb: ['工作台', 'A/B 实验']
@@ -339,6 +363,10 @@ const routes = [
     redirect: '/workspace/chat'
   },
   {
+    path: '/audit',
+    redirect: '/workspace/audit'
+  },
+  {
     path: '/dashboard/:pathMatch(.*)*',
     redirect: '/workspace/chat'
   }
@@ -357,12 +385,18 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresAdmin && !authStore.isAdmin()) {
-    return { path: '/workspace/chat' };
+    return {
+      path: '/workspace/forbidden',
+      query: { permission: 'platform_admin', from: to.fullPath }
+    };
   }
 
   const requiredPermission = String(to.meta.requiresPermission || '');
   if (requiredPermission && !authStore.hasPermission(requiredPermission)) {
-    return { path: '/workspace/entry' };
+    return {
+      path: '/workspace/forbidden',
+      query: { permission: requiredPermission, from: to.fullPath }
+    };
   }
 });
 

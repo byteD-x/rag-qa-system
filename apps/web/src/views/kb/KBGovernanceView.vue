@@ -286,11 +286,11 @@
               <div v-if="item.reviewer_note" class="note">{{ item.reviewer_note }}</div>
               <div v-if="item.low_confidence_region_count" class="actions">
                 <el-button text size="small" :loading="isLoadingLowConfidence(item.document_id)" @click="toggleLowConfidenceRegions(item)">
-                  {{ isLowConfidenceExpanded(item.document_id) ? '鏀惰捣浣庣疆淇″尯鍩?' : `鏌ョ湅鍏ㄩ儴浣庣疆淇″尯鍩?${item.low_confidence_region_count}` }}
+                  {{ isLowConfidenceExpanded(item.document_id) ? '收起低置信区域' : `查看全部低置信区域（${item.low_confidence_region_count}）` }}
                 </el-button>
               </div>
               <div v-if="isLowConfidenceExpanded(item.document_id)" class="low-confidence-region-list">
-                <div v-if="isLoadingLowConfidence(item.document_id)" class="summary-hint">鍔犺浇浣庣疆淇″尯鍩熶腑...</div>
+                <div v-if="isLoadingLowConfidence(item.document_id)" class="summary-hint">正在加载低置信区域...</div>
                 <div v-else-if="!lowConfidenceRegionsFor(item.document_id).length" class="empty empty--compact">未找到可展开的低置信区域。</div>
                 <article v-for="region in lowConfidenceRegionsFor(item.document_id)" :key="region.region_id" class="low-confidence-region-item">
                   <div class="low-confidence-region-item__meta">

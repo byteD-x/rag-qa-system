@@ -1,12 +1,16 @@
 <template>
   <div class="page-shell chat-page">
-    <section class="chat-workspace">
+    <section class="chat-workspace" :class="{ 'show-sidebar': showSidebar }">
       <!-- 侧边栏 -->
-      <ChatSidebar />
+      <ChatSidebar ref="sidebarRef" :open="showSidebar" @close="closeSidebar" />
 
       <!-- 主聊天区 -->
       <main class="chat-main">
-        <ChatHeader />
+        <ChatHeader ref="chatHeaderRef" @toggle-sidebar="openSidebar" />
+
+        <div class="chat-status-live-region" role="status" aria-live="polite" aria-atomic="true">
+          {{ liveStatus }}
+        </div>
 
         <div ref="messageListRef" class="message-list-container" @scroll="handleScroll">
           <div ref="messageListInnerRef" class="message-list-inner">            <div v-if="!chatStore.messages.length" class="message-empty">
@@ -87,6 +91,10 @@ const messageListRef = ref<HTMLElement | null>(null);
 const messageListInnerRef = ref<HTMLElement | null>(null);
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
 const traceDrawerRef = ref<InstanceType<typeof ChatTraceDrawer> | null>(null);
+const sidebarRef = ref<InstanceType<typeof ChatSidebar> | null>(null);
+const chatHeaderRef = ref<InstanceType<typeof ChatHeader> | null>(null);
+const showSidebar = ref(true);
+const liveStatus = ref('');
 
 let resizeObserver: ResizeObserver | null = null;
 let shouldAutoScroll = true;
@@ -118,6 +126,9 @@ function handleScroll() {
 }
 
 onMounted(() => {
+  if (window.innerWidth <= 768) {
+    showSidebar.value = false;
+  }
   if (messageListInnerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       if (shouldAutoScroll) {
@@ -136,6 +147,7 @@ onBeforeUnmount(() => {
 
 function handleAsk(question: string) {
   shouldAutoScroll = true;
+  liveStatus.value = '正在检索知识库，请稍候。';
   chatStore.ask(question, (smooth) => {
     void nextTick().then(() => {
       if (shouldAutoScroll) {
@@ -143,6 +155,16 @@ function handleAsk(question: string) {
       }
     });
   });
+}
+
+function openSidebar() {
+  showSidebar.value = true;
+  void nextTick().then(() => sidebarRef.value?.focusCloseButton());
+}
+
+function closeSidebar() {
+  showSidebar.value = false;
+  void nextTick().then(() => chatHeaderRef.value?.focusSidebarToggle());
 }
 
 function applyPrompt(prompt: string) {
@@ -201,6 +223,17 @@ watch(
   }
 );
 
+watch(
+  () => [chatStore.asking, chatStore.hasStreamingAssistant] as const,
+  ([asking, hasStreaming]) => {
+    if (asking) {
+      liveStatus.value = hasStreaming ? '正在生成回答，请稍候。' : '正在检索知识库，请稍候。';
+    } else if (liveStatus.value) {
+      liveStatus.value = '回答已完成。';
+    }
+  }
+);
+
 onBeforeUnmount(() => {
   chatStore.stopStreaming();
 });
@@ -209,18 +242,22 @@ onBeforeUnmount(() => {
 <style scoped>
 .chat-page {
   background: var(--bg-page);
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   padding: 0;
   margin: 0;
   display: flex;
+  overflow: hidden;
 }
 
 .chat-workspace {
   display: flex;
   width: 100%;
   height: 100%;
+  min-height: 0;
   background: var(--bg-panel);
   overflow: hidden;
+  position: relative;
 }
 
 .chat-main {
@@ -229,6 +266,19 @@ onBeforeUnmount(() => {
   flex-direction: column;
   position: relative;
   min-width: 0;
+  min-height: 0;
+}
+
+.chat-status-live-region {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Welcome Screen */
@@ -303,8 +353,15 @@ onBeforeUnmount(() => {
 /* Messages */
 .message-list-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px;
+}
+
+@media (max-width: 768px) {
+  .composer-container {
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
 }
 
 .message-list-inner {

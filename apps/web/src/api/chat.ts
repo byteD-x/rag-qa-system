@@ -138,10 +138,11 @@ export function retryWorkflowRun(runId: string, options: { idempotencyKey?: stri
 export function createChatRunV2(
   threadId: string,
   data: { question: string; scope?: ChatScope; execution_mode?: 'grounded' | 'agent'; focus_hint?: Record<string, any> },
-  options: { idempotencyKey?: string } = {}
+  options: { idempotencyKey?: string; signal?: AbortSignal } = {}
 ) {
   return request.post(`/api/v2/chat/threads/${threadId}/runs`, data, {
     baseURL: '',
+    signal: options.signal,
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-v2-run')
     }

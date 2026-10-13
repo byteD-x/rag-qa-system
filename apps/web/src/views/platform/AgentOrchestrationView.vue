@@ -103,6 +103,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { platformApi } from '@/api/platform'
+import { Refresh } from '@element-plus/icons-vue'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
 const loading = ref(false)

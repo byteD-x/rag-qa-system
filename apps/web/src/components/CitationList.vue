@@ -38,7 +38,14 @@
                   <span class="meta-tag" v-if="typeof citation.confidence === 'number'">置信度 {{ (citation.confidence * 100).toFixed(1) }}%</span>
                 </div>
               </div>
-              <a :href="documentPath(citation)" target="_blank" class="source-link" title="查看原文">
+              <a
+                :href="documentPath(citation)"
+                target="_blank"
+                rel="noreferrer"
+                class="source-link"
+                aria-label="查看原文"
+                title="查看原文"
+              >
                 <el-icon><Document /></el-icon>
               </a>
             </div>
@@ -54,16 +61,16 @@
               </div>
               <div class="quote-text">{{ citation.quote }}</div>
               
-              <div class="source-footer" v-if="citation.evidence_path?.final_score !== undefined">
+              <div class="source-footer" v-if="citation.evidence_path?.relevance !== undefined">
                 <div class="relevance-indicator">
                   <div class="relevance-track">
                     <div 
                       class="relevance-fill" 
-                      :style="{ width: `${Math.min(100, Math.max(0, citation.evidence_path.final_score * 100))}%` }"
-                      :class="getScoreClass(citation.evidence_path.final_score)"
+                      :style="{ width: `${Math.min(100, Math.max(0, citation.evidence_path.relevance * 100))}%` }"
+                      :class="getScoreClass(citation.evidence_path.relevance)"
                     ></div>
                   </div>
-                  <span class="relevance-text">{{ (citation.evidence_path.final_score * 100).toFixed(1) }}% 相关</span>
+                  <span class="relevance-text">{{ (citation.evidence_path.relevance * 100).toFixed(1) }}% 相关性</span>
                 </div>
               </div>
             </div>
@@ -101,6 +108,7 @@ interface CitationItem {
   confidence?: number | null;
   evidence_path?: {
     final_score?: number;
+    relevance?: number;
   };
 }
 
@@ -331,13 +339,13 @@ const getScoreClass = (score: number) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 44px;
+  height: 44px;
   border-radius: 4px;
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  transition: all 0.2s;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .source-link:hover {

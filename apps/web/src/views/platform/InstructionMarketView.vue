@@ -67,6 +67,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus, Upload } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue'

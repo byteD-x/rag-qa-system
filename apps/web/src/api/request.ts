@@ -80,10 +80,13 @@ function handleUnauthorized() {
   router.push('/login');
 }
 
-function resolveErrorMessage(status?: number, backendError?: string, responseData?: unknown): string {
+export function resolveRequestErrorMessage(status?: number, backendError?: string, responseData?: unknown, options: { isLoginRequest?: boolean } = {}): string {
   const backendCode = getBackendErrorCode(responseData);
 
   if (status === 401) {
+    if (options.isLoginRequest) {
+      return String(backendError || '邮箱或密码错误，请检查后重试。');
+    }
     return '登录已失效，请重新登录。';
   }
   if (status === 400) {
@@ -117,12 +120,12 @@ function resolveErrorMessage(status?: number, backendError?: string, responseDat
   return '请求失败，请稍后重试。';
 }
 
-function notifyRequestError(status?: number, responseData?: unknown) {
+function notifyRequestError(status?: number, responseData?: unknown, options: { isLoginRequest?: boolean } = {}) {
   const backendError = getBackendError(responseData);
-  if (status === 401) {
+  if (status === 401 && !options.isLoginRequest) {
     handleUnauthorized();
   }
-  ElMessage.error(resolveErrorMessage(status, backendError, responseData));
+  ElMessage.error(resolveRequestErrorMessage(status, backendError, responseData, options));
 }
 
 function createHandledRequestError(message: string, status?: number, code?: string): HandledRequestError {
@@ -151,7 +154,8 @@ request.interceptors.response.use(
     if ((error.config as RequestConfig | undefined)?.skipErrorHandler) {
       return Promise.reject(error);
     }
-    notifyRequestError(error.response?.status, error.response?.data);
+    const isLoginRequest = String(error.config?.url || '').endsWith('/auth/login');
+    notifyRequestError(error.response?.status, error.response?.data, { isLoginRequest });
     return Promise.reject(error);
   }
 );
@@ -233,7 +237,7 @@ export async function streamRequest(path: string, body: unknown, options: Stream
     const backendCode = getBackendErrorCode(payload);
     notifyRequestError(response.status, payload);
     throw createHandledRequestError(
-      resolveErrorMessage(response.status, backendError, payload),
+      resolveRequestErrorMessage(response.status, backendError, payload),
       response.status,
       backendCode
     );
@@ -272,7 +276,13 @@ export async function streamRequest(path: string, body: unknown, options: Stream
 }
 
 export function isAbortRequestError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+  if (error instanceof Error && (error.name === 'CanceledError' || (error as Error & { code?: string }).code === 'ERR_CANCELED')) {
+    return true;
+  }
+  return false;
 }
 
 export function isHandledRequestError(error: unknown): error is HandledRequestError {

@@ -109,6 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
@@ -155,7 +156,9 @@ async function createKey() {
 async function rotateKey(row: any) {
   try {
     await ElMessageBox.confirm('轮换后将创建新 Key，旧 Key 在 24 小时后自动失效。确定？', '确认轮换')
-    await platformApi.rotateApiKey(row.id)
+    const res = await platformApi.rotateApiKey(row.id)
+    createdRawKey.value = res.data.raw_key
+    showCreatedKey.value = true
     ElMessage.success('Key 已轮换')
     loadData()
   } catch { /* 取消 */ }

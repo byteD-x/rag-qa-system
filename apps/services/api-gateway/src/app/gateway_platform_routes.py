@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Query, Request
 
@@ -51,9 +53,20 @@ from .tool_registry import tool_registry
 from .gateway_workflows import serialize_workflow_run
 from shared.api_errors import raise_api_error
 from .tool_workflow import run_tool_workflow
+from .api_key_manager import APIKeyManager
+from .webhook_manager import WebhookManager
+from .pii_detector import PIIDetector, PIType
+from .instruction_evaluator import InstructionABEvaluator
 
 
 router = APIRouter()
+
+api_key_manager = APIKeyManager(db=gateway_db)
+webhook_manager = WebhookManager(db=gateway_db)
+ab_evaluator = InstructionABEvaluator(db=gateway_db)
+_experiment_owners: dict[str, str] = {}
+_pii_configs: dict[str, dict[str, object]] = {}
+_default_pii_types = [item.value for item in PIType]
 
 
 def _require_model_admin(request: Request, user: CurrentUser, *, action: str, resource_id: str = "") -> None:
@@ -521,3 +534,297 @@ async def remove_agent_profile(profile_id: str, request: Request, user: CurrentU
     delete_agent_profile(profile_id, user=user)
     write_gateway_audit_event(action="platform.agent_profile.delete", outcome="success", request=request, user=user, resource_type="agent_profile", resource_id=profile_id, scope="owner")
     return {"deleted": True, "profile_id": profile_id}
+
+
+# ---------------------------------------------------------------------------
+# Platform management capabilities
+# ---------------------------------------------------------------------------
+
+
+def _owned_api_key(key_id: str, user: CurrentUser) -> dict[str, object]:
+    item = next((key for key in api_key_manager.list_keys(user.user_id) if key["id"] == key_id), None)
+    if item is None:
+        raise_api_error(404, "api_key_not_found", "api key not found")
+    return item
+
+
+@router.get("/api/v1/platform/api-keys")
+async def list_platform_api_keys(request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.api_key.list", resource_type="api_key")
+    return {"items": api_key_manager.list_keys(user.user_id)}
+
+
+@router.post("/api/v1/platform/api-keys")
+async def create_platform_api_key(payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.api_key.create", resource_type="api_key")
+    name = str(payload.get("name") or "").strip()
+    permissions_raw = payload.get("permissions")
+    permissions = [str(item).strip().lower() for item in permissions_raw] if isinstance(permissions_raw, list) else []
+    allowed_permissions = {"chat.use", "kb.read", "kb.write", "kb.manage", "audit.read"}
+    if not name:
+        raise_api_error(400, "invalid_api_key_name", "name is required")
+    if not permissions or any(item not in allowed_permissions for item in permissions):
+        raise_api_error(400, "invalid_api_key_permissions", "permissions contains unsupported values")
+    try:
+        quota_tokens = int(payload.get("quota_tokens") or 0)
+        rate_limit = int(payload.get("rate_limit") or 60)
+    except (TypeError, ValueError):
+        raise_api_error(400, "invalid_api_key_limits", "quota_tokens and rate_limit must be integers")
+    if quota_tokens < 0 or rate_limit < 1 or rate_limit > 600:
+        raise_api_error(400, "invalid_api_key_limits", "quota or rate limit is out of range")
+    item = api_key_manager.create_key(
+        user.user_id,
+        name=name,
+        permissions=list(dict.fromkeys(permissions)),
+        quota_tokens=quota_tokens,
+        rate_limit_per_minute=rate_limit,
+    )
+    write_gateway_audit_event(action="platform.api_key.create", outcome="success", request=request, user=user, resource_type="api_key", resource_id=str(item["id"]), scope="owner")
+    return item
+
+
+@router.post("/api/v1/platform/api-keys/{key_id}/rotate")
+async def rotate_platform_api_key(key_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.api_key.rotate", resource_type="api_key",)
+    _owned_api_key(key_id, user)
+    item = api_key_manager.rotate_key(key_id)
+    if item is None:
+        raise_api_error(404, "api_key_not_found", "api key not found")
+    write_gateway_audit_event(action="platform.api_key.rotate", outcome="success", request=request, user=user, resource_type="api_key", resource_id=key_id, scope="owner", details={"new_key_id": item["id"]})
+    return item
+
+
+@router.post("/api/v1/platform/api-keys/{key_id}/revoke")
+async def revoke_platform_api_key(key_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.api_key.revoke", resource_type="api_key",)
+    _owned_api_key(key_id, user)
+    if not api_key_manager.revoke(key_id):
+        raise_api_error(404, "api_key_not_found", "api key not found")
+    write_gateway_audit_event(action="platform.api_key.revoke", outcome="success", request=request, user=user, resource_type="api_key", resource_id=key_id, scope="owner")
+    return {"revoked": True, "id": key_id}
+
+
+def _serialize_webhook(registration: object) -> dict[str, object]:
+    item = asdict(registration)
+    item.pop("secret", None)
+    item.pop("owner_user_id", None)
+    return item
+
+
+def _serialize_delivery(delivery: object) -> dict[str, object]:
+    item = asdict(delivery)
+    item.pop("payload", None)
+    return item
+
+
+def _validate_webhook_url(value: object) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise_api_error(400, "invalid_webhook_url", "webhook url must use http or https")
+    return url
+
+
+def _owned_webhook(webhook_id: str, user: CurrentUser):
+    item = next((hook for hook in webhook_manager.list_hooks(user.user_id) if hook.id == webhook_id), None)
+    if item is None:
+        raise_api_error(404, "webhook_not_found", "webhook not found")
+    return item
+
+
+@router.get("/api/v1/platform/webhooks")
+async def list_platform_webhooks(request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.webhook.list", resource_type="webhook")
+    return {"items": [_serialize_webhook(item) for item in webhook_manager.list_hooks(user.user_id)]}
+
+
+@router.get("/api/v1/platform/webhooks/deliveries")
+async def list_platform_webhook_deliveries(request: Request, user: CurrentUser, limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+    _platform_read(request, user, action="platform.webhook.delivery.list", resource_type="webhook_delivery")
+    deliveries = []
+    for hook in webhook_manager.list_hooks(user.user_id):
+        deliveries.extend(webhook_manager.history(hook.id, limit=limit))
+    deliveries.sort(key=lambda item: item.created_at, reverse=True)
+    return {"items": [_serialize_delivery(item) for item in deliveries[:limit]]}
+
+
+@router.post("/api/v1/platform/webhooks")
+async def register_platform_webhook(payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.webhook.create", resource_type="webhook")
+    url = _validate_webhook_url(payload.get("url"))
+    events_raw = payload.get("events")
+    events = [str(item).strip() for item in events_raw if str(item).strip()] if isinstance(events_raw, list) else ["*"]
+    registration = webhook_manager.register(url, events=events, secret=str(payload.get("secret") or ""), description=str(payload.get("description") or "").strip(), owner_user_id=user.user_id)
+    write_gateway_audit_event(action="platform.webhook.create", outcome="success", request=request, user=user, resource_type="webhook", resource_id=registration.id, scope="owner")
+    return _serialize_webhook(registration)
+
+
+@router.post("/api/v1/platform/webhooks/{webhook_id}/test")
+async def test_platform_webhook(webhook_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.webhook.test", resource_type="webhook")
+    _owned_webhook(webhook_id, user)
+    deliveries = await webhook_manager.trigger("platform.webhook.test", {"requested_by": user.user_id}, webhook_id=webhook_id)
+    if not deliveries:
+        raise_api_error(409, "webhook_inactive", "webhook is inactive")
+    return {"delivery": _serialize_delivery(deliveries[0])}
+
+
+@router.patch("/api/v1/platform/webhooks/{webhook_id}")
+async def update_platform_webhook(webhook_id: str, payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.webhook.update", resource_type="webhook")
+    _owned_webhook(webhook_id, user)
+    is_active = payload.get("is_active")
+    if is_active is not None and not isinstance(is_active, bool):
+        raise_api_error(400, "invalid_webhook_status", "is_active must be boolean")
+    events_raw = payload.get("events")
+    events = None
+    if events_raw is not None:
+        if not isinstance(events_raw, list):
+            raise_api_error(400, "invalid_webhook_events", "events must be an array")
+        events = [str(item).strip() for item in events_raw if str(item).strip()]
+    registration = webhook_manager.update(webhook_id, owner_user_id=user.user_id, is_active=is_active, description=str(payload["description"]) if "description" in payload else None, events=events)
+    if registration is None:
+        raise_api_error(404, "webhook_not_found", "webhook not found")
+    return _serialize_webhook(registration)
+
+
+@router.delete("/api/v1/platform/webhooks/{webhook_id}")
+async def delete_platform_webhook(webhook_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.webhook.delete", resource_type="webhook")
+    _owned_webhook(webhook_id, user)
+    if not webhook_manager.unregister(webhook_id):
+        raise_api_error(404, "webhook_not_found", "webhook not found")
+    return {"deleted": True, "id": webhook_id}
+
+
+def _pii_config(user: CurrentUser) -> dict[str, object]:
+    if user.user_id in _pii_configs:
+        return dict(_pii_configs[user.user_id])
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT strategy, mask_char, enabled_types_json FROM platform_pii_configs WHERE user_id = %s", (user.user_id,))
+            row = cur.fetchone()
+    if row:
+        config = {"strategy": str(row.get("strategy") or "mask"), "mask_char": str(row.get("mask_char") or "*"), "enabled_types": list(row.get("enabled_types_json") or _default_pii_types)}
+        _pii_configs[user.user_id] = config
+        return config
+    return {"strategy": "mask", "mask_char": "*", "enabled_types": list(_default_pii_types)}
+
+
+@router.get("/api/v1/platform/pii/config")
+async def get_platform_pii_config(request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.pii.config.get", resource_type="pii_config")
+    return _pii_config(user)
+
+
+@router.patch("/api/v1/platform/pii/config")
+async def save_platform_pii_config(payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.pii.config.update", resource_type="pii_config")
+    strategy = str(payload.get("strategy") or "mask").strip().lower()
+    if strategy not in {"mask", "hash", "redact", "replace"}:
+        raise_api_error(400, "invalid_pii_strategy", "unsupported pii strategy")
+    enabled_raw = payload.get("enabled_types")
+    enabled_types = [str(item).strip().lower() for item in enabled_raw] if isinstance(enabled_raw, list) else list(_default_pii_types)
+    if any(item not in _default_pii_types for item in enabled_types):
+        raise_api_error(400, "invalid_pii_types", "unsupported pii type")
+    mask_char = str(payload.get("mask_char") or "*")
+    if len(mask_char) != 1:
+        raise_api_error(400, "invalid_mask_char", "mask_char must be one character")
+    config = {"strategy": strategy, "mask_char": mask_char, "enabled_types": list(dict.fromkeys(enabled_types))}
+    _pii_configs[user.user_id] = config
+    from .db import to_json
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO platform_pii_configs (user_id, strategy, mask_char, enabled_types_json)
+                VALUES (%s, %s, %s, %s::jsonb)
+                ON CONFLICT (user_id) DO UPDATE SET strategy = EXCLUDED.strategy, mask_char = EXCLUDED.mask_char, enabled_types_json = EXCLUDED.enabled_types_json, updated_at = NOW()
+                """,
+                (user.user_id, strategy, mask_char, to_json(config["enabled_types"])),
+            )
+        conn.commit()
+    return config
+
+
+@router.post("/api/v1/platform/pii/test")
+async def test_platform_pii(payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.pii.test", resource_type="pii_config")
+    text = str(payload.get("text") or "")
+    if not text or len(text) > 20000:
+        raise_api_error(400, "invalid_pii_text", "text must contain 1 to 20000 characters")
+    config = _pii_config(user)
+    strategy = str(payload.get("strategy") or config["strategy"])
+    if strategy not in {"mask", "hash", "redact", "replace"}:
+        raise_api_error(400, "invalid_pii_strategy", "unsupported pii strategy")
+    detector = PIIDetector(enabled_types=list(config["enabled_types"]))
+    report = detector.audit_report(text)
+    return {**report, "sanitized": detector.anonymize(text, strategy=strategy, mask_char=str(config["mask_char"]))}
+
+
+@router.get("/api/v1/platform/experiments")
+async def list_platform_experiments(request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.experiment.list", resource_type="experiment")
+    return {"items": [item for item in ab_evaluator.list_experiments() if item.get("owner_user_id") == user.user_id or _experiment_owners.get(item["experiment_id"]) == user.user_id]}
+
+
+@router.post("/api/v1/platform/experiments")
+async def start_platform_experiment(payload: dict[str, object], request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.experiment.create", resource_type="experiment")
+    experiment_id = str(payload.get("experiment_id") or f"exp_{int(time.time() * 1000)}").strip()
+    control_prompt = str(payload.get("control_prompt") or "")
+    variant_prompt = str(payload.get("variant_prompt") or "")
+    if not control_prompt or not variant_prompt:
+        raise_api_error(400, "invalid_experiment_prompts", "control_prompt and variant_prompt are required")
+    if experiment_id in _experiment_owners or ab_evaluator.owner(experiment_id):
+        raise_api_error(409, "experiment_exists", "experiment already exists")
+    try:
+        target = int(payload.get("sample_size_target") or 100)
+        split_ratio = float(payload.get("split_ratio") or 0.5)
+    except (TypeError, ValueError):
+        raise_api_error(400, "invalid_experiment_config", "sample_size_target and split_ratio are invalid")
+    if target < 30 or target > 1000 or not 0.1 <= split_ratio <= 0.9:
+        raise_api_error(400, "invalid_experiment_config", "experiment configuration is out of range")
+    ab_evaluator.set_owner(user.user_id)
+    config = ab_evaluator.start_experiment(experiment_id, name=str(payload.get("name") or experiment_id), control_prompt=control_prompt, variant_prompt=variant_prompt, sample_size_target=target, split_ratio=split_ratio)
+    _experiment_owners[experiment_id] = user.user_id
+    return {"experiment_id": config.experiment_id, "name": config.name, "is_active": config.is_active, "sample_size": 0, "target": config.sample_size_target, "created_at": config.created_at}
+
+
+@router.post("/api/v1/platform/experiments/{experiment_id}/stop")
+async def stop_platform_experiment(experiment_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.experiment.stop", resource_type="experiment")
+    if (_experiment_owners.get(experiment_id) or ab_evaluator.owner(experiment_id)) != user.user_id:
+        raise_api_error(404, "experiment_not_found", "experiment not found")
+    ab_evaluator.stop_experiment(experiment_id)
+    return {"experiment_id": experiment_id, "is_active": False}
+
+
+@router.get("/api/v1/platform/experiments/{experiment_id}/report")
+async def get_platform_experiment_report(experiment_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.experiment.report", resource_type="experiment",)
+    if (_experiment_owners.get(experiment_id) or ab_evaluator.owner(experiment_id)) != user.user_id:
+        raise_api_error(404, "experiment_not_found", "experiment not found")
+    report = ab_evaluator.report(experiment_id)
+    if report is None:
+        raise_api_error(404, "experiment_not_found", "experiment not found")
+    return asdict(report)
+
+
+@router.get("/api/v1/platform/orchestration/runs")
+async def list_platform_orchestration_runs(request: Request, user: CurrentUser, limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+    _platform_read(request, user, action="platform.orchestration.list", resource_type="orchestration_run")
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM chat_workflow_runs WHERE user_id = %s ORDER BY created_at DESC LIMIT %s", (user.user_id, limit))
+            rows = cur.fetchall()
+    items = []
+    for row in rows:
+        state = dict(row.get("workflow_state_json") or {})
+        retrieval = dict(state.get("retrieval_meta") or {})
+        decomposition = dict(retrieval.get("decomposition") or {})
+        sub_tasks = list(decomposition.get("sub_tasks") or [])
+        worker_results = [{"task_id": task.get("id"), "worker_type": task.get("category", "retrieval"), "success": task.get("status") not in {"failed", "error"}, "execution_time_ms": 0, "evidence": []} for task in sub_tasks]
+        failures = sum(1 for item in worker_results if not item["success"])
+        items.append({"plan_id": str(row.get("id") or ""), "question": str(row.get("question") or ""), "sub_tasks": sub_tasks, "execution_order": list(decomposition.get("execution_order") or []), "success_count": len(worker_results) - failures, "failure_count": failures, "total_time_ms": float((state.get("timing") or {}).get("total_ms") or 0), "worker_types": list(dict.fromkeys(item["worker_type"] for item in worker_results)), "worker_results": worker_results})
+    return {"items": items, "total": len(items)}

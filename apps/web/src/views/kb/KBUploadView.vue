@@ -4,7 +4,7 @@
       <template #actions>
         <el-button type="primary" @click="router.push('/workspace/chat')">问答</el-button>
         <el-button plain :disabled="!canWrite" @click="pickFiles">上传</el-button>
-        <el-button plain :disabled="!canWrite" @click="openBaseDrawer('create')">新建</el-button>
+        <el-button plain :disabled="!canManageBase" @click="openBaseDrawer('create')">新建</el-button>
       </template>
     </PageHeaderCompact>
 
@@ -25,7 +25,7 @@
             />
           </el-select>
           <el-button
-            v-if="selectedBase && canWrite"
+            v-if="selectedBase && canManageBase"
             plain
             size="small"
             @click="openBaseDrawer('edit')"
@@ -113,16 +113,20 @@
             </el-form-item>
           </el-form>
 
-          <div
+          <button
+            type="button"
             class="dropzone"
-            @click="canWrite && pickFiles()"
+            :disabled="!canWrite"
+            aria-label="选择要上传的文件"
+            @click="pickFiles"
             @dragover.prevent
             @drop.prevent="handleDrop"
+            @keydown.enter.space.prevent="pickFiles"
           >
             <el-icon :size="32"><UploadFilled /></el-icon>
             <span>点击或拖拽文件</span>
             <span class="dropzone-hint">TXT / MD / JSON / CSV / XLSX / XLS / PDF / DOCX</span>
-          </div>
+          </button>
           <input
             ref="fileInputRef"
             type="file"
@@ -173,17 +177,17 @@
             class="doc-empty"
           />
           <div v-else class="doc-list">
-            <button
+            <article
               v-for="doc in latestDocuments"
               :key="doc.id"
-              type="button"
               class="doc-item"
-              @click="openDocument(doc.id)"
             >
-              <span class="doc-name">{{ doc.file_name }}</span>
-              <el-tag :type="statusMeta(doc.status).type" size="small" effect="plain">
-                {{ statusMeta(doc.status).label }}
-              </el-tag>
+              <button type="button" class="doc-open-btn" @click="openDocument(doc.id)">
+                <span class="doc-name">{{ doc.file_name }}</span>
+                <el-tag :type="statusMeta(doc.status).type" size="small" effect="plain">
+                  {{ statusMeta(doc.status).label }}
+                </el-tag>
+              </button>
               <div v-if="doc.stats_json?.version_assist?.suggested_version_family_key" class="version-assist-card">
                 <strong>版本建议</strong>
                 <span>建议家族：{{ doc.stats_json.version_assist.suggested_version_family_key }}</span>
@@ -194,7 +198,7 @@
                 <el-button text type="primary" size="small" @click.stop="openInChat(doc.id)">提问</el-button>
                 <el-button text type="danger" size="small" :disabled="!canWrite" @click.stop="handleDeleteDocument(doc)">删除</el-button>
               </div>
-            </button>
+            </article>
           </div>
         </div>
 
@@ -253,12 +257,12 @@
           </el-form-item>
         </template>
         <el-form-item>
-          <el-button type="primary" :loading="creatingBase" :disabled="!canWrite" @click="handleSubmitBase">
+          <el-button type="primary" :loading="creatingBase" :disabled="!canManageBase" @click="handleSubmitBase">
             {{ baseFormMode === 'edit' ? '保存' : '创建' }}
           </el-button>
           <el-button v-if="baseFormMode === 'edit'" @click="cancelEditBase">取消</el-button>
           <el-button
-            v-if="baseFormMode === 'edit' && selectedBase && canWrite"
+            v-if="baseFormMode === 'edit' && selectedBase && canManageBase"
             type="danger"
             plain
             @click="handleDeleteBase"
@@ -375,8 +379,17 @@ const ensureMetadataDefaults = () => {
 };
 
 const fileFingerprint = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
-const canWrite = computed(() => authStore.hasPermission('kb.write'));
 const selectedBase = computed(() => bases.value.find((b) => String(b.id) === String(selectedBaseId.value)) || null);
+const canManageBase = computed(() => {
+  if (!authStore.hasPermission('kb.write')) return false;
+  const role = String(authStore.user?.role || '');
+  if (authStore.isAdmin() || role === 'kb_admin') return true;
+  return Boolean(selectedBase.value && String(selectedBase.value.created_by || '') === String(authStore.user?.id || ''));
+});
+const canWrite = computed(() => {
+  if (!authStore.hasPermission('kb.write')) return false;
+  return !selectedBase.value || canManageBase.value;
+});
 
 const clearPoller = () => {
   if (pollTimer !== null) {
@@ -471,7 +484,7 @@ const cancelEditBase = () => {
 };
 
 const handleSubmitBase = async () => {
-  if (!canWrite.value || !baseForm.name.trim()) {
+  if (!canManageBase.value || !baseForm.name.trim()) {
     ElMessage.warning('请填写名称');
     return;
   }
@@ -509,7 +522,7 @@ const handleSubmitBase = async () => {
 };
 
 const handleDeleteBase = async () => {
-  if (!canWrite.value || !selectedBase.value) return;
+  if (!canManageBase.value || !selectedBase.value) return;
   try {
     await ElMessageBox.confirm(
       `将删除知识库「${selectedBase.value.name}」及其全部文档，此操作不可恢复。`,
@@ -716,7 +729,15 @@ onBeforeUnmount(clearPoller);
   border-radius: var(--radius-md);
   background: var(--bg-panel-muted);
   cursor: pointer;
+  width: 100%;
+  color: inherit;
+  font: inherit;
   transition: border-color var(--transition-base), background var(--transition-base);
+}
+
+.dropzone:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .dropzone:hover {
@@ -818,8 +839,6 @@ onBeforeUnmount(clearPoller);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-panel-muted);
-  text-align: left;
-  cursor: pointer;
   transition: border-color var(--transition-base), background var(--transition-base);
 }
 
@@ -835,6 +854,21 @@ onBeforeUnmount(clearPoller);
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
+}
+
+.doc-open-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .doc-actions {

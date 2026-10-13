@@ -71,6 +71,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Check } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
@@ -95,6 +96,10 @@ const testResult = ref<any>(null)
 const testing = ref(false)
 
 async function saveConfig() {
+  if (!config.mask_char || [...config.mask_char].length !== 1) {
+    ElMessage.error('遮盖字符必须填写一个字符')
+    return
+  }
   try {
     await platformApi.savePiiConfig({
       strategy: config.strategy,
@@ -108,7 +113,10 @@ async function saveConfig() {
 }
 
 async function runTest() {
-  if (!testInput.value) return
+  if (!testInput.value.trim()) {
+    ElMessage.warning('请输入要检测的文本')
+    return
+  }
   testing.value = true
   try {
     const res = await platformApi.testPiiDetection({ text: testInput.value, strategy: config.strategy })
@@ -123,8 +131,14 @@ async function runTest() {
 onMounted(async () => {
   try {
     const res = await platformApi.getPiiConfig()
-    if (res.data) Object.assign(config, res.data)
-  } catch { /* 使用默认配置 */ }
+    if (res.data) {
+      Object.assign(config, res.data)
+      const enabled = new Set(res.data.enabled_types || [])
+      piiTypes.forEach(type => { type.enabled = enabled.has(type.key) })
+    }
+  } catch {
+    ElMessage.error('加载 PII 配置失败，请重试')
+  }
 })
 </script>
 

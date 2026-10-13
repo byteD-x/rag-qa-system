@@ -9,7 +9,7 @@ describe('operations route guard', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('redirects users without kb.manage to workspace entry', async () => {
+  it('redirects users without kb.manage to an actionable forbidden page', async () => {
     localStorage.setItem('access_token', 'token');
     localStorage.setItem(
       'user',
@@ -24,7 +24,7 @@ describe('operations route guard', () => {
     const { default: router } = await import('@/router');
     await router.push('/workspace/kb/operations');
 
-    expect(router.currentRoute.value.fullPath).toBe('/workspace/entry');
+    expect(router.currentRoute.value.fullPath).toBe('/workspace/forbidden?permission=kb.manage&from=/workspace/kb/operations');
   }, 15000);
 
   it('allows users with kb.manage to enter operations page', async () => {
@@ -43,5 +43,15 @@ describe('operations route guard', () => {
     await router.push('/workspace/kb/operations');
 
     expect(router.currentRoute.value.fullPath).toBe('/workspace/kb/operations');
+  });
+
+  it('redirects the legacy audit deep link to the workspace route', async () => {
+    localStorage.setItem('access_token', 'token');
+    localStorage.setItem('user', JSON.stringify({ id: 'audit-1', email: 'audit@local', role: 'audit_viewer', permissions: ['audit.read'] }));
+
+    const { default: router } = await import('@/router');
+    await router.push('/audit');
+
+    expect(router.currentRoute.value.path).toBe('/workspace/audit');
   });
 });

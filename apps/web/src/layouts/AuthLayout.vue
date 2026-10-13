@@ -45,6 +45,7 @@ import { Platform } from '@element-plus/icons-vue';
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(420px, 480px);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .auth-showcase {
@@ -52,7 +53,7 @@ import { Platform } from '@element-plus/icons-vue';
   align-items: center;
   justify-content: center;
   padding: 56px 48px;
-  background: linear-gradient(160deg, #0f172a 0%, #1e3a5f 35%, #1e293b 60%, #0c1222 100%);
+  background: #111827;
   color: #fff;
 }
 

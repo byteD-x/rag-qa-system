@@ -95,6 +95,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev/smoke-eval.ps1
 | 现象 | 处理方式 |
 |---|---|
 | `docker` 命令不存在 | 先跑 `make demo-offline` 做轻量离线验证，并说明当前机器未安装或未暴露 Docker CLI |
-| smoke eval 等待服务超时 | 查看 `docker compose ps` 和 `docker compose logs --no-color gateway kb-service kb-worker` |
+| smoke eval 等待服务超时 | 查看 `docker compose ps` 和 `docker compose logs --no-color gateway kb-service` |
 | 回归门禁失败 | 打开 `agent_smoke_regression_gate.md`，确认是 correctness、faithfulness、citation alignment 还是 refusal 指标失败 |
 | 检索指标下降 | 先跑 `run-retrieval-ablation.py`，再用 `/api/v1/kb/retrieve/debug` 检查候选和 rerank |

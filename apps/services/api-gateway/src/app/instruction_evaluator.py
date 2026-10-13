@@ -87,9 +87,10 @@ class InstructionABEvaluator:
     SIGNIFICANCE_THRESHOLD = 0.05  # p < 0.05 视为显著
     MIN_SAMPLE_SIZE = 30           # 最少样本量才能出报告
 
-    def __init__(self) -> None:
+    def __init__(self, db: Any | None = None) -> None:
         self._experiments: dict[str, ExperimentConfig] = {}
         self._results: dict[str, list[TrialResult]] = defaultdict(list)
+        self._db = db
 
     def start_experiment(
         self,
@@ -126,6 +127,18 @@ class InstructionABEvaluator:
         )
         self._experiments[experiment_id] = config
         self._results[experiment_id] = []
+        if self._db is not None:
+            from .db import to_json
+            with self._db.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO platform_experiments (experiment_id, owner_user_id, name, description, control_prompt, variant_prompt, metric_keys_json, sample_size_target, split_ratio)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                        """,
+                        (experiment_id, str(getattr(self, "_current_owner", "")), config.name, config.description, config.control_prompt, config.variant_prompt, to_json(config.metric_keys), config.sample_size_target, config.split_ratio),
+                    )
+                conn.commit()
         logger.info("ab_experiment_started id=%s name=%s target=%d", experiment_id, name, sample_size_target)
         return config
 
@@ -134,6 +147,11 @@ class InstructionABEvaluator:
         if experiment_id in self._experiments:
             self._experiments[experiment_id].is_active = False
             logger.info("ab_experiment_stopped id=%s", experiment_id)
+        if self._db is not None:
+            with self._db.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE platform_experiments SET is_active = FALSE WHERE experiment_id = %s", (experiment_id,))
+                conn.commit()
 
     def assign_variant(self, experiment_id: str) -> str:
         """为请求分配变体（A 或 B）。
@@ -187,15 +205,22 @@ class InstructionABEvaluator:
             user_feedback=user_feedback,
         )
         self._results[experiment_id].append(trial)
+        if self._db is not None:
+            from .db import to_json
+            with self._db.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO platform_experiment_trials (trial_id, experiment_id, variant, question, scores_json, latency_ms, user_feedback) VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)", (trial.trial_id, experiment_id, trial.variant, trial.question, to_json(trial.scores), trial.latency_ms, trial.user_feedback))
+                conn.commit()
         return trial
 
     def report(self, experiment_id: str) -> ExperimentReport | None:
         """生成实验报告。"""
         config = self._experiments.get(experiment_id)
+        results = self._results.get(experiment_id, [])
+        if self._db is not None:
+            config, results = self._load_persisted(experiment_id)
         if config is None:
             return None
-
-        results = self._results.get(experiment_id, [])
         a_results = [r for r in results if r.variant == "A"]
         b_results = [r for r in results if r.variant == "B"]
 
@@ -255,6 +280,12 @@ class InstructionABEvaluator:
 
     def list_experiments(self) -> list[dict[str, Any]]:
         """列出所有实验。"""
+        if self._db is not None:
+            with self._db.connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT e.*, COUNT(t.trial_id) AS sample_size FROM platform_experiments e LEFT JOIN platform_experiment_trials t ON t.experiment_id = e.experiment_id GROUP BY e.experiment_id ORDER BY e.created_at DESC")
+                    rows = cur.fetchall()
+            return [{"experiment_id": str(row["experiment_id"]), "name": str(row.get("name") or ""), "is_active": bool(row.get("is_active")), "sample_size": int(row.get("sample_size") or 0), "target": int(row.get("sample_size_target") or 0), "created_at": row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else row.get("created_at"), "owner_user_id": str(row.get("owner_user_id") or "")} for row in rows]
         return [
             {
                 "experiment_id": eid,
@@ -266,6 +297,31 @@ class InstructionABEvaluator:
             }
             for eid, config in self._experiments.items()
         ]
+
+    def set_owner(self, user_id: str) -> None:
+        self._current_owner = user_id
+
+    def owner(self, experiment_id: str) -> str | None:
+        if self._db is None:
+            return None
+        with self._db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT owner_user_id FROM platform_experiments WHERE experiment_id = %s", (experiment_id,))
+                row = cur.fetchone()
+        return str(row["owner_user_id"]) if row else None
+
+    def _load_persisted(self, experiment_id: str) -> tuple[ExperimentConfig | None, list[TrialResult]]:
+        with self._db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM platform_experiments WHERE experiment_id = %s", (experiment_id,))
+                config_row = cur.fetchone()
+                cur.execute("SELECT * FROM platform_experiment_trials WHERE experiment_id = %s ORDER BY created_at", (experiment_id,))
+                trial_rows = cur.fetchall()
+        if not config_row:
+            return None, []
+        config = ExperimentConfig(experiment_id=experiment_id, name=str(config_row.get("name") or ""), description=str(config_row.get("description") or ""), control_prompt=str(config_row.get("control_prompt") or ""), variant_prompt=str(config_row.get("variant_prompt") or ""), metric_keys=list(config_row.get("metric_keys_json") or []), sample_size_target=int(config_row.get("sample_size_target") or 100), split_ratio=float(config_row.get("split_ratio") or 0.5), is_active=bool(config_row.get("is_active")), created_at=config_row.get("created_at").timestamp() if hasattr(config_row.get("created_at"), "timestamp") else float(config_row.get("created_at") or time.time()))
+        results = [TrialResult(trial_id=str(row["trial_id"]), experiment_id=experiment_id, variant=str(row.get("variant") or "A"), question=str(row.get("question") or ""), scores=dict(row.get("scores_json") or {}), latency_ms=float(row.get("latency_ms") or 0), user_feedback=str(row.get("user_feedback") or ""), created_at=row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else float(row.get("created_at") or time.time())) for row in trial_rows]
+        return config, results
 
     # ---- 统计方法 ----
 

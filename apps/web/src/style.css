@@ -1,12 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
-
 :root {
   color-scheme: light;
 
   /* B2B Enterprise Design System */
-  --font-heading: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
-  --font-body: 'Plus Jakarta Sans', 'Segoe UI', sans-serif;
-  --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+  --font-heading: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-body: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
 
   --ink-900: #1e293b;
   --slate-700: #475569;
@@ -93,12 +91,14 @@ html,
 body {
   margin: 0;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   scroll-behavior: smooth;
 }
 
 body {
   height: 100vh;
+  height: 100dvh;
   font-family: var(--font-body);
   color: var(--text-primary);
   background: var(--bg-page);
@@ -110,6 +110,7 @@ body {
 #app {
   width: 100%;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -200,7 +201,6 @@ img {
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
   min-height: auto;
 }
 
@@ -300,7 +300,6 @@ img {
   border: 1px solid var(--border-color) !important;
   border-radius: var(--radius-sm) !important;
   background: var(--bg-panel) !important;
-  box-shadow: var(--shadow-sm) !important;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 

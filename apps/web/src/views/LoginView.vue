@@ -43,6 +43,11 @@
       </el-form-item>
     </el-form>
 
+    <div class="auth-links">
+      <RouterLink to="/register">注册新账号</RouterLink>
+      <RouterLink to="/password-reset">忘记密码？</RouterLink>
+    </div>
+
     <div class="demo-section">
       <span class="demo-label">演示账号</span>
       <div class="demo-accounts">
@@ -272,4 +277,13 @@ const handleLogin = async () => {
 .demo-password {
   font-family: var(--font-mono);
 }
+
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-caption, 0.8125rem);
+}
+
+.auth-links a { color: var(--blue-600); }
 </style>

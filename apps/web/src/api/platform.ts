@@ -378,6 +378,7 @@ export const platformApi = {
   listExperiments: () => requestItems(request.get('/platform/experiments')),
   startExperiment: (data: any) => requestData(request.post('/platform/experiments', data)),
   stopExperiment: (experimentId: string) => requestData(request.post(`/platform/experiments/${experimentId}/stop`)),
+  getExperimentReport: (experimentId: string) => requestData(request.get(`/platform/experiments/${experimentId}/report`)),
 
   listOrchestrationRuns: () => requestItems(request.get('/platform/orchestration/runs')),
 

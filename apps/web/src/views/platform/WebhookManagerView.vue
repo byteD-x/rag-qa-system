@@ -92,6 +92,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
@@ -111,7 +112,7 @@ async function loadData() {
     ])
     hooks.value = hRes.data || []
     deliveries.value = dRes.data || []
-  } catch { /* ignore */ }
+  } catch { ElMessage.error('加载 Webhook 数据失败，请重试') }
   finally { loading.value = false }
 }
 

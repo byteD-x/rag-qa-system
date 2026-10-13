@@ -17,6 +17,7 @@ from .gateway_runtime import CHAT_PERMISSION, gateway_db, runtime_settings
 from .gateway_schemas import CreateRunRequest, CreateThreadRequest, SubmitInterruptRequest
 from .gateway_scope import default_scope, fetch_corpora, fetch_corpus_documents, normalize_execution_mode, resolve_scope_snapshot
 from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages
+from .gateway_workflows import load_workflow_run_for_user
 
 
 router = APIRouter()

@@ -11,7 +11,7 @@ import httpx
 from fastapi import HTTPException
 
 from shared.auth import CurrentUser, has_permission
-from shared.grounded_answering import fallback_answer
+from shared.grounded_answering import dedupe_citations, fallback_answer, public_citations
 from shared.langchain_chat import build_chat_model
 from shared.prompt_safety import analyze_prompt_safety, apply_safety_response_policy
 from shared.tracing import current_trace_id, ensure_trace_id
@@ -1649,6 +1649,11 @@ def build_chat_response_payload(
         list(answer_payload.get("citations") or [])
         if "citations" in answer_payload
         else list(prepared["evidence"])
+    )
+    response_evidence = public_citations(
+        dedupe_citations(response_evidence),
+        answer_mode=str(prepared.get("answer_mode") or ""),
+        refusal_reason=str(prepared.get("refusal_reason") or ""),
     )
     hallucination = hallucination_report_to_dict(
         detect_hallucination_rules(final_answer, response_evidence)

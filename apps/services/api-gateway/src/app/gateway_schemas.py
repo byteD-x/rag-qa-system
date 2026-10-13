@@ -15,6 +15,62 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=8, max_length=128)
+    department: str = Field(default="", max_length=120)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_register_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("请输入有效邮箱")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def validate_register_password(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("密码不能包含首尾空格")
+        if not any(char.isalpha() for char in value) or not any(char.isdigit() for char in value):
+            raise ValueError("密码需同时包含字母和数字")
+        return value
+
+    @field_validator("department")
+    @classmethod
+    def normalize_department(cls, value: str) -> str:
+        return value.strip()
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_reset_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+    password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_reset_password(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("密码不能包含首尾空格")
+        if not any(char.isalpha() for char in value) or not any(char.isdigit() for char in value):
+            raise ValueError("密码需同时包含字母和数字")
+        return value
+
 
 class ChatScopePayload(BaseModel):
     mode: str = Field(default="all", max_length=16)

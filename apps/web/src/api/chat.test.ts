@@ -37,6 +37,22 @@ describe('chat v2 api helpers', () => {
     );
   });
 
+  it('passes an AbortSignal to chat v2 runs', () => {
+    const controller = new AbortController();
+
+    createChatRunV2('thread-1', { question: 'hello' }, { signal: controller.signal, idempotencyKey: 'run-key' });
+
+    expect(requestPost).toHaveBeenCalledWith(
+      '/api/v2/chat/threads/thread-1/runs',
+      { question: 'hello' },
+      {
+        baseURL: '',
+        signal: controller.signal,
+        headers: { 'Idempotency-Key': 'run-key' },
+      },
+    );
+  });
+
   it('loads and resumes chat v2 runs without inheriting the v1 baseURL', () => {
     getChatRunV2('run-1');
     resumeChatRunV2('run-1', { free_text: 'more' }, { idempotencyKey: 'resume-key' });

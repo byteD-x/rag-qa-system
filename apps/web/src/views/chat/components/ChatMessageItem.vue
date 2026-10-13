@@ -31,7 +31,7 @@
           <span class="typing-text">{{ message.isRetrieving ? '正在检索...' : '正在思考中...' }}</span>
         </div>
         <ChatInterruptCard v-else-if="message.message_kind === 'interrupt'" :message="message" />
-        <div v-else class="message-content markdown-body" v-html="renderedContent"></div>
+        <div v-else class="message-content markdown-body" v-html="renderedContent" @click="handleContentClick"></div>
       </div>
 
       <div v-if="message.role === 'assistant' && message.message_kind !== 'interrupt' && (message.citations?.length || 0) > 0" class="citations-area">
@@ -49,13 +49,27 @@
         </div>
 
         <div class="action-right" v-if="!message.streaming && message.id && !message.id.startsWith('temp-')">
-          <button class="feedback-btn" :class="{ active: message.feedback?.verdict === 'up' }" @click="chatStore.handleFeedback(message, 'up')" title="有帮助">
-            👍
+          <button
+            type="button"
+            class="feedback-btn"
+            :class="{ active: message.feedback?.verdict === 'up' }"
+            aria-label="回答有帮助"
+            title="有帮助"
+            @click="chatStore.handleFeedback(message, 'up')"
+          >
+            <el-icon><CircleCheckFilled /></el-icon>
           </button>
           <el-popover placement="top" :width="300" trigger="click" v-model:visible="popoverVisible">
             <template #reference>
-              <button class="feedback-btn" :class="{ active: message.feedback?.verdict === 'down' }" @click="openFeedback" title="没帮助">
-                👎
+              <button
+                type="button"
+                class="feedback-btn"
+                :class="{ active: message.feedback?.verdict === 'down' }"
+                aria-label="回答没帮助"
+                title="没帮助"
+                @click="openFeedback"
+              >
+                <el-icon><CircleCloseFilled /></el-icon>
               </button>
             </template>
             <div class="feedback-panel">
@@ -83,7 +97,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { User, Platform, Connection } from '@element-plus/icons-vue';
+import { CircleCheckFilled, CircleCloseFilled, User, Platform, Connection } from '@element-plus/icons-vue';
 import { marked } from 'marked';
 import CitationList from '@/components/CitationList.vue';
 import { useChatStore } from '@/store/chat';
@@ -97,25 +111,38 @@ const popoverVisible = ref(false);
 const feedbackForm = ref({ reason_code: '', notes: '' });
 
 const renderer = new marked.Renderer();
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 renderer.code = (options: any) => {
-  const code = options.text;
-  const language = options.lang || 'text';
+  const code = String(options.text || '');
+  const language = escapeHtml(String(options.lang || 'text'));
   return `
     <div class="code-block-wrapper">
       <div class="code-lang">
         <span>${language}</span>
-        <button class="code-copy-btn" onclick="navigator.clipboard.writeText(decodeURIComponent('${encodeURIComponent(code)}'))">Copy</button>
+        <button type="button" class="code-copy-btn" data-copy-code="${escapeHtml(encodeURIComponent(code))}">复制</button>
       </div>
-      <pre><code class="language-${language}">${code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>
+      <pre><code class="language-${language}">${escapeHtml(code)}</code></pre>
     </div>
   `;
 };
+renderer.html = (token: any) => escapeHtml(String(token?.text || ''));
 marked.setOptions({ renderer });
 
 const renderedContent = computed(() => {
   if (!props.message.content) return '';
   return marked.parse(props.message.content) as string;
 });
+
+function handleContentClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-copy-code]');
+  if (!target) return;
+  void navigator.clipboard?.writeText(decodeURIComponent(target.dataset.copyCode || ''));
+}
 
 function answerModeLabel(mode: string | undefined) {
   if (mode === 'grounded') return '有据回答';
@@ -390,11 +417,22 @@ async function submitFeedback() {
 }
 
 .feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   background: transparent;
   border: none;
   cursor: pointer;
+  color: var(--text-muted);
   font-size: 18px;
   opacity: 0.6;
+}
+
+.feedback-btn:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
 }
 
 .feedback-btn.active,

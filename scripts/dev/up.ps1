@@ -44,13 +44,13 @@ try {
     }
 
     Write-Info "Starting infrastructure services..."
-    Invoke-DockerCompose -Arguments @("up", "-d", "--remove-orphans", "postgres", "minio", "qdrant")
+    Invoke-DockerCompose -Arguments @("up", "-d", "--remove-orphans", "postgres", "qdrant")
 
     Write-Info "Applying explicit stack initialization..."
     Invoke-DockerCompose -Arguments @("--profile", "init", "run", "--rm", "stack-init")
 
     Write-Info "Starting application services..."
-    Invoke-DockerCompose -Arguments @("up", "-d", "--remove-orphans", "kb-service", "kb-worker", "gateway")
+    Invoke-DockerCompose -Arguments @("up", "-d", "--remove-orphans", "kb-service", "gateway")
 
     if ($SkipHealthCheck) {
         Write-Info "Health checks skipped."

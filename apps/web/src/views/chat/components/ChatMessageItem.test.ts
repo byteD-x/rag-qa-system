@@ -57,4 +57,15 @@ describe('ChatMessageItem', () => {
     expect(wrapper.find('.answer-basis').exists()).toBe(true);
     expect(wrapper.find('.answer-basis__text').text()).toContain('v2 / 第 3 页 / terminal config');
   });
+
+  it('escapes raw html in assistant markdown', () => {
+    const wrapper = shallowMount(ChatMessageItem, {
+      props: {
+        message: { id: 'msg-xss', role: 'assistant', content: '<img src=x onerror="alert(1)">', citations: [] }
+      },
+      global: { stubs: globalStubs }
+    });
+
+    expect(wrapper.find('.message-content').html()).not.toContain('<img');
+  });
 });

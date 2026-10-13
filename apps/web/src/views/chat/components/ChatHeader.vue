@@ -1,6 +1,15 @@
 <template>
   <header class="chat-header">
     <div class="header-title-area">
+      <button
+        ref="sidebarToggleButton"
+        type="button"
+        class="mobile-sidebar-toggle"
+        aria-label="显示历史对话"
+        @click="emit('toggle-sidebar')"
+      >
+        <el-icon><Grid /></el-icon>
+      </button>
       <span class="chat-title">{{ chatStore.activeSessionTitle }}</span>
     </div>
     <div class="header-actions">
@@ -113,12 +122,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { Aim, Platform } from '@element-plus/icons-vue';
+import { computed, ref } from 'vue';
+import { Aim, Grid, Platform } from '@element-plus/icons-vue';
 import { useChatStore } from '@/store/chat';
 import { statusMeta } from '@/utils/status';
 
 const chatStore = useChatStore();
+const emit = defineEmits<{ (e: 'toggle-sidebar'): void }>();
+const sidebarToggleButton = ref<HTMLButtonElement | null>(null);
+
+defineExpose({
+  focusSidebarToggle: () => sidebarToggleButton.value?.focus()
+});
 
 const selectedCorpusSummary = computed(() => {
   if (chatStore.scopeMode === 'all' && !chatStore.selectedCorpusIds.length) {
@@ -149,14 +164,28 @@ const selectedCorpusSummary = computed(() => {
   align-items: center;
   padding: 16px 24px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
+  background: var(--bg-panel);
   z-index: 10;
 }
 
 .header-title-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
+}
+
+.mobile-sidebar-toggle {
+  display: none;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
 }
 
 .chat-title {
@@ -182,8 +211,14 @@ const selectedCorpusSummary = computed(() => {
   border-radius: 999px;
   font-size: 12px;
   color: var(--text-secondary);
-  transition: all 0.2s;
+  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
   cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .mobile-sidebar-toggle {
+    display: inline-flex;
+  }
 }
 
 .action-chip:hover {

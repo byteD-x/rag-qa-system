@@ -290,6 +290,10 @@ make down
 
    登录页的“管理员”和“成员”快捷账号会在前端构建时读取 `ADMIN_EMAIL`、`ADMIN_PASSWORD`、`MEMBER_EMAIL`、`MEMBER_PASSWORD`；生产发布不要直接复用上述本地默认密码。
 
+   登录页同时提供真实注册和找回密码入口。注册用户写入 Gateway PostgreSQL 的 `auth_users` 表，密码使用 PBKDF2 哈希存储；本地开发环境的找回密码接口会返回一次性令牌以便没有邮件服务时完成验证。生产环境必须配置 `SMTP_HOST`、`SMTP_PORT`、`SMTP_FROM`（以及需要时的 `SMTP_USERNAME`、`SMTP_PASSWORD`、`PUBLIC_APP_URL`），否则接口会明确返回 503，不会伪装成已发送。平台 API Key、Webhook、PII 配置和 A/B 实验也持久化到 Gateway 数据库，容器重启不会丢失。
+
+   本轮暂不提供支付、订单、退款或订阅能力；这些入口不会伪装成可用功能。
+
 5. 创建知识库。
 
    在前端新建一个知识库，例如：
@@ -1380,14 +1384,14 @@ curl -X POST http://localhost:8300/api/v1/kb/connectors \
 - Experience Layer：前端工作台，承载知识库管理、检索调试、分析看板和聊天交互
 - Gateway Layer：统一会话入口、认证、工作流编排、Prompt 模板和 Agent Profile
 - Knowledge Layer：知识库、文档、chunk 治理、检索和连接器同步
-- Storage and Operations：PostgreSQL、MinIO、Qdrant 以及审计、追踪、成本分析等运维能力
+- Storage and Operations：PostgreSQL、文件系统对象存储（可选 MinIO/S3）、Qdrant 以及审计、追踪、成本分析等运维能力
 
 ### 每个服务负责什么
 
 - `apps/web`：前端界面，负责登录、上传、检索、问答和查看结果
 - `api-gateway`：统一聊天入口、认证、会话管理、工作流编排、审计聚合
 - `kb-service`：知识库、文档、上传、检索、单库问答和连接器同步
-- `kb-worker`：异步解析文档、OCR、切分、索引、向量化
+- `kb-service` 内置 worker：异步解析文档、OCR、切分、索引、向量化（由 `KB_RUN_WORKER` 控制）
 - `packages/python/shared`：共享鉴权、存储、检索、追踪、模型调用等基础能力
 
 ### 文档进入系统后的状态
@@ -1988,7 +1992,7 @@ python scripts/dev/reindex-qdrant.py
 - `gateway` 和 `kb-service` 的 `readyz`
 - `artifacts/reports/agent_smoke_report.json`
 - `artifacts/reports/agent_smoke_regression_gate.json`
-- `gateway`、`kb-service`、`kb-worker` 日志
+- `gateway`、`kb-service` 日志（worker 已运行在 `kb-service` 内）
 
 ### 常见脚本入口
 
@@ -2076,9 +2080,8 @@ docs/reference/         API 文档、STAR、面试材料
 
 只有进入 `ready`，检索和问答才最稳定。如果长时间卡住，优先检查：
 
-- `kb-worker` 是否正常运行
-- `kb-service` 的 `readyz`
-- MinIO 和 Qdrant 是否可用
+- `kb-service` 的 `readyz`（包含内置 worker 所需依赖状态）
+- Qdrant 是否可用；若将 `OBJECT_STORAGE_PROVIDER` 切到 `s3`，再检查对应 MinIO/S3 服务
 
 ### 2. 为什么本地目录连接器提示目录不允许
 

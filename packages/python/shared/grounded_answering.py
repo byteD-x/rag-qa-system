@@ -77,6 +77,7 @@ def langchain_messages_to_dicts(messages: list[BaseMessage]) -> list[dict[str, s
 # 与「无证据硬拒答 3/12」的折中;语料为单一合成文档,换真实语料必须重标。
 STRONG_RELEVANCE = 0.68
 WEAK_RELEVANCE = 0.62
+RERANK_SUPPORT_SCORE = 4.0
 STRONG_EVIDENCE_COUNT = 2
 
 
@@ -89,6 +90,42 @@ def _evidence_relevance(item: dict[str, Any]) -> float:
         return float(raw or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _evidence_rerank(item: dict[str, Any]) -> float:
+    raw = (item.get("signal_scores") or {}).get("rerank")
+    try:
+        return float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def dedupe_citations(citations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按文档/版本/章节和视觉上下文合并重复的 section/chunk 证据。"""
+    best: dict[tuple[str, ...], tuple[int, dict[str, Any]]] = {}
+    for index, citation in enumerate(citations):
+        key = (
+            str(citation.get("document_id") or citation.get("corpus_id") or ""),
+            str(citation.get("version_label") or citation.get("version_number") or ""),
+            str(citation.get("section_title") or citation.get("chapter_title") or ""),
+            str(citation.get("region_label") or citation.get("asset_id") or ""),
+            str(citation.get("source_kind") or citation.get("evidence_kind") or ""),
+            str(citation.get("page_number") or ""),
+        )
+        if not any(key):
+            key = ("unit", str(citation.get("unit_id") or index), "", "", "", "")
+        current = best.get(key)
+        current_score = float(((current[1].get("evidence_path") or {}).get("relevance") or 0.0)) if current else -1.0
+        next_score = float(((citation.get("evidence_path") or {}).get("relevance") or 0.0))
+        if current is None or next_score > current_score:
+            best[key] = (index, citation)
+    return [item for _index, item in sorted(best.values(), key=lambda pair: pair[0])]
+
+
+def public_citations(citations: list[dict[str, Any]], *, answer_mode: str, refusal_reason: str) -> list[dict[str, Any]]:
+    if answer_mode == "refusal":
+        return []
+    return dedupe_citations(citations)
 
 
 def _evidence_group_key(item: dict[str, Any]) -> str:
@@ -117,13 +154,14 @@ def classify_evidence(
             best_by_group[key] = value
     relevances = sorted(best_by_group.values(), reverse=True)
     top_relevance = relevances[0] if relevances else 0.0
+    top_rerank = max((_evidence_rerank(item) for item in evidence), default=0.0)
     strong_count = sum(1 for value in relevances if value >= STRONG_RELEVANCE)
     if top_relevance >= STRONG_RELEVANCE and strong_count >= STRONG_EVIDENCE_COUNT:
         score = min(0.95, 0.55 + strong_count * 0.05 + top_relevance * 0.35)
         return "grounded", "grounded", round(score, 4), ""
     if allow_common_knowledge:
         return "common_knowledge", "ungrounded", 0.0, ""
-    if top_relevance >= WEAK_RELEVANCE:
+    if top_relevance >= WEAK_RELEVANCE or top_rerank >= RERANK_SUPPORT_SCORE:
         return "weak_grounded", "partial", round(min(0.72, 0.30 + top_relevance * 0.40), 4), "partial_evidence"
     return "refusal", "insufficient", 0.0, "insufficient_evidence"
 

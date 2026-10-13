@@ -90,7 +90,7 @@
   
   /* 优化指标卡片 */
   .hero-metrics {
-    grid-template-columns: repeat(3, 1fr) !important;
+    grid-template-columns: 1fr !important;
     gap: 8px !important;
   }
   

@@ -152,6 +152,12 @@ services:
       dockerfile: apps/services/api-gateway/Dockerfile
     environment:
       <<: [*common-auth-env, *llm-env]
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:5173}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       GATEWAY_DATABASE_DSN: ${GATEWAY_DATABASE_DSN:-postgresql://rag:rag@postgres:5432/gateway_app}
       GATEWAY_TIMEOUT_SECONDS: ${GATEWAY_TIMEOUT_SECONDS:-180}
       KB_SERVICE_URL: ${KB_SERVICE_URL:-http://kb-service:8200}

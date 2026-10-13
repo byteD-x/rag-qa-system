@@ -52,6 +52,27 @@
             <el-button v-if="exp.is_active" size="small" type="warning" @click="stopExperiment(exp)">停止</el-button>
           </div>
         </div>
+
+    <el-dialog v-model="reportVisible" title="实验报告" width="640px">
+      <div v-if="report" class="report-content">
+        <div class="report-summary">
+          <span>样本 A：{{ report.sample_size?.A || 0 }}</span>
+          <span>样本 B：{{ report.sample_size?.B || 0 }}</span>
+          <el-tag :type="report.is_significant ? 'success' : 'info'">
+            {{ report.is_significant ? '结果显著' : '尚无显著结论' }}
+          </el-tag>
+        </div>
+        <p class="report-recommendation">建议：{{ recommendationLabel(report.recommendation) }}</p>
+        <el-table :data="reportMetricRows" size="small">
+          <el-table-column prop="metric" label="指标" />
+          <el-table-column prop="aMean" label="A 均值" />
+          <el-table-column prop="bMean" label="B 均值" />
+          <el-table-column prop="diff" label="差异" />
+          <el-table-column prop="pValue" label="p 值" />
+        </el-table>
+      </div>
+      <div v-else class="report-loading">正在加载报告...</div>
+    </el-dialog>
       </div>
     </div>
 
@@ -85,12 +106,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue'
 
 const experiments = ref<any[]>([])
 const showCreate = ref(false)
+const reportVisible = ref(false)
+const report = ref<any>(null)
 
 const createForm = ref({
   name: '',
@@ -133,8 +157,26 @@ async function stopExperiment(exp: any) {
 }
 
 function viewReport(exp: any) {
-  void exp
-  ElMessage.info('实验报告功能开发中')
+  report.value = null
+  reportVisible.value = true
+  platformApi.getExperimentReport(exp.experiment_id)
+    .then((res) => { report.value = res.data })
+    .catch(() => {
+      reportVisible.value = false
+      ElMessage.error('加载实验报告失败')
+    })
+}
+
+const reportMetricRows = computed(() => Object.entries(report.value?.metrics || {}).map(([metric, value]: [string, any]) => ({
+  metric,
+  aMean: value.A_mean,
+  bMean: value.B_mean,
+  diff: `${value.diff_pct}%`,
+  pValue: value.p_value
+})))
+
+function recommendationLabel(value: string) {
+  return ({ adopt_variant: '采用实验组 B', keep_control: '保留对照组 A', need_more_data: '继续收集数据' } as Record<string, string>)[value] || '继续收集数据'
 }
 
 function formatDate(ts: number) {
@@ -158,4 +200,8 @@ onMounted(loadData)
 .progress-text { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
 .exp-meta { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px; }
 .exp-actions { display: flex; gap: 8px; }
+.report-content { display: grid; gap: 16px; }
+.report-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; color: var(--el-text-color-secondary); }
+.report-recommendation { margin: 0; color: var(--el-text-color-primary); }
+.report-loading { padding: 24px; text-align: center; color: var(--el-text-color-secondary); }
 </style>

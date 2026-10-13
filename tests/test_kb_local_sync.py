@@ -55,7 +55,7 @@ def test_collect_local_sync_candidates_scans_supported_files_only(monkeypatch, t
     root = tmp_path / "source"
     root.mkdir()
     (root / "policy.txt").write_text("expense approval", encoding="utf-8")
-    (root / "notes.md").write_text("ignore", encoding="utf-8")
+    (root / "notes.exe").write_bytes(b"ignore")
     nested = root / "nested"
     nested.mkdir()
     (nested / "guide.pdf").write_bytes(b"%PDF-1.7")
@@ -64,7 +64,7 @@ def test_collect_local_sync_candidates_scans_supported_files_only(monkeypatch, t
 
     assert [item.relative_path for item in candidates] == ["nested/guide.pdf", "policy.txt"]
     assert all(item.file_type in {"txt", "pdf"} for item in candidates)
-    assert ignored == ["notes.md"]
+    assert ignored == ["notes.exe"]
 
 
 def test_plan_local_directory_sync_marks_create_update_skip_and_soft_delete(tmp_path: Path) -> None:

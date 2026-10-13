@@ -337,6 +337,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     stopStreaming();
+    currentController = new AbortController();
     asking.value = true;
     try {
       const sessionId = await ensureSession();
@@ -381,7 +382,8 @@ export const useChatStore = defineStore('chat', () => {
         execution_mode: executionMode.value,
         focus_hint: Object.keys(activeFocusHint.value).length ? activeFocusHint.value : undefined
       }, {
-        idempotencyKey: createIdempotencyKey(`chat:${sessionId}`)
+        idempotencyKey: createIdempotencyKey(`chat:${sessionId}`),
+        signal: currentController.signal
       });
 
       messages.value = messages.value.filter((item: any) => item.id !== pendingMessageId);
@@ -393,8 +395,8 @@ export const useChatStore = defineStore('chat', () => {
       await loadSessions();
       onScrollRequest(true);
     } catch (error: any) {
-      if (isAbortRequestError(error)) return;
       messages.value = messages.value.filter((item: any) => !(item?.streaming && item.role === 'assistant' && !String(item.content || item.answer || '').trim()));
+      if (isAbortRequestError(error)) return;
       if (isHandledRequestError(error)) return;
       ElMessage.error('问答失败，请重试');
     } finally {

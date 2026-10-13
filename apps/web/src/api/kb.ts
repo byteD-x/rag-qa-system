@@ -1,4 +1,4 @@
-import request, { createIdempotencyKey, streamRequest, type StreamRequestOptions } from './request';
+import request, { createIdempotencyKey, streamRequest, type RequestConfig, type StreamRequestOptions } from './request';
 
 export interface UploadPartPayload {
   part_number: number;
@@ -6,8 +6,8 @@ export interface UploadPartPayload {
   size_bytes: number;
 }
 
-export function listKnowledgeBases() {
-  return request.get('/kb/bases');
+export function listKnowledgeBases(options: RequestConfig = {}) {
+  return request.get('/kb/bases', options as any);
 }
 
 export function listKBJobPositions() {
@@ -764,8 +764,8 @@ export function retrieveDebugKB(data: RetrieveDebugKBPayload) {
 }
 
 // ---- Connectors ----
-export function listConnectors(baseId?: string) {
-  return request.get('/kb/connectors', { params: { base_id: baseId } });
+export function listConnectors(baseId?: string, options: RequestConfig = {}) {
+  return request.get('/kb/connectors', { params: { base_id: baseId }, ...options });
 }
 
 export function createConnector(data: { base_id: string; name: string; connector_type: string; config: any; schedule?: any }) {

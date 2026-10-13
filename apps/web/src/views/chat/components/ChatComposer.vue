@@ -11,8 +11,15 @@
         @keydown.ctrl.enter.prevent="handleAsk"
         @keydown.enter.exact.prevent="handleAsk"
       />
-      <button class="modern-send-btn" :class="{ 'is-active': question.trim().length > 0 }" :disabled="chatStore.asking" @click="handleAsk">
-        <el-icon v-if="chatStore.asking" class="is-loading"><Loading /></el-icon>
+      <button
+        type="button"
+        class="modern-send-btn"
+        :class="{ 'is-active': question.trim().length > 0 || chatStore.asking }"
+        :disabled="!chatStore.asking && !question.trim()"
+        :aria-label="chatStore.asking ? '停止回答' : '发送问题'"
+        @click="chatStore.asking ? chatStore.stopStreaming() : handleAsk()"
+      >
+        <el-icon v-if="chatStore.asking"><Close /></el-icon>
         <el-icon v-else><Position /></el-icon>
       </button>
     </div>
@@ -24,7 +31,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Position, Loading } from '@element-plus/icons-vue';
+import { Position, Close } from '@element-plus/icons-vue';
 import { useChatStore } from '@/store/chat';
 
 const chatStore = useChatStore();
@@ -49,8 +56,9 @@ defineExpose({
 
 <style scoped>
 .composer-container {
+  flex-shrink: 0;
   padding: 0 24px 24px;
-  background: linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 20%);
+  background: var(--bg-panel);
 }
 
 .composer-inner {
@@ -58,8 +66,7 @@ defineExpose({
   margin: 0 auto;
   position: relative;
   background: #fff;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   padding: 4px;
 }
@@ -82,8 +89,8 @@ defineExpose({
   position: absolute;
   right: 12px;
   bottom: 12px;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 8px;
   background: #e5e5e5;
   color: #fff;
@@ -92,7 +99,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   font-size: 16px;
-  transition: all 0.2s;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .modern-send-btn.is-active {
@@ -104,10 +111,21 @@ defineExpose({
   background: var(--blue-700);
 }
 
+.modern-send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .composer-footer {
   text-align: center;
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .composer-container {
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  }
 }
 </style>

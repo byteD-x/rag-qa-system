@@ -6,10 +6,12 @@ from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from shared.grounded_answering import (
     classify_evidence,
+    dedupe_citations,
     dicts_to_langchain_messages,
     ensure_citation_markers,
     evidence_prompt_lines,
     fallback_answer,
+    public_citations,
 )
 from shared.langchain_chat import invoke_prompt_chain, stream_prompt_chain
 from shared.llm_settings import load_llm_settings
@@ -55,7 +57,7 @@ def prepare_query_response(
         use_cache=use_retrieval_cache,
         metadata_filter=metadata_filter,
     )
-    citations = [serialize_evidence(item, corpus_id=f"kb:{base_id}") for item in retrieval.items]
+    citations = dedupe_citations([serialize_evidence(item, corpus_id=f"kb:{base_id}") for item in retrieval.items])
     answer_mode, evidence_status, grounding_score, refusal_reason = classify_evidence(
         citations,
         allow_common_knowledge=False,
@@ -79,6 +81,7 @@ def prepare_query_response(
         "question": question,
         "strategy_used": strategy,
         "retrieval": retrieval.stats.as_dict(),
+        # 内部阶段保留候选，供安全分析、模型兜底和 trace 调试；最终响应再过滤拒答引用。
         "citations": citations,
         "answer_mode": answer_mode,
         "evidence_status": evidence_status,
@@ -243,6 +246,11 @@ def _finalize_query_response(*, prepared: dict[str, Any], answer: str) -> dict[s
         result["safety"] = prepared["safety"]
         result["trace_id"] = prepared["trace_id"]
         return result
+    citations = public_citations(
+        prepared["citations"],
+        answer_mode=str(prepared.get("answer_mode") or ""),
+        refusal_reason=str(prepared.get("refusal_reason") or ""),
+    )
     return {
         "answer": answer,
         "answer_mode": prepared["answer_mode"],
@@ -251,8 +259,8 @@ def _finalize_query_response(*, prepared: dict[str, Any], answer: str) -> dict[s
         "grounding_score": prepared["grounding_score"],
         "refusal_reason": prepared["refusal_reason"],
         "safety": prepared["safety"],
-        "citations": prepared["citations"],
-        "evidence_path": [item["evidence_path"] for item in prepared["citations"]],
+        "citations": citations,
+        "evidence_path": [item["evidence_path"] for item in citations],
         "retrieval": prepared["retrieval"],
         "trace_id": prepared["trace_id"],
     }
