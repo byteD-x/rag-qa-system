@@ -1,0 +1,891 @@
+[
+  {
+    "File": "style.css",
+    "Lines": 13,
+    "Range": "193-205",
+    "Kind": "dead",
+    "Selector": ".page-hero"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "207-210",
+    "Kind": "dead",
+    "Selector": ".page-hero > *"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "212-214",
+    "Kind": "dead",
+    "Selector": ".hero-copy"
+  },
+  {
+    "File": "style.css",
+    "Lines": 14,
+    "Range": "216-229",
+    "Kind": "dead",
+    "Selector": ".hero-kicker"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "231-235",
+    "Kind": "dead",
+    "Selector": ".hero-title"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "237-242",
+    "Kind": "dead",
+    "Selector": ".hero-subtitle"
+  },
+  {
+    "File": "style.css",
+    "Lines": 7,
+    "Range": "244-250",
+    "Kind": "dead",
+    "Selector": ".hero-actions"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "252-257",
+    "Kind": "dead",
+    "Selector": ".hero-metrics"
+  },
+  {
+    "File": "style.css",
+    "Lines": 7,
+    "Range": "259-265",
+    "Kind": "dead",
+    "Selector": ".hero-metric"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "267-272",
+    "Kind": "dead",
+    "Selector": ".hero-metric strong"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "274-277",
+    "Kind": "dead",
+    "Selector": ".hero-metric span"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "279-283",
+    "Kind": "dead",
+    "Selector": ".page-grid-two"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "285-289",
+    "Kind": "dead",
+    "Selector": ".page-grid-three"
+  },
+  {
+    "File": "style.css",
+    "Lines": 7,
+    "Range": "291-297",
+    "Kind": "dead",
+    "Selector": ".aside-stack, .card-stack, .soft-list"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "299-304",
+    "Kind": "dead",
+    "Selector": ".surface-card"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "306-308",
+    "Kind": "dead",
+    "Selector": ".surface-card:hover"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "310-313",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__header"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "315-317",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__body"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "319-324",
+    "Kind": "dead",
+    "Selector": ".section-head"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "326-329",
+    "Kind": "dead",
+    "Selector": ".section-head h2, .section-head h3"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "331-335",
+    "Kind": "dead",
+    "Selector": ".section-head p"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "337-341",
+    "Kind": "dead",
+    "Selector": ".metric-grid"
+  },
+  {
+    "File": "style.css",
+    "Lines": 8,
+    "Range": "343-350",
+    "Kind": "dead",
+    "Selector": ".metric-card"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "352-355",
+    "Kind": "dead",
+    "Selector": ".metric-card:hover"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "357-361",
+    "Kind": "dead",
+    "Selector": ".metric-card span"
+  },
+  {
+    "File": "style.css",
+    "Lines": 7,
+    "Range": "363-369",
+    "Kind": "dead",
+    "Selector": ".metric-card strong"
+  },
+  {
+    "File": "style.css",
+    "Lines": 8,
+    "Range": "371-378",
+    "Kind": "dead",
+    "Selector": ".interactive-card"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "380-383",
+    "Kind": "dead",
+    "Selector": ".interactive-card:hover"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "385-389",
+    "Kind": "dead",
+    "Selector": ".insight-strip"
+  },
+  {
+    "File": "style.css",
+    "Lines": 7,
+    "Range": "391-397",
+    "Kind": "dead",
+    "Selector": ".insight-card"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "399-402",
+    "Kind": "dead",
+    "Selector": ".insight-card > *"
+  },
+  {
+    "File": "style.css",
+    "Lines": 8,
+    "Range": "404-411",
+    "Kind": "dead",
+    "Selector": ".insight-card span"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "413-418",
+    "Kind": "dead",
+    "Selector": ".insight-card strong"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "420-425",
+    "Kind": "dead",
+    "Selector": ".insight-card p"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "427-431",
+    "Kind": "dead",
+    "Selector": ".detail-list"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "460-462",
+    "Kind": "dead",
+    "Selector": ".label-mono"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "464-466",
+    "Kind": "dead",
+    "Selector": ".subtle-text"
+  },
+  {
+    "File": "style.css",
+    "Lines": 5,
+    "Range": "468-472",
+    "Kind": "dead",
+    "Selector": ".pill-row"
+  },
+  {
+    "File": "style.css",
+    "Lines": 10,
+    "Range": "474-483",
+    "Kind": "dead",
+    "Selector": ".empty-placeholder"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "501-504",
+    "Kind": "dead",
+    "Selector": ".slide-in-right-enter-active, .slide-in-right-leave-active"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "506-509",
+    "Kind": "dead",
+    "Selector": ".slide-in-right-enter-from"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "511-514",
+    "Kind": "dead",
+    "Selector": ".slide-in-right-leave-to"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "516-519",
+    "Kind": "dead",
+    "Selector": ".slide-in-up-enter-active, .slide-in-up-leave-active"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "521-524",
+    "Kind": "dead",
+    "Selector": ".slide-in-up-enter-from"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "526-529",
+    "Kind": "dead",
+    "Selector": ".slide-in-up-leave-to"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "532-535",
+    "Kind": "dead",
+    "Selector": ".scale-in-enter-active, .scale-in-leave-active"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "537-540",
+    "Kind": "dead",
+    "Selector": ".scale-in-enter-from"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "542-545",
+    "Kind": "dead",
+    "Selector": ".scale-in-leave-to"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "548-551",
+    "Kind": "dead",
+    "Selector": ".fade-enter-active, .fade-leave-active"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "553-556",
+    "Kind": "dead",
+    "Selector": ".fade-enter-from, .fade-leave-to"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "559-562",
+    "Kind": "dead",
+    "Selector": ".stagger-item"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "585-587",
+    "Kind": "dead",
+    "Selector": ".animate-pulse"
+  },
+  {
+    "File": "style.css",
+    "Lines": 10,
+    "Range": "599-608",
+    "Kind": "dead",
+    "Selector": ".shimmer"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "620-622",
+    "Kind": "dead",
+    "Selector": ".animate-bounce"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "634-636",
+    "Kind": "dead",
+    "Selector": ".animate-spin"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "710-712",
+    "Kind": "dead",
+    "Selector": ".custom-form-error"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "721-726",
+    "Kind": "dead",
+    "Selector": "mark.highlight"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "734-736",
+    "Kind": "dead-el",
+    "Selector": ".el-empty"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "761-763",
+    "Kind": "dead",
+    "Selector": ".page-grid-three"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "765-767",
+    "Kind": "dead",
+    "Selector": ".insight-strip"
+  },
+  {
+    "File": "style.css",
+    "Lines": 6,
+    "Range": "771-776",
+    "Kind": "dead",
+    "Selector": ".page-hero, .page-grid-two, .page-grid-three"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "778-780",
+    "Kind": "dead",
+    "Selector": ".insight-strip"
+  },
+  {
+    "File": "style.css",
+    "Lines": 4,
+    "Range": "788-791",
+    "Kind": "dead",
+    "Selector": ".page-hero"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "793-795",
+    "Kind": "dead",
+    "Selector": ".hero-title"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "797-799",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__header"
+  },
+  {
+    "File": "style.css",
+    "Lines": 3,
+    "Range": "801-803",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__body"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "7-9",
+    "Kind": "dead",
+    "Selector": ".safe-area-top"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "11-13",
+    "Kind": "dead",
+    "Selector": ".safe-area-bottom"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "15-17",
+    "Kind": "dead",
+    "Selector": ".safe-area-left"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "19-21",
+    "Kind": "dead",
+    "Selector": ".safe-area-right"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 7,
+    "Range": "24-30",
+    "Kind": "dead",
+    "Selector": ".mobile-safe-bottom"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "59-62",
+    "Kind": "dead",
+    "Selector": ".hero-title"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "64-66",
+    "Kind": "dead",
+    "Selector": ".section-head h3"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "69-71",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__header"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "73-75",
+    "Kind": "dead",
+    "Selector": ".surface-card .el-card__body"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 6,
+    "Range": "78-83",
+    "Kind": "dead",
+    "Selector": ".hero-actions, .section-head .el-button, .base-actions, .upload-actions"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 5,
+    "Range": "85-89",
+    "Kind": "dead",
+    "Selector": ".hero-actions .el-button, .section-head .el-button"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "92-95",
+    "Kind": "dead",
+    "Selector": ".hero-metrics"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "97-99",
+    "Kind": "dead",
+    "Selector": ".hero-metric"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "101-103",
+    "Kind": "dead",
+    "Selector": ".hero-metric strong"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "105-107",
+    "Kind": "dead",
+    "Selector": ".hero-metric span"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "114-116",
+    "Kind": "dead",
+    "Selector": ".session-panel"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "118-120",
+    "Kind": "dead",
+    "Selector": ".conversation-panel"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "122-124",
+    "Kind": "dead",
+    "Selector": ".aside-stack"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "132-134",
+    "Kind": "dead",
+    "Selector": ".message-meta"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 7,
+    "Range": "137-143",
+    "Kind": "dead",
+    "Selector": ".composer-panel"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "146-148",
+    "Kind": "dead",
+    "Selector": ".upload-dropzone"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "151-153",
+    "Kind": "dead",
+    "Selector": ".document-grid"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "156-158",
+    "Kind": "dead",
+    "Selector": ".insight-strip"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "161-163",
+    "Kind": "dead",
+    "Selector": ".quick-base-row"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "205-207",
+    "Kind": "dead",
+    "Selector": ".page-grid-three"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "209-211",
+    "Kind": "dead",
+    "Selector": ".dashboard-metrics"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "241-244",
+    "Kind": "dead",
+    "Selector": ".conversation-panel"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "270-272",
+    "Kind": "dead",
+    "Selector": ".surface-card"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "295-297",
+    "Kind": "dead-el",
+    "Selector": ".el-loading-mask"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "299-301",
+    "Kind": "dead-el",
+    "Selector": ".el-loading-spinner"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "304-307",
+    "Kind": "dead",
+    "Selector": ".custom-scrollbar"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "309-312",
+    "Kind": "dead",
+    "Selector": ".custom-scrollbar::-webkit-scrollbar"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "314-316",
+    "Kind": "dead",
+    "Selector": ".custom-scrollbar::-webkit-scrollbar-track"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "318-321",
+    "Kind": "dead",
+    "Selector": ".custom-scrollbar::-webkit-scrollbar-thumb"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "323-325",
+    "Kind": "dead",
+    "Selector": ".custom-scrollbar::-webkit-scrollbar-thumb:hover"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "328-330",
+    "Kind": "dead",
+    "Selector": ".touch-scroll"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "408-411",
+    "Kind": "dead-el",
+    "Selector": ".el-link"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "413-415",
+    "Kind": "dead-el",
+    "Selector": ".el-link:hover"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 5,
+    "Range": "496-500",
+    "Kind": "dead",
+    "Selector": ".el-cascader-menu__item.in-active-path, .el-cascader-menu__item.is-active"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "569-572",
+    "Kind": "dead-el",
+    "Selector": ".el-video-player"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "575-577",
+    "Kind": "dead-el",
+    "Selector": ".el-audio-player"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "606-609",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-dragger"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "611-613",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-dragger:hover"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "636-639",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.is-finish .el-upload-list__item-name"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "642-645",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item.is-exception .el-icon-close"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "647-650",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item.is-exception .el-icon-close:hover"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "653-655",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "662-665",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item .el-icon-document"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "668-670",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item .el-icon-picture-outline"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "672-674",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item .el-icon-video-camera"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "676-678",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list__item .el-icon-headset"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 5,
+    "Range": "774-778",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "781-783",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list::-webkit-scrollbar"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "785-788",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list::-webkit-scrollbar-thumb"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 8,
+    "Range": "791-798",
+    "Kind": "dead-el",
+    "Selector": ".el-upload-list:empty::before"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "801-803",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.ui-sortable-handle"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "805-807",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.ui-sortable-handle:active"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 6,
+    "Range": "810-815",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.ui-sortable-placeholder"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 4,
+    "Range": "818-821",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.ui-sortable-helper"
+  },
+  {
+    "File": "styles/responsive-enhancements.css",
+    "Lines": 3,
+    "Range": "824-826",
+    "Kind": "dead",
+    "Selector": ".el-upload-list__item.ui-sortable-update"
+  },
+  {
+    "File": "styles/theme-extras.css",
+    "Lines": 6,
+    "Range": "20-25",
+    "Kind": "dead",
+    "Selector": ".tech-glow, .tech-glow:hover, .tech-glow-hover, .tech-glow-hover:hover"
+  }
+]

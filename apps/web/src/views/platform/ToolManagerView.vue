@@ -244,7 +244,7 @@ onMounted(() => {
 }
 
 .tool-card:hover {
-  border-color: var(--blue-400);
+  border-color: var(--blue-500);
 }
 
 .tool-header {

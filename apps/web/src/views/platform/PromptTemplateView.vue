@@ -256,7 +256,7 @@ onMounted(() => {
   flex: 1;
   font-size: 13px;
   color: var(--text-secondary);
-  background: var(--bg-body);
+  background: var(--bg-page);
   border-radius: var(--radius-sm);
   padding: 12px;
   white-space: pre-wrap;

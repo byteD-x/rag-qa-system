@@ -261,7 +261,7 @@ onMounted(() => { loadData(); });
 .invalidate-item { display: flex; align-items: center; gap: 12px; }
 .invalidate-item label { font-size: 13px; color: var(--text-primary); white-space: nowrap; flex-shrink: 0; width: 100px; }
 .invalidate-item .el-input { flex: 1; max-width: 300px; }
-.danger-hint { font-size: 12px; color: var(--red-500); }
+.danger-hint { font-size: 12px; color: var(--el-color-danger); }
 
 /* 缓存层级说明 */
 .cache-layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }

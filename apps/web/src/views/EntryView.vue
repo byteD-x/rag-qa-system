@@ -556,11 +556,11 @@ const go = (path: string) => {
 }
 
 .sat-bar.up {
-  background: var(--success-color, #67c23a);
+  background: var(--el-color-success);
 }
 
 .sat-bar.down {
-  background: var(--danger-color, #f56c6c);
+  background: var(--el-color-danger);
 }
 
 .sat-legend {
@@ -570,8 +570,8 @@ const go = (path: string) => {
   font-size: 12px;
 }
 
-.leg-up { color: var(--success-color, #67c23a); }
-.leg-down { color: var(--danger-color, #f56c6c); }
+.leg-up { color: var(--el-color-success); }
+.leg-down { color: var(--el-color-danger); }
 
 .zero-hit-list {
   list-style: none;
@@ -687,8 +687,8 @@ const go = (path: string) => {
 }
 .degraded-hint {
   font-size: 12px;
-  color: var(--warning-color, #e6a23c);
-  background: var(--warning-bg, #fdf6ec);
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -726,7 +726,7 @@ const go = (path: string) => {
   flex-shrink: 0;
 }
 .success-text .f-value {
-  color: var(--success-color, #67c23a);
+  color: var(--el-color-success);
 }
 
 /* Health & Quality Grid */
@@ -792,11 +792,11 @@ const go = (path: string) => {
 }
 .health-alert.danger {
   background: rgba(245, 108, 108, 0.1);
-  color: var(--danger-color, #f56c6c);
+  color: var(--el-color-danger);
 }
 .health-alert.warning {
   background: rgba(230, 162, 60, 0.1);
-  color: var(--warning-color, #e6a23c);
+  color: var(--el-color-warning);
 }
 .health-alert.info {
   background: rgba(64, 158, 255, 0.1);
@@ -804,7 +804,7 @@ const go = (path: string) => {
 }
 .health-alert.success {
   background: rgba(103, 194, 58, 0.1);
-  color: var(--success-color, #67c23a);
+  color: var(--el-color-success);
 }
 
 /* Quality Bars */
@@ -836,9 +836,9 @@ const go = (path: string) => {
   height: 100%;
   border-radius: 4px;
 }
-.q-fill.success { background: var(--success-color, #67c23a); }
-.q-fill.warning { background: var(--warning-color, #e6a23c); }
-.q-fill.danger { background: var(--danger-color, #f56c6c); }
+.q-fill.success { background: var(--el-color-success); }
+.q-fill.warning { background: var(--el-color-warning); }
+.q-fill.danger { background: var(--el-color-danger); }
 .q-fill.info { background: var(--blue-600); }
 .q-percent {
   width: 40px;

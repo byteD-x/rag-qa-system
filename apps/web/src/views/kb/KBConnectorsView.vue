@@ -458,7 +458,7 @@ onMounted(() => {
   margin-top: 10px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-panel) 92%);
+  background: color-mix(in srgb, var(--blue-600) 8%, var(--bg-panel) 92%);
   color: var(--text-secondary);
   font-size: 12px;
   display: grid;

@@ -197,7 +197,7 @@ onMounted(() => { loadScenes(); });
 .scene-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }
 
 .scene-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; display: flex; flex-direction: column; gap: 14px; transition: border-color var(--transition-base), box-shadow var(--transition-base); }
-.scene-card:hover { border-color: var(--blue-400); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.scene-card:hover { border-color: var(--blue-500); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
 .scene-card.active { border-color: var(--blue-500); box-shadow: 0 2px 12px rgba(59,130,246,0.2); }
 
 .scene-header { display: flex; gap: 12px; }

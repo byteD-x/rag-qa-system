@@ -262,7 +262,7 @@ onMounted(() => {
 
 .chunk-card.is-disabled {
   opacity: 0.6;
-  background: var(--bg-body);
+  background: var(--bg-page);
 }
 
 .chunk-header {

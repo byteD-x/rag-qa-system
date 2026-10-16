@@ -202,7 +202,7 @@ onMounted(() => { loadData(); });
 
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
 .stat-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; text-align: center; }
-.stat-card.primary { border-color: var(--blue-400); background: #f0f7ff; }
+.stat-card.primary { border-color: var(--blue-500); background: #f0f7ff; }
 .stat-value { font-size: 22px; font-weight: 700; color: var(--blue-600); }
 .stat-card.primary .stat-value { font-size: 26px; }
 .stat-label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
@@ -212,7 +212,7 @@ onMounted(() => { loadData(); });
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .section-header h3 { margin: 0; font-size: 15px; color: var(--text-primary); }
 .health-summary-text { font-size: 13px; color: var(--text-secondary); }
-.circuit-warn { color: var(--red-500); font-weight: 600; }
+.circuit-warn { color: var(--el-color-danger); font-weight: 600; }
 
 /* 模型成本 */
 .model-cost-grid { display: flex; flex-direction: column; gap: 10px; }
@@ -220,13 +220,13 @@ onMounted(() => { loadData(); });
 .mc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .mc-header strong { font-size: 13px; }
 .mc-bar-wrapper { height: 6px; background: var(--bg-panel-muted); border-radius: 3px; margin-bottom: 6px; overflow: hidden; }
-.mc-bar { height: 100%; background: linear-gradient(90deg, var(--blue-400), var(--blue-600)); border-radius: 3px; transition: width 0.5s; }
+.mc-bar { height: 100%; background: linear-gradient(90deg, var(--blue-500), var(--blue-600)); border-radius: 3px; transition: width 0.5s; }
 .mc-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
 
 /* 模型健康 */
 .model-health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .health-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; }
-.health-card.circuit-open { border-color: var(--red-400); background: #fff5f5; }
+.health-card.circuit-open { border-color: var(--el-color-danger); background: #fff5f5; }
 .health-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .health-header strong { font-size: 13px; }
 .health-metric { margin-bottom: 8px; }
@@ -243,13 +243,13 @@ onMounted(() => { loadData(); });
 .scene-name { font-size: 13px; color: var(--text-primary); }
 .scene-pct { font-size: 11px; color: var(--text-muted); }
 .scene-bar-bg { flex: 1; height: 20px; background: var(--bg-panel-muted); border-radius: 4px; overflow: hidden; }
-.scene-bar { height: 100%; background: var(--blue-400); border-radius: 4px; transition: width 0.5s; }
+.scene-bar { height: 100%; background: var(--blue-500); border-radius: 4px; transition: width 0.5s; }
 .scene-cost { width: 80px; text-align: right; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 
 /* 每日趋势 */
 .daily-trend { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding: 8px 0; }
 .daily-bar-item { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; }
-.daily-bar { width: 100%; max-width: 32px; background: var(--blue-400); border-radius: 3px 3px 0 0; min-height: 2px; transition: height 0.3s; cursor: pointer; }
+.daily-bar { width: 100%; max-width: 32px; background: var(--blue-500); border-radius: 3px 3px 0 0; min-height: 2px; transition: height 0.3s; cursor: pointer; }
 .daily-bar:hover { background: var(--blue-600); }
 .daily-label { font-size: 9px; color: var(--text-muted); margin-top: 4px; transform: rotate(-45deg); transform-origin: top left; }
 </style>

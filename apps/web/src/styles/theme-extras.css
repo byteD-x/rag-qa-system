@@ -17,12 +17,6 @@
 }
 
 /* tech-glow / tech-glow-hover 保留类名兼容，但无发光效果 */
-.tech-glow,
-.tech-glow:hover,
-.tech-glow-hover,
-.tech-glow-hover:hover {
-  box-shadow: none !important;
-}
 
 /* Element 弹窗：克制阴影，精致边框 */
 .el-dialog {

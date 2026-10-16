@@ -14,11 +14,6 @@
           </div>
         </div>
 
-        <div class="sidebar-focus">
-          <span class="sidebar-focus-label">当前页</span>
-          <span class="sidebar-focus-title">{{ routeTitle }}</span>
-        </div>
-
         <nav class="nav-stack" aria-label="主导航">
           <button
             v-for="item in navItemsPrimaryFiltered"
@@ -89,7 +84,6 @@
                   {{ item }}
                 </span>
               </div>
-              <h1>{{ routeTitle }}</h1>
             </div>
           </div>
           
@@ -415,28 +409,6 @@ const handleLogout = () => {
   line-height: 1.65;
 }
 
-.sidebar-focus {
-  padding: 12px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel-muted);
-  border: 1px solid var(--border-color);
-}
-
-.sidebar-focus-label {
-  display: block;
-  font-size: var(--text-caption, 0.75rem);
-  color: var(--text-muted);
-  margin-bottom: 4px;
-  font-weight: 500;
-}
-
-.sidebar-focus-title {
-  font-size: var(--text-body, 0.9375rem);
-  font-weight: 600;
-  color: var(--text-primary);
-  line-height: 1.3;
-}
-
 .nav-stack {
   display: flex;
   flex-direction: column;
@@ -550,10 +522,10 @@ const handleLogout = () => {
   top: 0;
   z-index: 6;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding: 14px 16px 16px 12px;
+  padding: 10px 16px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-color);
 }
@@ -561,7 +533,7 @@ const handleLogout = () => {
 
 .topbar-leading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
   flex: 1 1 0%;
   min-width: 0;
@@ -588,7 +560,6 @@ const handleLogout = () => {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 10px;
-  margin-bottom: 4px;
 }
 
 .breadcrumb-item {
@@ -605,13 +576,6 @@ const handleLogout = () => {
   content: '/';
   color: var(--border-strong);
   margin-left: 4px;
-}
-
-.topbar-leading h1 {
-  font-size: var(--text-h2, 1.125rem);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
 }
 
 .workspace-content {

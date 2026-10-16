@@ -350,7 +350,7 @@ const getScoreClass = (score: number) => {
 
 .source-link:hover {
   color: var(--blue-600);
-  border-color: var(--blue-200);
+  border-color: var(--blue-500);
   background: var(--blue-50);
 }
 

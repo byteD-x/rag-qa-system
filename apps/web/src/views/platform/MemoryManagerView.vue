@@ -364,7 +364,7 @@ onMounted(() => {
 }
 
 .subject-count {
-  background: var(--blue-100);
+  background: var(--blue-50);
   color: var(--blue-600);
   border-radius: 10px;
   padding: 1px 8px;

@@ -425,7 +425,7 @@ onMounted(() => {
 }
 
 .run-card:hover {
-  border-color: var(--blue-400);
+  border-color: var(--blue-500);
 }
 
 .run-card.selected {
@@ -514,12 +514,12 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
-  border-left: 3px solid var(--blue-400);
+  border-left: 3px solid var(--blue-500);
 }
 
-.dag-node.completed { border-left-color: var(--green-400); }
-.dag-node.running { border-left-color: var(--orange-400); }
-.dag-node.failed { border-left-color: var(--red-400); }
+.dag-node.completed { border-left-color: var(--el-color-success); }
+.dag-node.running { border-left-color: var(--el-color-warning); }
+.dag-node.failed { border-left-color: var(--el-color-danger); }
 
 .node-header {
   display: flex;
@@ -576,8 +576,8 @@ onMounted(() => {
   padding: 16px;
 }
 
-.reflection-card.passed { border-left: 3px solid var(--green-400); }
-.reflection-card.failed { border-left: 3px solid var(--red-400); }
+.reflection-card.passed { border-left: 3px solid var(--el-color-success); }
+.reflection-card.failed { border-left: 3px solid var(--el-color-danger); }
 
 .reflection-scores {
   display: flex;
@@ -608,7 +608,7 @@ onMounted(() => {
   margin-top: 10px;
 }
 
-.reflection-issues strong { color: var(--red-500); font-size: 13px; }
+.reflection-issues strong { color: var(--el-color-danger); font-size: 13px; }
 .reflection-suggestions strong { color: var(--blue-500); font-size: 13px; }
 
 .reflection-issues ul,
@@ -617,7 +617,7 @@ onMounted(() => {
   padding: 0;
 }
 
-.reflection-issues li { color: var(--red-600); font-size: 12px; }
+.reflection-issues li { color: var(--el-color-danger); font-size: 12px; }
 .reflection-suggestions li { color: var(--blue-600); font-size: 12px; }
 
 /* 性能指标 */

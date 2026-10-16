@@ -244,7 +244,7 @@ onMounted(() => {
 }
 
 .agent-card:hover {
-  border-color: var(--blue-400);
+  border-color: var(--blue-500);
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
@@ -258,7 +258,7 @@ onMounted(() => {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: var(--blue-100);
+  background: var(--blue-50);
   color: var(--blue-600);
   display: flex;
   align-items: center;

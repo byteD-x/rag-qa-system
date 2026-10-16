@@ -333,7 +333,7 @@ onBeforeUnmount(() => {
 }
 
 .suggest-card:hover {
-  border-color: var(--blue-400);
+  border-color: var(--blue-500);
   box-shadow: var(--shadow-sm);
   transform: translateY(-2px);
 }

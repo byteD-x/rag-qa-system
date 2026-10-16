@@ -919,7 +919,7 @@ onMounted(loadAllData);
 .summary-value { font-size: 28px; color: var(--text-primary); }
 .toolbar-row, .panel-head, .actions, .toolbar-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .toolbar-group, .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.degraded-text, .note { color: var(--warning-color, #e6a23c); }
+.degraded-text, .note { color: var(--el-color-warning); }
 .panel, .list, .item-body { display: flex; flex-direction: column; gap: 12px; }
 .detail-stack { display: flex; flex-direction: column; gap: 12px; }
 .list { gap: 10px; }
