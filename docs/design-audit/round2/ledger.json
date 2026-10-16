@@ -1,0 +1,2157 @@
+{
+  "source": "docs/design-audit/round1/*.md",
+  "report_count": 23,
+  "reports": [
+    {
+      "report": "01-shell",
+      "title": "01 工作台外壳（侧边栏 + 顶栏 + 页面过渡 + 应用入口）",
+      "task_steps": 8,
+      "elements": {
+        "necessary": 13,
+        "deletable": 10,
+        "mergeable": 5,
+        "sinkable": 0,
+        "rows": 28,
+        "raw_tags": {
+          "必要": 13,
+          "可删": 10,
+          "可合并": 5
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/layouts/MainLayout.vue:92 与 apps/web/src/components/PageHeaderCompact.vue:4",
+          "gain": "少一次判断",
+          "cost_risk": "24 个视图各自渲染一个 `<h1>`（apps/web/src/views/EntryView.vue:4、apps/web/src/views/AuditView.vue:3、apps/web/src/views/kb/KBGovernanceView.vue:3 等），外壳顶栏又渲染一个（apps/web/src/layouts/MainLayout.vue:92），同屏两个一级标题；其中 6 组名称还不一致：apps/web/src/router/index.ts:189「Agent 工作台」vs apps/web/src/views/platform/AgentProfileView.vue:3「Agent 智能体市场」，apps/web/src/router/index.ts:200 vs apps/web/src/views/platform/PromptTemplateView.vue:3，apps/web/src/router/index.ts:135 vs apps/web/src/views/kb/KBOperationsView.vue:3，apps/web/src/router/index.ts:146 vs apps/web/src/views/kb/RetrievalDebuggerView.vue:3，apps/web/src/router/index.ts:124 vs apps/web/src/views/kb/KBConnectorsView.vue:3，apps/web/src/router/index.ts:310 vs apps/web/src/router/index.ts:312。风险：PageHeaderCompact 的 title 在 3 处承担「当前对象名」（apps/web/src/views/kb/KBUploadView.vue:3、apps/web/src/views/kb/KBDocumentView.vue:3、apps/web/src/views/kb/KBChunkReviewView.vue:3），不能直接删 prop，需改挂到已有 subtitle（apps/web/src/components/PageHeaderCompact.vue:5-7）；改动落在被 24 个界面共用的组件上，超出本界面范围，需与各界面负责人协调；无测试断言该 h1（apps/web/src/components/PageHeaderCompact.test.ts:7-16 只断言 subtitle），回归不会被自动发现"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/layouts/MainLayout.vue:303-306",
+          "gain": "少一次判断",
+          "cost_risk": "`activeNavPath` 在未匹配到任何导航项时兜底返回 `/workspace/entry`（该值是字面量而非「无匹配」），凡是路径不以任一导航项开头的路由都会把「业务总览」错高亮成当前页：文档详情与切片管理（apps/web/src/router/index.ts:162、apps/web/src/router/index.ts:173，入口见 apps/web/src/views/kb/KBGovernanceView.vue:814、apps/web/src/views/kb/KBUploadView.vue:637、apps/web/src/views/kb/KBOperationsView.vue:112）、无权限页（apps/web/src/router/index.ts:65）、以及 12 条未入导航的 platform/* 路由（apps/web/src/router/index.ts:216-347）。风险：需要为这些深层路由声明所属导航项（在 apps/web/src/router/index.ts 补 meta 或改匹配规则），漏声明的后果是「无高亮」而非「错高亮」；若同时执行提案 5，需要维护的映射只剩下文档详情/切片管理/无权限 3 条；apps/web/src 下不存在覆盖 MainLayout 的测试，只能人工回归"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/layouts/MainLayout.vue:103 与 apps/web/src/styles/theme-extras.css:131-144",
+          "gain": "少一次判断",
+          "cost_risk": "每次工作台内导航先播旧页 250ms 淡出（内容区空白、无加载指示）再播新页 250ms 淡入，规则要求数十次/天的切换「极简或砍掉」。风险：失去页面切换的连续性提示，长列表页可能出现内容突然整屏替换的观感（靠 h1 标题变化补偿）；需人工回归 30+ 路由；若产品坚持保留过渡，退路是删掉 `mode=\"out-in\"` 并只留 opacity（≤150ms），不要用 spinner 补偿"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/layouts/MainLayout.vue:17-20 与 apps/web/src/layouts/MainLayout.vue:83-91",
+          "gain": "少一次判断",
+          "cost_risk": "routeTitle 同屏出现三次（apps/web/src/layouts/MainLayout.vue:19 侧栏「当前页」、apps/web/src/layouts/MainLayout.vue:89 面包屑尾项、apps/web/src/layouts/MainLayout.vue:92 顶栏 h1），且面包屑整行不可点击、无法用于跳转（apps/web/src/layouts/MainLayout.vue:84-90）。风险：深度≥3 的页面（apps/web/src/router/index.ts:169、apps/web/src/router/index.ts:180）会失去「所属分区」的文字线索，需要侧栏高亮准确来补偿，因此提案 2 必须先落地；删除后侧栏顶部少一块内容，纵向节奏只能靠 apps/web/src/layouts/MainLayout.vue:356-363 的 `gap:16px` 维持；相关 scoped 样式需连带删除（apps/web/src/layouts/MainLayout.vue:418-438、apps/web/src/layouts/MainLayout.vue:586-608）"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/router/index.ts:216-347",
+          "gain": "少一次判断",
+          "cost_risk": "12 条已注册路由全仓零入口：`platform/monitor`、`platform/tools`、`platform/memory`、`platform/cost`、`platform/scenes`、`platform/cache`、`platform/apikeys`、`platform/webhooks`、`platform/pii`、`platform/market`、`platform/experiments`、`platform/orchestration`。模板与脚本中不存在任何指向它们的 `router.push` / `router-link`（仓库内检索这些路径无命中），侧栏 12 项里也没有它们（apps/web/src/layouts/MainLayout.vue:209-301），其中 3 页还是 v-loading 指令的唯一使用点。风险：这些页面实现完整（如 apps/web/src/views/platform/AgentMonitorView.vue、apps/web/src/views/platform/CostDashboardView.vue），删路由等于让能力下线，属产品决策；若已有外部收藏或文档分享这些 URL，删除会 404；替代方案是补 1 个聚合入口，但新增元素必须偿还——偿还对象即本表第 4 条的「当前页」块与面包屑行"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 可打断性",
+          "location": "apps/web/src/layouts/MainLayout.vue:103",
+          "finding": "工作台内每次路由切换都跑 `mode=\"out-in\"`：先 250ms 旧页淡出（内容区空白、无加载指示），再 250ms 新页淡入；这是数十次/天的操作，规则要求极简或砍掉，且离开阶段是纯等待",
+          "fix": "删除该过渡，或去掉 `mode=\"out-in\"` 只留单段 opacity（≤150ms）；不要新增 spinner/骨架补偿"
+        },
+        {
+          "severity": "HIGH",
+          "category": "缓动与时长 / 一致性与 token",
+          "location": "apps/web/src/styles/theme-extras.css:133",
+          "finding": "`transition: opacity 0.25s ease, transform 0.25s ease`：使用了被规则禁止的 CSS 预设曲线 `ease`，并给内容整块引入 6px 位移；时长与曲线都没走 `--transition-*` token（apps/web/src/style.css:1-84）",
+          "fix": "删位移；若保留则曲线改 `cubic-bezier(0.23,1,0.32,1)`、时长 ≤200ms，并引用现有 transition token"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长 / 性能",
+          "location": "apps/web/src/style.css:485-498（由 apps/web/src/App.vue:4 触发）",
+          "finding": "换壳过渡 0.35s 超出「UI 动效一律 <300ms」，入场同时位移 16px 与 scale(0.98)；触发点是登录↔工作台，属罕见频次，优先级低于页面过渡",
+          "fix": "只保留 opacity（≤200ms，曲线 0.23,1,0.32,1），去掉 16px 位移与缩放；不要动布局属性"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "物理性与原点 / 目的与频次",
+          "location": "apps/web/src/components/ThemeToggle.vue:117-130",
+          "finding": "icon-spin 入场从 `rotate(-180deg) scale(0.5)` 起（低于入场下限 scale(0.95)），时长 0.3s（未 <300ms），且 `mode=\"out-in\"`（apps/web/src/components/ThemeToggle.vue:4）让一次换图标跑两段约 600ms；旋转与缩放不携带任何空间或状态信息，主题状态已由图标本身与菜单勾选（apps/web/src/components/ThemeToggle.vue:24-26）表达",
+          "fix": "删除旋转与缩放，只保留 opacity 交叉淡入（≤150ms）；或整段删除，图标直接切换"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长",
+          "location": "apps/web/src/components/ThemeToggle.vue:96、apps/web/src/components/ThemeToggle.vue:106-108",
+          "finding": "`.theme-toggle` 用 `transition: all 0.3s`，而 `:active` 是按压反馈，规则要求 100-160ms；按下后按钮要 300ms 才落到 scale(0.95)，手感滞后",
+          "fix": "拆分为 `transform 120ms` + `background/border-color var(--transition-fast)`，去掉 `transition: all`"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/components/ThemeToggle.vue:96、apps/web/src/components/ThemeToggle.vue:119",
+          "finding": "曲线用 `cubic-bezier(0.4,0,0.2,1)`（Material 标准曲线），与项目要求的进入曲线 `cubic-bezier(0.23,1,0.32,1)` 不一致，属非预设但非本系统 token 的第三套曲线",
+          "fix": "统一到规则指定的进入曲线；若确要两套，必须写进 token（本次不新增 token，则统一为一套）"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍 / 一致性与 token",
+          "location": "apps/web/src/styles/responsive-enhancements.css:43-53 与 apps/web/src/components/ThemeToggle.vue:99-104",
+          "finding": "触屏兜底规则只覆盖 `.surface-card/.session-item/.nav-item` 的 hover 位移，漏掉 `.theme-toggle`（apps/web/src/components/ThemeToggle.vue:102 的 `translateY(-2px)`），触屏上主题按钮会粘在位移态；根因是 hover 位移未包在 `@media (hover:hover) and (pointer:fine)` 内（本界面特例）",
+          "fix": "把 `.theme-toggle:hover` 的位移包进 `@media (hover:hover) and (pointer:fine)`，或直接把 hover 位移降级为纯颜色变化（少一次判断成本为零）"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/style.css:164-180（元素在 apps/web/src/layouts/MainLayout.vue:3）",
+          "finding": "skip-link 用 `transform 0.22s ease`：预设曲线 + 非 token 时长；它是键盘用户进入工作台的第一个可聚焦元素",
+          "fix": "时长与曲线换成现有 token（`--transition-fast` 150ms 等）；隐藏方式保持 transform 可以，但不要用 `ease` 预设"
+        }
+      ]
+    },
+    {
+      "report": "02-auth",
+      "title": "02 登录 / 注册 / 找回密码 / 无权限",
+      "task_steps": 8,
+      "elements": {
+        "necessary": 26,
+        "deletable": 12,
+        "mergeable": 1,
+        "sinkable": 1,
+        "rows": 40,
+        "raw_tags": {
+          "必要": 26,
+          "可删": 12,
+          "可下沉": 1,
+          "可合并": 1
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/PasswordResetView.vue:5,9,40-42（配套改 :4 文案）",
+          "gain": "少一步",
+          "cost_risk": "**这是功能性死路，不只是体验问题**：`token` 只有请求响应用 `reset_token` 时才被赋值（PasswordResetView.vue:40-42），而该字段只在 `APP_ENV` 属于 dev/development/local/test 时才返回（gateway_auth_routes.py:54-57）；生产环境改为发邮件，邮件正文是令牌、链接是 `/password-reset` 且不带令牌（auth_store.py:117-122）。用户点邮件链接回来后 `token` 仍为空，`v-if=\"!token\"` 又显示申请表单（PasswordResetView.vue:5），重置流程走不完。建议：请求成功后无条件推进到「令牌+新密码」这一步，令牌只在返回时预填。代价：多一个步骤状态的确切定义；「邮箱不存在」与「已发送」后端目前统一返回 `accepted`（gateway_auth_routes.py:53），无法区分，会把没收到邮件的人也推进到令牌页——但那正是他们实际所处的状态。需在 `APP_ENV` 为生产值的环境真机跑一遍确认"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/LoginView.vue:51-76（配套删 CSS :203-279）",
+          "gain": "少一次判断",
+          "cost_risk": "消除「我该点管理员还是成员、口令是什么」的判断，以及把口令明文渲染在登录页的暴露面（LoginView.vue:75；口令来源 loginPresets.ts:13-16,22-33）。真实代价：演示/验收流程需要一个可复述的账号；`loginPresets.ts` 与 `loginPresets.test.ts` 目前只被 LoginView.vue:87 引用，删除后需一并决定其去留；副标题（LoginView.vue:4）提到的「演示账号」必须同步改写。若 Owner 判定演示入口必须保留，退路是仅在非生产构建渲染并停止明文展示口令——但这需要新增构建期判断，届时必须偿还等价元素"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/AccessDeniedView.vue:4,8（配套删 CSS :47-51,:63-66），:7 并入 :6",
+          "gain": "少一次判断",
+          "cost_risk": "页面收敛为「一句结论 + 一个按钮」，用户不必去理解 403 编号与内部路径的含义。真实代价：截图报障时少一条路径线索；「所需权限」保留但降为从句后，管理员口述权限名仍可行。测试不受影响：AccessDeniedView.test.ts:23-27 只断言标题、「kb.manage」与按钮"
+        },
+        {
+          "action": "降层级",
+          "target": "apps/web/src/layouts/AuthLayout.vue:129-138（连带 :137,:140-143）",
+          "gain": "少一次误操作",
+          "cost_risk": "删掉卡片边框/阴影/圆角与 hover，只留间距与对齐；同时消除「可点」的假反馈。真实代价：表单失去可见边界，在宽屏上要与左侧深色栏竞争视线；我无法只靠读代码判断视觉是否发散，必须先渲染确认（浅色与深色各一次）；若确认发散，则退一步只删 hover 与 `transition`（AuthLayout.vue:137,140-143），保留卡片面"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/RegisterView.vue:8（部门标签）、:4 或 :7（密码规则）",
+          "gain": "少一次误操作",
+          "cost_risk": "部门填错/留空的后果是「检索结果里看不到本部门文档」（retrieve.py:632-643），而不是一条报错——用户只会认为系统不好用；建议把标签「部门（可选）」改成能说明后果的说法。密码规则同理：客户端只判 `min: 8`（RegisterView.vue:29），后端还会以 400 拒绝纯数字密码（gateway_schemas.py:42-43）。**这两处都用改写现有文案完成，不新增元素，所以无需偿还。** 真实代价：文案变长会把「可选」的轻松感变成必填压力，要看实际观感；「部门」是否需要（而不是由管理员/目录系统分配）是产品决策，见存疑"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 性能 / 无障碍",
+          "location": "apps/web/src/layouts/AuthLayout.vue:137,140-143",
+          "finding": "全界面唯一的动效是给一张不可点击的卡片加了 hover 阴影+描边，200ms。三个问题叠在一起：① 指针在整个填表过程中都停在卡片上方，「悬停态」实际就是常态，这个反馈不报告任何信息；② 动的是 `box-shadow`/`border-color`，不是 transform/opacity，会触发重绘；③ 未包在 `@media (hover:hover) and (pointer:fine)` 内，触屏上点击后阴影会粘住。注：这是「非位移版」的悬停问题，与全局已知的「`:hover` 位移未包媒体查询」不是同一处代码，故在此单列",
+          "fix": "直接删除 `:hover` 块与 `transition` 声明（AuthLayout.vue:137,140-143）。删除后本界面为零动效——这与「登录页属于低频、且不需要任何动效」的判定一致；不要在 auth 三页新增过渡来「统一」"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "状态指示 / 缺失的机会",
+          "location": "apps/web/src/views/PasswordResetView.vue:5,9,43",
+          "finding": "两步之间的切换只靠一条 toast（:43）和整块表单的瞬间替换：申请成功后字段从 1 个变成 2 个，标题和副标题（:3-4）却完全没变，用户无法从页面上确认「我进入下一步了」；令牌确认成功后又把 `token` 清空（:56），表单跳回申请状态，与新密码已生效的事实相反",
+          "fix": "让 `:3`/`:4` 两行文本随步骤变化（复用现有元素，不新增），而不是加动效；成功后在 `:56` 之后跳转 `/login`，与 toast 文案「请重新登录」一致，少一步"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/AccessDeniedView.vue:49,55,65；apps/web/src/layouts/AuthLayout.vue:85；apps/web/src/views/LoginView.vue:159,197,285",
+          "finding": "同一批文件里用了 48px/24px/13px/1.5rem/1rem 等现有 4 级字号刻度（style.css:31-35：22/18/15/12px）之外的尺寸；`h2` 在 RegisterView.vue:48 与 PasswordResetView.vue:64 未设字号，实际是浏览器默认 24px，而 LoginView.vue:159 用了 `--text-h1`=22px —— 同一个布局里三个标题三个字号。另有 `var(--text-caption, 0.8125rem)` 这种与 token 值（0.75rem）不一致的兜底（LoginView.vue:285）",
+          "fix": "标题统一走 `--text-h1`；`403` 大字随提案 3 一并删除；兜底值改为与 token 一致的 `0.75rem` 或直接去掉兜底"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/layouts/AuthLayout.vue:56-57,78-80,93,109,117",
+          "finding": "展示栏整块用硬编码色（`#111827`、`#fff`、`rgba(255,255,255,.7/.88)`、`rgba(59,130,246,…)`、`#93c5fd`），这些色不参与主题切换（切换只改变量，utils/theme.ts:11-35）。深色模式下 `--bg-page` 为 `#0c1222`（theme.ts:13）、`--bg-panel` 为 `#131b2e`（theme.ts:14），与硬编码的 `#111827` 已经非常接近，左右分栏的层次只剩卡片边框在区分",
+          "fix": "若要保留展示栏，改用现有变量表达层次；若不保留，随提案 4 一并处理。渲染一次浅色/深色即可确认层次是否真的消失"
+        }
+      ]
+    },
+    {
+      "report": "03-entry",
+      "title": "03 业务总览",
+      "task_steps": 9,
+      "elements": {
+        "necessary": 9,
+        "deletable": 6,
+        "mergeable": 2,
+        "sinkable": 8,
+        "rows": 25,
+        "raw_tags": {
+          "可删": 6,
+          "必要": 9,
+          "可合并": 2,
+          "可下沉": 8
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/EntryView.vue:300（并含 :326 同类）",
+          "gain": "少一次误操作",
+          "cost_risk": "删掉恒为 `0` 的「N 篇」后，用户不会再把有文档的库当成空库去重复上传；代价是最近列表只剩名称、信息密度下降，`apps/web/src/views/EntryView.vue:326` 的「继续」也一并消失。若要真的显示文档数，成本更高的路径是补后端（`apps/services/knowledge-base/src/app/kb_base_routes.py:101-136` 的 `_decorate_base_rows` 增加计数）或前端按库逐个查文档（N+1 请求），本提案不采用"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/EntryView.vue:240-253",
+          "gain": "少一次误操作",
+          "cost_risk": "柱高按天归一化 + `|| 0.1` 会让\"零反馈的一天\"看起来有两条柱，删除可消除误判；代价是失去\"满意度随时间变化\"的唯一视图，趋势能力丢失，需 owner 确认接受。折中方案（一行\"近 N 天 赞 X / 踩 Y\"）会新增文案元素，偿还物是删掉 `:249-252` 的图例与 `:536-574` 的柱状样式"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/EntryView.vue:112",
+          "gain": "少一次误操作",
+          "cost_risk": "文案「去检索调试」与落点 `/workspace/chat` 不符，删除可避免\"以为去调试检索、结果进了问答\"；代价是「问答质量」卡退化为纯展示、失去唯一下钻入口。若保留则必须同时改文案、改目标为 `/workspace/kb/debugger`（该路由需 `kb.manage`，`apps/web/src/router/index.ts:145`）并补权限判断，成本高于删除"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/EntryView.vue:28-63（并入 :78-95、:118-131）",
+          "gain": "少一次判断",
+          "cost_risk": "同一事实以两组字段名出现两次（`documents_ready` `:46` vs `ready_documents` `:84`；`grounded` `:56` vs `grounded_answers` `:136`；`feedback.up/down` `:61` vs 满意度趋势 `:244-245`），用户不需要判断\"它们是不是同一个数\"；代价是丢掉\"上传→就绪→提问→有据回答→反馈\"的端到端叙事，需 owner 确认可接受，若要在卡标题保留路径提示则会新增文案元素，偿还物是删掉漏斗的 5 个箭头图标（`:38,43,48,53,58`）"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/EntryView.vue:392-393（联动 :74-76、:114-116）",
+          "gain": "少一次判断",
+          "cost_risk": "加载失败后 `dashboardData` 置空，页面永久显示\"暂不支持入库指标或服务降级\"（`:75`）/\"暂无问答质量数据\"（`:115`），与\"真的没有数据\"不可区分（接口层只给一条 3 秒 toast，`apps/web/src/api/request.ts:151-161`）；代价是要新增\"加载失败 + 重试\"状态并区分加载中/失败/空三态，偿还物是把两处自写 `empty-state` 合并进已有的 `EnhancedEmpty` 调用（`:283-289`，净增 0 元素）；本页无单测，改动需人工回归"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 缓动与时长",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113（本页实例：apps/web/src/views/EntryView.vue:283-289,309-315）",
+          "finding": "装饰插画（非可点元素）带 hover 位移+旋转 `scale(1.05) rotate(2deg)`，`0.3s` 已在 300ms 上限、曲线 `cubic-bezier(0.34,1.56,0.64,1)` 为回弹过冲，且未使用 `--transition-*` token；组件被 15+ 界面复用（本页两处）",
+          "fix": "按 Less is more 第一步直接删掉 `:108-113` 的 `transition` 与 `:111-113` 的 hover transform；空态只需静态插画，无需替代物"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 一致性与 token",
+          "location": "apps/web/src/views/EntryView.vue:665-676（使用点 :280-282、:306-308）",
+          "finding": "骨架屏 `animation: skeleton-shimmer 1.2s ease-in-out infinite` 动的是 `background-position`（逐帧重绘、非合成属性），首页最多 8 个元素同时无限循环；1.2s 与 ease-in-out 均为硬编码，未用 `--transition-fast/base/smooth`；该 keyframes 全仓仅此一处",
+          "fix": "保留骨架屏则改为 `transform: translateX` 合成动画并把时长收敛到 token；若采纳「加载表达统一到 spinner」，整段 `@keyframes skeleton-shimmer` 可删"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会 / 防止突变突兀",
+          "location": "apps/web/src/views/EntryView.vue:387-396 触发 :21-24 的整段替换",
+          "finding": "切换 7/14/30 天或 个人/全局 时 `loadingDashboard` 直接把整个大盘换成 spinner 再重建，内容闪断；滚动容器 `.entry-content`（`:439-446`，`overflow-y:auto`）在同一次交互中高度归零，滚动位置与视觉焦点丢失",
+          "fix": "不新增动效：保留旧数据渲染 + 局部 loading 指示（如标题行状态点），避免整段卸载重建；符合\"缓动效\"优先级最后一档之前先做减状态"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token / 状态指示",
+          "location": "apps/web/src/views/EntryView.vue:632-638（`.recent-item` 及其 hover）",
+          "finding": "hover 同时改背景（`--bg-panel-muted`→`--bg-panel`）与边框，背景变白后与所在卡片 `.recent-col`（`:612` 同为 `--bg-panel`）边界消失，两个信号方向相反；且该 hover 未包在 `@media (hover:hover) and (pointer:fine)` 内（全站已知问题的\"只改色不改位移\"特例）",
+          "fix": "二者留一：只保留边框变实或只保留背景加深；并给该规则补 hover/pointer 媒体查询"
+        }
+      ]
+    },
+    {
+      "report": "04-chat-page",
+      "title": "04 统一问答（页面层）",
+      "task_steps": 11,
+      "elements": {
+        "necessary": 14,
+        "deletable": 7,
+        "mergeable": 5,
+        "sinkable": 2,
+        "rows": 28,
+        "raw_tags": {
+          "必要": 14,
+          "可合并": 5,
+          "可删": 7,
+          "可下沉": 2
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "`apps/web/src/views/chat/components/ChatComposer.vue:11-12`（配套 `apps/web/src/views/chat/UnifiedChatView.vue:148-158`）",
+          "gain": "少一次误操作",
+          "cost_risk": "发送绑定只判 Enter 与修饰键（`.enter.exact`），前端 `apps/web/src` 全量 grep 没有任何 `isComposing` 守卫；而 element-plus 2.13.3 在合成期间不写回 v-model（依赖源码 `node_modules/element-plus/es/components/input/src/input.vue2.mjs:189-190` 的 `if (isComposing.value) return;`），所以只要输入法在合成中派发 key 为 Enter 的 keydown，提交的就是合成前的旧文本（半句话）。修复：`handleAsk` 前判 `event.isComposing`。代价与风险：不同输入法 / 浏览器在合成期是否派发 Enter 的行为不一致，必须先真机验证（见存疑）；加守卫后，少数输入法「回车确认候选、再回车发送」的第二下可能被吞掉，用户要再按一次。"
+        },
+        {
+          "action": "合并",
+          "target": "`apps/web/src/store/chat.ts:341-352`、`:409-419`（删 `apps/web/src/views/chat/UnifiedChatView.vue:47-59` 与样式 `:377-426`）",
+          "gain": "少一次判断",
+          "cost_risk": "让用户消息与占位 assistant 消息先入列、再 `ensureSession()`，同一等待态就只剩 `ChatMessageItem` 一处指示器，页面级兜底块（约 30 行模板 + 样式）可整块删除；副作用是问句立刻出现在列表里，缩短「点了发送但列表没反应」的窗口。代价与风险：乐观入列后若建会话失败，列表会留下一条没有对应的用户消息（`store/chat.ts:397-401` 目前只清理流式占位，需要在 catch 里回滚或标失败）；`resumeInterrupt`（`:409-444`）必须同时补占位消息，否则恢复期间没有任何指示器。"
+        },
+        {
+          "action": "加反馈",
+          "target": "`apps/web/src/store/chat.ts:397-401`、`:331-350`（配套 `ChatComposer.vue:44-49`）",
+          "gain": "少一步",
+          "cost_risk": "失败时占位 assistant 消息被整条移除，列表里没有失败标记，唯一信号是 3 秒 toast（`:401`），问句留在列表里却无法就地重发，用户要重新输入或复制粘贴一遍。修复：复用 `safety_notice` 通道（`store/chat.ts:90-103`）在同一条消息上承载失败态，或失败时把问题回填输入框。代价与风险：回填会覆盖用户失败后已经输入的新内容（只能约定「输入框非空则不覆盖」，否则又要新增「恢复上一问」入口）；把失败态做成一条消息会永久留在会话记录里，进入历史会话时会再次加载，后端是否承认这类消息类型需确认。"
+        },
+        {
+          "action": "删除",
+          "target": "`apps/web/src/views/chat/UnifiedChatView.vue:24-35`、`:102-106`（配套样式 `:285-351`）",
+          "gain": "少一次误操作",
+          "cost_risk": "三条硬编码演示问题（报销审批 / 试用期请假 / 客服升级）与用户自己的知识库无关，却是空态首屏最大的一块；点击只填词不发送（`:170-174` → `ChatComposer.vue:52-54`），用户容易把它当成「已经问过了」。代价与风险：新建会话的空态只剩输入框和一行标题，新用户没有示例可点；要保留示例就必须改成按当前知识库动态生成（新增数据依赖与空库兜底），成本高于删除。"
+        },
+        {
+          "action": "删除",
+          "target": "`apps/web/src/views/chat/components/ChatHeader.vue:102-119`",
+          "gain": "少一次判断",
+          "cost_risk": "头部常驻「标准 RAG / Agent 模式」开关，弹层文案自述差异是「多步思考、多次检索 vs 速度较快」（`:116`），业务用户无法据此判断该选哪个，却每次都要在头部多扫一个 chip。代价与风险：这是全仓唯一能设置 `executionMode='agent'` 的入口（grep 命中的只有本文件与 store），删除后 Agent 模式从 UI 不可达，必须产品确认是否已无人使用；若仍需保留，应移到检索测试 / 调试类界面而不是业务问答页头部。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "无障碍",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:113-116`（全局规则 `apps/web/src/style.css:806-815`）",
+          "finding": "程序化 `scrollTo({behavior:'smooth'})` 不受 `prefers-reduced-motion` 约束：全局通配符只清 CSS 动画与过渡，而 `scroll-behavior` 这个 CSS 属性管不到 API 里显式传入的 `smooth`（CSS 只决定 `auto` 时怎么滚）。少数派用户每轮问答仍会看到整屏平滑滚动。",
+          "fix": "在 `scrollMessagesToBottom` 内读 `matchMedia('(prefers-reduced-motion: reduce)')`，命中时传 `'auto'`；不要指望样式表兜住。"
+        },
+        {
+          "severity": "HIGH",
+          "category": "缓动与时长",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:429-437`",
+          "finding": "`.chat-fade` 是 `0.3s ease`：`ease` 属被禁止的 CSS 预设曲线，时长又顶在「UI 动效一律 <300ms」的边界；enter 与 leave 共用同一组值，切换会话或清空列表时旧列表与新列表在 300ms 内重叠（`transition-group` 未定义 move 类，leave 元素仍占位）。",
+          "fix": "入场改 `opacity`（可配 8px 位移或最低 `scale(0.95)`）200ms `cubic-bezier(0.23,1,0.32,1)`；整列表替换（`startDraftSession`、`selectSession`）不走 enter/leave。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "可打断性 / 一致性与 token",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:108-117`、`:119-126`、`:133-139`、`:151-157`、`apps/web/src/store/chat.ts:377`、`:396`",
+          "finding": "同一回合里同一个容器用了两种滚动行为：显式 `smooth`（起、止各一次）与 ResizeObserver 里的瞬时滚动（`:135` 传 `false`），用户看到「平滑滚一下 + 突然跳一下」；而 `shouldAutoScroll` 只在 `@scroll` 事件里更新（`:119-126`），RO 的兜底时机取决于渲染时序而非用户意图。",
+          "fix": "固定一种行为：建议只在结果到达时滚一次 `smooth`；RO 仅在 `shouldAutoScroll` 为真且无进行中滚动时兜底；reduced-motion 一律走 `auto`。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "物理性与原点",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:419-422`",
+          "finding": "兜底指示器的 `@keyframes typing` 从 `scale(0)` 起（规则要求入场最低 `scale(0.95)`；循环指示器每 1.4s 完全消失再出现，观感等同「重启」），且与 `apps/web/src/views/chat/components/ChatMessageItem.vue:293-296` 完全重复（同名 keyframes、同名类）。",
+          "fix": "两处合成一处（见提案 2）；要保留循环脉冲就改成 opacity 或 `scale(0.6) → 1`。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:331-339`",
+          "finding": "`.suggest-card` 用 `transition: all 0.2s`（已在全局清单）加 hover `translateY(-2px)` + `box-shadow`，并且 `border-color: var(--blue-400)` 引用了一个不存在的 token（`apps/web/src/style.css:17-20` 只定义到 blue-500/600/700/50）。本页特例是：这是页面唯一的 hover 位移，且过渡里含着一条无效属性。",
+          "fix": "删掉位移与投影，hover 只留边框或背景；`--blue-400` 换成已定义 token 或补定义（见系统性候选）。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会",
+          "location": "`apps/web/src/store/chat.ts:397-401`、`:331-350`",
+          "finding": "失败路径把占位 assistant 消息整条删除，列表里没有失败痕迹，唯一反馈是 3 秒 toast（`:401`），用户无法就地重试。",
+          "fix": "用同一条消息承载失败态（复用 `safety_notice` 通道），或失败时回填输入框（见提案 3）。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会",
+          "location": "`apps/web/src/api/chat.ts:138-150`、`apps/web/src/views/chat/UnifiedChatView.vue:47-59`",
+          "finding": "问答走的是非流式 POST（`createChatRunV2` 是普通 `request.post`，无 SSE），等待期间没有任何增量输出，`streaming` 只是占位标记（`store/chat.ts:352-374`、`:389`）；同文件的流式接口 `streamChatMessage`（`api/chat.ts:108-120`）全仓已无调用方。",
+          "fix": "确认是否要接回流式；若不接，删掉页面级兜底指示器与 `isRetrieving` 分支，只留一处静态等待态。"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "`apps/web/src/views/chat/UnifiedChatView.vue:290-311`、`:341-351`",
+          "finding": "欢迎区硬编码 24px / 15px / 18px / 32px 字号与 16px 圆角，均不在 token 刻度内（`apps/web/src/style.css:31-44`：`--text-h1` 22px、`--text-h2` 18px、`--text-body` 15px、圆角 6/8/12/14）。",
+          "fix": "提案 4 若删掉欢迎区，随删除消失；若保留，字号改 token，18px/32px 无对应刻度则删或用 caption。"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "`apps/web/src/views/chat/components/ChatSidebar.vue:107`",
+          "finding": "侧栏上挂着 `transition: width 0.3s ease`，但桌面固定 280px、宽度从不变化，属死属性；且 width 是规则禁止动的属性（≤768px 的开合已由 `:252-253` 的 `transform 0.2s` 承担）。",
+          "fix": "删除该 transition；保留移动端 transform 方案。"
+        }
+      ]
+    },
+    {
+      "report": "05-chat-components",
+      "title": "05 统一问答（组件层：侧栏/头部/输入框/消息/轨迹抽屉/中断卡）",
+      "task_steps": 7,
+      "elements": {
+        "necessary": 40,
+        "deletable": 16,
+        "mergeable": 9,
+        "sinkable": 1,
+        "rows": 66,
+        "raw_tags": {
+          "必要": 40,
+          "可合并": 9,
+          "可删": 16,
+          "可下沉": 1
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/chat/components/ChatMessageItem.vue:157",
+          "gain": "少一次误操作",
+          "cost_risk": "删除 `openFeedback()` 里的 `handleFeedback(message,'down')`：现在仅「打开👎面板」就会写入一次差评（store/chat.ts:446-460 无 feedbackData 即 newVerdict='down' 并调用 submitMessageFeedback），点「取消」（:87）不回滚；连续点两次还会因 store/chat.ts:449 的 toggle 语义把 state 清成 undefined 而服务端仍是 down，造成前后端不一致。风险：删除后「👎」不再有\"先记后改\"的路径，必须确认产品接受\"打开面板又取消 = 不留痕\"；store 的 toggle-off 分支要重新对齐到提交路径，否则会失去\"撤销差评\"能力"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/chat/components/ChatComposer.vue:11-12, :44-49",
+          "gain": "少一次误操作",
+          "cost_risk": "两个问题同一路径：(a) `handleAsk` 在 emit 后无条件清空输入（:47），而 store 可拒绝本次提问（apps/web/src/store/chat.ts:331-337：scopeMode≠all 且未选库时仅 warning 并 return）→ 用户输入被吞；(b) `.exact` 只校验修饰键、不校验 `isComposing`，全仓无任何 composition 守卫（grep `isComposing"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/chat/components/ChatMessageItem.vue:11, :23-26, :43-45",
+          "gain": "少一次判断",
+          "cost_risk": "一条回答里同时给出 answer_mode 徽标、回答依据框、可信度百分比、检索耗时、召回条数五个\"可信度\"信号，用户要在它们之间比对哪个才算准。风险：三者语义不同（后端枚举 / 自然语言标签 / 数值），合并必须由产品指定唯一权威信号，否则会变成\"更少但更不准\"的信息；需要后端确认三者是否同源"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/chat/components/ChatTraceDrawer.vue:79-89",
+          "gain": "少一次判断",
+          "cost_risk": "三块 `JSON.stringify(...,null,2)` 原始 payload 面向实现者，且 Tool Calls JSON 与上方工具调用表（:66-77）同数据；删除后抽屉的阅读顺序变成 状态→时间线→失败→重试。风险：开发者失去 UI 内看原始 payload 的入口，需改用 network 面板或 `getWorkflowRun`（apps/web/src/api/chat.ts:126）；若支持排障依赖它，应改为 debug 开关下的折叠，而不是直接删"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/styles/responsive-enhancements.css:127-130",
+          "gain": "少一次判断",
+          "cost_risk": "该全局 `!important` 覆盖只在 ≤768px 生效，却强改助手气泡的 padding，使\"纯文本回答\"与\"用户灰底气泡\"在移动端看起来像同类卡片，角色区分需要靠重读判断。影响面已核实：`.message-bubble` 全仓只被 ChatMessageItem.vue:28 与 UnifiedChatView.vue:52 使用，均在本界面内。风险：这条规则可能被其它页面的同名类复用（当前 grep 无），删除前需做一次 375px 宽度的视觉回归"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 性能",
+          "location": "apps/web/src/views/chat/components/ChatSidebar.vue:107",
+          "finding": "`.session-sidebar` 声明 `transition: width 0.3s ease`，但桌面宽度固定 280px（:100-108）、移动端切换走 transform（:248-261），全仓无任何规则改变该元素宽度 → 完全死掉的过渡；且 width 属于禁止动画属性，将来做折叠会直接引发布局抖动",
+          "fix": "删除该声明；移动端开合已由 :253 的 transform 承担"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/chat/components/ChatSidebar.vue:130, :190, :253；apps/web/src/views/chat/components/ChatHeader.vue:214；apps/web/src/views/chat/components/ChatComposer.vue:102",
+          "finding": "本界面 5 处过渡全部硬编码 `0.2s ease`，完全未使用 --transition-fast/base/smooth（apps/web/src/style.css:46-48）；`ease` 不在允许曲线内",
+          "fix": "颜色类 hover 统一 `var(--transition-fast)`（150ms），面板/抽屉用 `var(--transition-base)`；进入曲线 `cubic-bezier(0.23,1,0.32,1)`"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/chat/components/ChatMessageItem.vue:273-300",
+          "finding": "typing 指示器与 apps/web/src/views/chat/UnifiedChatView.vue:401-422 是两套同源实现（markup + @keyframes 各一份），且文案不一致：消息内会在「正在检索...」「正在思考中...」之间切换（:31 依 isRetrieving，apps/web/src/store/chat.ts:373 初值为 true），兜底版则固定「正在检索...」",
+          "fix": "只保留消息内一处，或抽成一个极小组件；文案统一为一个动词"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "物理性与原点",
+          "location": "apps/web/src/views/chat/components/ChatSidebar.vue:253",
+          "finding": "移动抽屉用 `transform: translateX(-100%) → 0` + `0.2s ease`：方向正确，但曲线是 CSS 预设、时长未走令牌，进/出同一曲线",
+          "fix": "进入用 `cubic-bezier(0.23,1,0.32,1)` + `var(--transition-base)`；退出可更短；保持只动 transform"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/chat/components/ChatMessageItem.vue:127, :141-145",
+          "finding": "代码块「复制」点击后零状态变化（不换文案、无 toast、无勾选），用户无法确认是否复制成功，只能重试或手动粘贴验证",
+          "fix": "加 1.2-1.5s 的「已复制」状态（只改 color/opacity，不改尺寸）；等价删除见提案 3 的遥测指标"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍",
+          "location": "apps/web/src/views/chat/components/ChatMessageItem.vue:438-441",
+          "finding": "`:hover` 提亮未包在 `@media (hover:hover) and (pointer:fine)` 内；触屏点击后 sticky hover 会停在每条回答最高频的反馈按钮上（全局通配归零之外的组件特例，同类还有 ChatSidebar.vue:193-195）",
+          "fix": "把 hover 规则包进 hover 媒体查询"
+        },
+        {
+          "severity": "LOW",
+          "category": "目的与频次",
+          "location": "apps/web/src/views/chat/components/ChatMessageItem.vue:287-296",
+          "finding": "三点循环 1.4s、关键帧含 `scale(0)`；作为循环加载可接受，但它每次回答都出现且与 :31 的文案重复表达同一状态",
+          "fix": "保留文案 + 三点其一；若去掉三点，用 opacity 呼吸即可（仍只动 transform/opacity）"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/chat/components/ChatComposer.vue:88-108",
+          "finding": "发送按钮只有灰→蓝的背景色过渡，无按压反馈（无 :active）——属于允许的「操作反馈」，且 100+ 次/天的元素只做颜色过渡是浪费",
+          "fix": "加 100-160ms 的 :active transform；等价删除 :110-112 的 hover 变深"
+        }
+      ]
+    },
+    {
+      "report": "06-interview",
+      "title": "06 AI 模拟面试",
+      "task_steps": 13,
+      "elements": {
+        "necessary": 15,
+        "deletable": 10,
+        "mergeable": 1,
+        "sinkable": 3,
+        "rows": 29,
+        "raw_tags": {
+          "必要": 15,
+          "可删": 10,
+          "可下沉": 3,
+          "可合并": 1
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/interview/InterviewView.vue:41-44（配合 :116-121）",
+          "gain": "少一次误操作",
+          "cost_risk": "现在评分与「下一题题干 + 空输入框」同帧出现（:121 替换题干、:116 写入评分），用户会把分数当成当前题的。修法：把该块放到下一题题干之上并标注题号（如「第 2 题评分」）。代价：面板变高，题干起始位置下移，滚动位置与视觉锚点变化（需真机确认，见存疑）；需要多存一个「上一题序号」状态，且最后一题的评分在切到报告时仍无处显示（`lastEvaluation` 在报告态不渲染，:47-61）。偿还：删除「未标注难度」标签（:33）与字数计数（:36）"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/interview/InterviewView.vue:54、:57-59（数据源 api/interview.ts:62、gateway_interview_routes.py:283-284）",
+          "gain": "少一次判断",
+          "cost_risk": "报告已含逐题 `feedback` / `weak_points` 但一列都不显示，用户读完只知道自己「几分」，不知道错在哪。修法：删掉「#」列（行序即题号），把「来源」原样 UUID 降为 hover 提示（题目列已用 show-overflow-tooltip，:55），腾出的列位给反馈/弱项。代价：来源从显性列降为 hover 才可见，「可追溯」在报告页的可见度下降（与页头副标题的承诺相关，需产品确认）；`feedback` 后端可长至 4000 字符（gateway_interview_routes.py:141），需要限行/展开策略，否则表格行高失控"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/interview/InterviewView.vue:113-122（输入框 :36）",
+          "gain": "少一次误操作",
+          "cost_risk": "提交后等评分往返（LLM 调用，gateway_interview_routes.py:160-165）期间输入框仍可编辑，响应到达时 `:122` 直接清空，用户在这段时间补写的内容静默消失；界面上只有按钮 loading 一个状态位。修法：提交中把输入框置为只读并明示「评分中」，清空只在下一题渲染后发生。代价：新增一句状态文案与一个只读态（违反默认删除，由删除字数计数 :36、提示文案 :38 偿还）；若评分耗时接近 axios 60s 超时（api/request.ts:30），只读等待会放大焦虑，需要真实耗时数据支撑（见存疑）"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/interview/InterviewView.vue:23-24",
+          "gain": "少一次误操作",
+          "cost_risk": "两个自由文本字段的取值只能靠猜，而猜错不会得到「筛选条件无效」的反馈 —— 只会拿到 409，提示文案是英文原文（gateway_interview_routes.py:58 + api/request.ts:104-105），用户会去怀疑知识库而不是自己填的词。删掉后默认「不限」，与 placeholder 的承诺一致。代价：失去按难度/题型收窄题池的能力；若要保留，必须先把它们换成取自题库的枚举（本次未发现任何 facet/取值接口，grep `question-pool` 仅命中 kb_generic_routes.py:426，需要后端先提供）"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/interview/InterviewView.vue:50、:125",
+          "gain": "少一次判断",
+          "cost_risk": "两处「说假话」的兜底：(1) 报告请求失败时 `completed` 已置 true（:118），`:50` 的 `?? 0` 会把失败渲染成「总分 0」的空报告；(2) `:125` 的 catch 与请求层拦截器（api/request.ts:158）对同一次失败各弹一条 toast，文案还不一样（「回答提交失败」vs 服务端原文）。修法：删掉 `?? 0` 与重复 toast，改用未加载/失败态并保留会话（否则用户只剩「再来一场」一条路，:48，等于销毁这场面试）。代价：只剩服务端文案，而当前 409/502 是英文（gateway_interview_routes.py:58、:45），需要后端本地化或在前端按 code 映射，否则用户从「两条中文错」变成「一条英文错」；新增失败态分支需要一个容器（由删除 `@submit.prevent` :10、维度方块边框 :157 偿还）"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "状态指示 / 缺失的机会",
+          "location": "apps/web/src/views/interview/InterviewView.vue:41-44、:116-121",
+          "finding": "提交后题干与评分在同一帧整体替换：旧题的分数出现在新题下方，界面没有任何位置或文案说明它属于上一题；评分块本身是纯 `v-if` 出现（:41），无入场也无状态位",
+          "fix": "先修归属（见提案 1），再考虑动效：只对该块做 opacity + 位移 ≤4px、200ms、`cubic-bezier(0.23,1,0.32,1)` 入场；不要做高度/边距过渡，也不要从 scale(0) 起"
+        },
+        {
+          "severity": "HIGH",
+          "category": "操作反馈",
+          "location": "apps/web/src/views/interview/InterviewView.vue:113-122、:36",
+          "finding": "评分往返期间输入框仍可编辑（:36 无 `:disabled`/`:readonly`），响应到达后 `:122` 直接 `answer.value = ''`；用户在这段时间的输入没有任何提示地消失。整段等待只靠按钮 loading 表达",
+          "fix": "提交中将输入框置为只读并给出文本状态；不要加动效 —— 该场景属「数十次/天」级别，按规则只做状态指示"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "防止突变突兀",
+          "location": "apps/web/src/views/interview/InterviewView.vue:30、:47（对照 :149 单容器）",
+          "finding": "三个状态共用同一个 `.panel`（:149）用 `v-if/v-else-if/v-else` 整块替换，三态高度差异大（表单 → 题干+文本框 → 表格），而 `.interview-content` 是独立滚动容器（:148、:147 覆盖了 style.css:182-191 的滚动）",
+          "fix": "不做位移过渡；先靠固定顶部锚点（题干与表单同一水平起始位）稳定视觉，仅在报告首次出现时允许 opacity ≤250ms；是否有可见跳变需真机确认"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/interview/InterviewView.vue:151、:153、:158、:159",
+          "finding": "字号全部硬编码 px：18px / 20px / 22px / 13px，未使用 `--text-h1/h2/body/caption`（style.css:32-35）；22px 与 `--text-h1`（1.375rem）等值，18px 与 `--text-h2` 等值，20px 与 13px 在现有刻度上没有对应值",
+          "fix": "归位到已有 token：面板标题与题干用 `--text-h2`、大分数用 `--text-h1`、`.muted` 用 `--text-caption`；不得新增刻度，13px/20px 的取舍需设计确认"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "无障碍",
+          "location": "apps/web/src/views/interview/InterviewView.vue:41-44、:39",
+          "finding": "评分/反馈块是条件渲染出现，没有 `aria-live`；提交完成后按钮从 loading/disabled 回到可用，焦点不回到题干或输入框，键盘与读屏用户不会被告知「评分已到、可以继续」",
+          "fix": "该块加 `aria-live=\"polite\"`（不新增视觉元素）；下一题渲染后把焦点移回输入框"
+        },
+        {
+          "severity": "LOW",
+          "category": "目的与频次",
+          "location": "apps/web/src/views/interview/InterviewView.vue:26、:39（样式来自 style.css:652-654）",
+          "finding": "主按钮 hover 只有瞬时 `opacity: 0.9`，无过渡也无位移；按钮 hover 属高频交互，按规则应「极简或砍掉」。全局 `:hover` 位移问题已在已知清单，本条是该全局样式落在本页的特例（属性是 opacity，不是位移）",
+          "fix": "推荐删除该 hover（本页按钮已用 loading/disabled 表达可用性）；若保留，时长 ≤150ms 且包进 `@media (hover:hover) and (pointer:fine)`"
+        }
+      ]
+    },
+    {
+      "report": "07-kb-upload",
+      "title": "07 知识库治理（上传与文档列表）",
+      "task_steps": 7,
+      "elements": {
+        "necessary": 12,
+        "deletable": 7,
+        "mergeable": 10,
+        "sinkable": 5,
+        "rows": 34,
+        "raw_tags": {
+          "可删": 6,
+          "可删（或下沉）": 1,
+          "必要": 12,
+          "可下沉": 5,
+          "可合并": 10
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBUploadView.vue:5-6",
+          "gain": "少一次判断",
+          "cost_risk": "头部失去「上传」入口后，只能从 dropzone 或底部按钮起手；对习惯点头部的主用户是新增一次学习。另：`问答` 按钮删掉后，无 `chat.use` 的用户不再被弹到 forbidden 页（router/index.ts:394-400），但该跳转本身在别处仍存在"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBUploadView.vue:113-119",
+          "gain": "少一步",
+          "cost_risk": "「替代旧文档 ID」是版本治理的合法能力，删掉后该路径只能走批量更新接口（api/kb.ts:135）或连接器（KBConnectorsView.vue:124-129）；若后端强依赖 `supersedes_document_id` 表达版本链，此能力在本界面将不可达"
+        },
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/kb/KBUploadView.vue:64-119",
+          "gain": "少一次判断",
+          "cost_risk": "版本字段默认折叠后，需要用它们的少数用户多一次展开；且折叠期间用户不知道有这些字段，可能上传出「无版本家族」的文档，把成本推到下游治理视图"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBUploadView.vue:197-202",
+          "gain": "少一次判断",
+          "cost_risk": "删掉建议卡片后，建议数据仍来自 `doc.stats_json.version_assist`，本页不再展示，用户若要采纳需切到连接器界面；若该卡片是「版本治理」产品的核心卖点，删除会削弱它"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBUploadView.vue:145-158",
+          "gain": "少一次误操作",
+          "cost_risk": "需要新增每文件状态文案（这违反默认删除），且上传中重复渲染是性能代价；实现上还要区分「上传失败」与「已上传待索引」两种状态，否则文案会误导"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 缓动与时长",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113",
+          "finding": "空态插图挂在 `:hover` 上做 `scale(1.05) rotate(2deg)`，300ms，`cubic-bezier(0.34, 1.56, 0.64, 1)`（带过冲）。这是纯装饰插图，不是可点元素（EnhancedEmpty.vue:99-109 内无交互监听），却给出可交互的错觉",
+          "fix": "删除该 hover 变换；`:hover` 位移改挂触发点本身（现状连触发点都没对齐）。若确实要保留，须进 `@media (hover: hover) and (pointer: fine)` 且去掉过冲曲线"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 一致性与 token",
+          "location": "apps/web/src/views/kb/KBUploadView.vue:745、852",
+          "finding": "`transition` 落到了 `background`（dropzone 与 doc-item 都是 `border-color, background`），而 hover 目标色是实色变量（KBUploadView.vue:753-756、855-858），触发的是可动画属性而非合成层属性",
+          "fix": "只保留 `border-color` 的过渡；如需背景反馈改用 `box-shadow` 或不做过渡"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/kb/KBUploadView.vue:152-156",
+          "finding": "`el-progress` 在轮询（KBUploadView.vue:569，2s 一次）下没有明确的插值过渡；上传完成瞬间 `uploadProgress` 被清空（KBUploadView.vue:629），百分比从 100 直接消失，进度条整条消失而无过渡",
+          "fix": "只加 `opacity` 过渡（KBUploadView.vue:629），不要动宽高；进度条本身的插值交给组件默认值"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍 / 一致性与 token",
+          "location": "apps/web/src/views/kb/KBUploadView.vue:753、855",
+          "finding": "两处 `:hover` 样式的选择器都未包在 `@media (hover: hover) and (pointer: fine)` 内",
+          "fix": "全局范围已有此问题（见已知清单），此处只作为本界面内的实例记录；修复应与全局同一批进行"
+        }
+      ]
+    },
+    {
+      "report": "08-kb-governance",
+      "title": "08 知识治理工作台",
+      "task_steps": 9,
+      "elements": {
+        "necessary": 31,
+        "deletable": 13,
+        "mergeable": 9,
+        "sinkable": 10,
+        "rows": 63,
+        "raw_tags": {
+          "必要": 31,
+          "可删": 13,
+          "可下沉": 10,
+          "可合并": 9
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:37-151（含关联状态与动作 :529-533、:561-567、:689-766）",
+          "gain": "少一次判断",
+          "cost_risk": "这是本页最大的一块内容：4 个面板 + 1 个 JSON textarea + 4 个按钮（:41-77），全部排在真正的队列（:243）之前，首屏几乎谈不到治理。下沉目标已存在：`/workspace/kb/operations`（MainLayout.vue:255-259）。**真实代价**：知识灌入/rebuild 目前**只有**这一处 UI，必须先落到 KBOperationsView.vue 再删，否则能力不可达；且 `KBGovernanceView.test.ts:291-366` 覆盖 dry-run→写入→rebuild 的签名门控，迁移要重写该用例并迁移 4 个 `data-testid`（kb-batch-*）"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:543,615,624,685,251,257",
+          "gain": "少一次误操作",
+          "cost_risk": "每区段只取 8 条（`:543` 的 `limit` 从未被修改，后端上限 8、最大 50，kb_analytics_routes.py:1216），而工作集筛选是在这 8 条上做客户端二次过滤（:615→:624）。后果：后端有 23 条待审核时，选「待我处理」可能显示 0 条并给出「当前筛选下没有待处理项。」（:257），用户会判断为「已处理完」而漏处理。修复方向二选一：把 `workset` 下推服务端（需后端支持按 owner 过滤），或把 tag 文案写清并把 `limit` 提到 50。**真实代价**：全量拉取 50 条会放大首屏渲染成本（每行约 20 个 DOM 节点、6 个区段），且 `limit` 提到上限仍不等于分页；后者才是完整解，但需要后端加 offset"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:14-20（及 :597-603 的 summaryCards）",
+          "gain": "少一次判断",
+          "cost_risk": "5 张卡片的 5 个数字在别处均已存在：4 个在区段 tag（:251）、1 个在冲突面板 tag（:327）。而且汇总卡与队列之间隔了 7 个 panel（:37-237），用户必须靠「记住数字→往下滚→找对应区段」来配对，这正是提案 1 落地后仍会残留的成本。删除后区段标题与它自己的计数相邻。**真实代价**：失去「一屏看到全部积压」的分诊视图；若将来队列很长，需要以「队列区顶部的一行计数」形式恢复，而不是复位到页顶；`tone` 字段（:597-601）一并清理"
+        },
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:164-182（及耦合提示 :184-188）",
+          "gain": "少一次误操作",
+          "cost_risk": "rebuild 是**单文档**操作（`rebuildTarget` 要求恰好选中 1 条，:568），却和批量审核共用 `selectedDocumentIds`（:153-189）。选中多条时「预览 rebuild / 执行 rebuild」静默置灰并额外出现一句解释（:185），这与「批量通过/批量驳回为何变灰」难以区分，是误读来源。**真实代价**：单文档 rebuild 需要新落点，行内已有 4 个按钮（:313-316），再加会加剧拥挤，建议移入文档详情页；同时 `KBGovernanceView.test.ts:167-289` 依赖 `select-document-*` + `kb-rebuild-*` 锚点，删除会破坏该用例对「切换选中项后签名失效」的断言"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:10",
+          "gain": "少一次判断",
+          "cost_risk": "该按钮与侧栏项指向同一路由 `/workspace/kb/upload`（MainLayout.vue:241-244），但标签不同（「知识库管理」vs「知识库治理」），会让人怀疑是两个不同的地方。桌面端侧栏常驻，删除零功能损失。**真实代价**：窄屏侧栏收起时少一个直达入口——侧栏在移动端的展开方式本次未验证（见存疑）；若确认收起后不可达，则该项降级为「改名与侧栏一致」而非删除"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "物理性与原点",
+          "location": "apps/web/src/views/kb/KBGovernanceView.vue:239-241,243",
+          "finding": "`v-if=\"loading\"` 的整页骨架与 `v-else` 的队列 grid 互斥：刷新时整个队列区（最长 6 个区段 × 8 条）从有到无再重建，页面高度与滚动位置整体跳变，属于典型的空间不连续；同时触发它的按钮（:9）自身已有 `:loading`，两个指示器表达同一状态",
+          "fix": "骨架只用于首屏（`governance === null`）；已有数据时的刷新保留列表，仅用头部按钮 loading 或面板顶部一条细进度条；不要用整块内容替换来表达「正在刷新」"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBGovernanceView.vue:919",
+          "finding": "`.summary-value { font-size: 28px }` 脱离 token 刻度（22/18/15/12），并大于页面标题的 `--text-h2`（PageHeaderCompact.vue:42，18px）：页面最重的元素是 5 个统计数字，而不是用户要处理的那条文档。该硬编码字号模式跨 10+ 界面重复（见返回 JSON 的 systemic_candidates）",
+          "fix": "降到 `--text-h2`（或 `--text-h1`），与页面标题同级或更低；不要新增字号刻度"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次",
+          "location": "apps/web/src/views/kb/KBGovernanceView.vue:226,240,371",
+          "finding": "同一个「加载中」状态有三种表示（3 行骨架 / 6 行整页骨架 / 6 行抽屉骨架）；其中 :226 的面板级骨架与 :224 的按钮 loading 会同时出现，是「同一状态两处指示」的重复",
+          "fix": "统一为一种局部骨架行数；面板级刷新只保留按钮 loading，避免骨架与 loading 并存"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBGovernanceView.vue:914,918,922,930",
+          "finding": "三处 token 漂移：`gap: 20px` 写死（:914 未用 `--content-gap`，数值相同故无视觉差，但会随 token 变动而失效）、`font-size: 12px` 写死两次（:918、:930 未用 `--text-caption`）、`color: var(--warning-color, #e6a23c)`（:922）引用了 `style.css:1-84` 中**不存在**的变量，实际落到硬编码的 `#e6a23c`，等于在 token 体系外引入了一个色值（同写法另见 EntryView.vue:690,799,840）",
+          "fix": "改用 `var(--content-gap)` / `var(--text-caption)`；`--warning-color` 要么补进 token 层，要么改用现有色阶，避免 fallback 静默生效"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/kb/KBGovernanceView.vue:15-19,251,327",
+          "finding": "批量裁定成功后计数是静默跳变的（本文件无任何过渡声明），用户只能回看 toast 判断是否生效；这是状态指示的缺口，而非装饰缺口",
+          "fix": "只对计数本身做 `opacity`/`color` 的短反馈（<200ms，`--transition-fast`），不动 `width/height/margin`；若与 `prefers-reduced-motion` 的全局清零冲突则直接不做"
+        }
+      ]
+    },
+    {
+      "report": "09-kb-connectors",
+      "title": "09 多源同步（连接器）",
+      "task_steps": 17,
+      "elements": {
+        "necessary": 15,
+        "deletable": 3,
+        "mergeable": 8,
+        "sinkable": 1,
+        "rows": 27,
+        "raw_tags": {
+          "可删": 3,
+          "必要": 15,
+          "可合并": 8,
+          "可下沉": 1
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBConnectorsView.vue:44-57",
+          "gain": "少一次判断",
+          "cost_risk": "后端早已返回这些字段（`apps/services/knowledge-base/src/app/kb_connector_routes.py:36-42` 的 `last_run_at`/`last_result`/`next_run_at`），并且有一个现成却全仓无人调用的接口 `getConnectorRuns`（`apps/web/src/api/kb.ts:787-788`），所以这不是\"要不要做\"而是\"页面没接\"。真代价：`last_result` 有两种形态——成功存 `{counts, items}`、失败只存 `{error_message}`（`kb_connector_routes.py:229-240`），失败时要显示的是后端英文异常文本，想中文化得再做一层映射；`last_run_at` 为空（新建未跑）需要定\"尚未同步\"的占位文案；`:308-317` 的 `runSync` 成功后不刷新列表，必须同时补 `loadData()`，否则新加的那行永远停在旧值；偿还物是把 `:45-56` 三行属性并成一行 meta（净增 0 行）。本页列表渲染路径无单测（`apps/web/src/views/kb/KBConnectorsView.test.ts:1-85` 只覆盖失败态与重试），改动只能人工回归"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBConnectorsView.vue:38（联动 `:308-317`）",
+          "gain": "少一次误操作",
+          "cost_risk": "手动同步是同步阻塞请求（`apps/services/knowledge-base/src/app/kb_connector_routes.py:426-461`），执行期间按钮既无 `loading` 也无 `disabled`，每点一次就是一次真实写入；仓库里已有现成模式可抄（`apps/web/src/views/kb/KBOperationsView.vue:187-195` 的 `runningConnectorId` + 执行中文案）。真代价：大目录同步会让按钮长时间停在\"执行中...\"而没有任何进度，用户可能以为卡死；要进度就得引入轮询 `getConnectorRuns`（`apps/web/src/api/kb.ts:787-788`），那是另一个更大的改动。偿还物是删掉 `:313` 的「同步任务已提交」——该接口返回即已完成，\"已提交\"是假反馈，删掉后\"已发出\"的即时信号消失、反馈延迟到请求返回；同时 `:314-316` 把任何失败都吞成一句「同步提交失败」，与 request 层已经弹过的错误提示（`apps/web/src/api/request.ts:151-159`）重复，需一并收敛成一条"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBConnectorsView.vue:87-89（联动 `:237`、`:250`）",
+          "gain": "少一次误操作",
+          "cost_risk": "两个真实风险被这一行空白框藏住：（a）6 种类型要的 key 不同（`apps/services/knowledge-base/src/app/kb_connector_routes.py:149-181`），页面不提示，用户只能猜写；（b）`delete_missing` 默认是 `true`（`kb_connector_routes.py:142`），意味着源里消失的文件会在知识库中被软删除，而该键在新增（`:237` 只预填 `urls`）与编辑（`:250` 回显已存 config，没有该键）两条路径上都不可见，用户只在同步完成后从 `:111` 的\"软删除 N\"才第一次知道。真代价：要为 6 种类型各写一份必填 key 提示，这份契约会随后端漂移（当前只在一处写死预填）；把 `delete_missing` 提成可见开关会新增一个表单项，偿还物是删掉 `:237` 那段只对 web_crawler 正确的预填示例。若产品坚持\"配置靠手写 JSON\"，那至少要在 `:87` 的标签里写明当前类型必填哪些 key"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBConnectorsView.vue:124-130（含样式 `:457-471`）",
+          "gain": "少一次判断",
+          "cost_risk": "这 4 行是 family/label/supersedes/confidence 原始字段名，删掉可省一次\"这是给我看的还是给系统看的\"判断，并顺手清掉 `:461` 这处全仓唯一的无效 token（`--color-primary` 零定义，背景已实际透明）。真代价：失去\"这条新增文档是否与既有版本重复\"的唯一提示——且它只在成功同步后出现一次；若产品要保留该能力，成本更高的路径是改成一句中文 + 用已有 token 重写 `:461`（如 `--blue-50`）、并定义 confidence 的取舍阈值，成本高于删除。本页无单测，删除后在结果弹窗里不会有任何回归信号"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBConnectorsView.vue:94",
+          "gain": "少一次误操作",
+          "cost_risk": "把可选区间收到后端真能接受的范围，删掉 10–14 这段永远提交不了的取值：`:min=\"10\"` 与 `apps/services/knowledge-base/src/app/kb_schemas.py:563` 的 `ge=15`（配合 `:567-568`：enabled 时 interval_minutes 必填）直接冲突，用户选 10–14 会在保存时被拒，屏幕上只有 request 层的通用提示「请求参数错误，请检查输入后重试。」（`apps/web/src/api/request.ts:93`），既不指向\"定时同步\"这一项，也不说下限是 15。真代价：若产品确实要 10 分钟档，就必须同时改后端 `ge=15` 并确认调度轮询节奏能支撑（`apps/services/knowledge-base/src/app/kb_connector_scheduler.py:20-104`），本提案不采用；另外把 min 改成 15 后，默认值 60（`:235`）与下限之间仍有距离，用户仍可能手输非法值再被夹回，提示缺失只解决了一半"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "MEDIUM",
+          "category": "状态指示 / 操作反馈",
+          "location": "apps/web/src/views/kb/KBConnectorsView.vue:38（触发与反馈 `:308-317`）",
+          "finding": "手动同步是全程无状态指示的阻塞请求：按钮没有 `loading`、也没有 `disabled`，请求进行中可反复点击，每次都是一次真实的全量同步写入（`apps/services/knowledge-base/src/app/kb_connector_routes.py:426-461`）；唯一反馈是请求返回后的一句「同步任务已提交」（`:313`），而它描述的动作在请求返回时其实已经完成了——属于操作反馈与真实状态不一致",
+          "fix": "不新增动效，只补状态：复用仓库已有模式 `syncingId` + 按钮 `:loading`/`:disabled`（`apps/web/src/views/kb/KBOperationsView.vue:187-195`），并把 `:313` 的假反馈替换为对结果弹窗的指向"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会 / 防止突变突兀",
+          "location": "apps/web/src/views/kb/KBConnectorsView.vue:291、`:305` → `:10-13`",
+          "finding": "保存成功后（`:291`）与删除数据源后（`:305`）都调 `loadData()`，于是 `:10-13` 的 loading 分支把整个 `.connector-list` 卸载、换成 padding 48px 的 spinner，再整体重建；卡片网格 `.connector-list`（`:366-370`）高度在这一次交互中归零又回来，滚动容器 `.connectors-content`（`:332-337`，`overflow-y: auto`）的滚动位置与\"我刚改的是哪一张卡\"的视觉锚点一起丢失",
+          "fix": "不新增动效：把 `loading` 限定为首次加载，保存/删除后的刷新保留旧数据渲染 + 局部 busy 指示（例如卡片自身的状态），避免整段卸载重建；符合 Less is more 里\"减状态\"优先于\"缓动效\"的顺序"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBConnectorsView.vue:324-472（整段 scoped 样式）",
+          "finding": "本页自研动效为零：`transition`、`animation`、`@keyframes`、`:hover`、`@media` 在本文件 grep 全部零命中；页面上唯一\"动\"的是 Element Plus 自带件（`:11` 的 `is-loading` 旋转图标、`:63` 与 `:105` 两个弹窗的出场），它们走 EP 自己的过渡变量，与 `--transition-fast/base/smooth` 无关联；好处是本页不动任何高频元素，风险是弹窗时长与曲线完全不受本项目 token 约束（`EnhancedEmpty` 的插画 hover 位移问题已在 03-entry 报告，本页仅复用它两次：`:21-26`、`:133-138`，此处不重复）",
+          "fix": "维持现状不要在 `:324-472` 新增自研动效；若要统一弹窗手感，只改 EP 的主题变量（如 `--el-transition-duration`），不要给本页新增逐元素的 transition"
+        }
+      ]
+    },
+    {
+      "report": "10-kb-operations",
+      "title": "10 知识库运维",
+      "task_steps": 11,
+      "elements": {
+        "necessary": 15,
+        "deletable": 4,
+        "mergeable": 5,
+        "sinkable": 5,
+        "rows": 29,
+        "raw_tags": {
+          "必要": 15,
+          "可删": 4,
+          "可下沉": 5,
+          "可合并": 5
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/kb/KBOperationsView.vue:215（同类：:96-98、:130-132、:180-182、:218-219）",
+          "gain": "少一次判断",
+          "cost_risk": "需要为 `job_status` / `document_status` / `outcome` / `last_run_outcome` / `connector_type` / `resource_type` 各补一份中文映射与未知值兜底（映射源：api/kb.ts:332-420）；映射表会随后端枚举漂移，维护成本落在本文件。若只改 `:215` 一处，收益最小（只影响事件流），反而不值得单独改。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBOperationsView.vue:5,38,64,148,207",
+          "gain": "少一次判断",
+          "cost_risk": "`:38` 是页面上唯一写出后端依赖来源（readyz）的位置，删后排障的人需要另找；`:64`/`:148` 的「优先处理…」是流程指引，删前需确认这套优先级在治理页或文档里有承载。纯文案删除，无功能风险。"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/kb/KBOperationsView.vue:69-82、153-170（样式 :542-568）",
+          "gain": "少一次判断",
+          "cost_risk": "`dead_letter_documents`（api/kb.ts:379）与 `recent_failed_runs`（api/kb.ts:406）没有对应列表，直接删盒会让这两个数失去落点，必须指定归属或明文放弃该指标（需产品决定）；列表为空时，指标盒是卡片里唯一还有内容的元素，合并后冷启动页面会更空。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBOperationsView.vue:196",
+          "gain": "少一次误操作",
+          "cost_risk": "删除后连接器行右侧只剩「立即同步」，用户无法从某一条直接跳到连接器配置——但该按钮本来就不带 `connector_id`（固定跳 `/workspace/kb/connectors`），删掉不损失任何深链能力；若产品要「从这条去配置」，那是新增，本审计不建议。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBOperationsView.vue:222（样式 :615-624）",
+          "gain": "少一次判断",
+          "cost_risk": "删除后本页看不到事件负载详情，需要先确认审计日志页（入口 MainLayout.vue:291-295，路径 `/workspace/audit`）或事件接口能提供等价信息；若不能，排障时 `trace_id` 之外的证据会消失。另见存疑中关于 details 内容卫生的未决问题。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/kb/KBOperationsView.vue:31（触发点 :9、:13、:18；逻辑 :286-293）",
+          "finding": "三个入口（范围、天数、刷新）都会置 `loading = true`，经 v-if（`:31`/`:33`）把 `.operations-content` 整块卸载再重建，过渡是浏览器瞬时替换：内容塌陷成一行虚线框文案再弹回，滚动位置与「刚才看到的那一条」同时丢失，用户无法区分「在加载」与「刷新后跳回顶部」。",
+          "fix": "内容不卸载，把加载态下沉到工具栏（`:18` 已有 `:disabled=\"loading\"` 绑定可复用）；只有首次加载（`operations === null`）保留页面级占位。若确要过渡，只动 `opacity`、时长 ≤ `var(--transition-fast)`（style.css:46），并依赖全局 `prefers-reduced-motion` 兜底（style.css:806-815）。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBOperationsView.vue:26、110、194（按钮态）；:434-496（样式定义）",
+          "finding": "本视图全部交互控件都是手写 `<button class=\"toolbar-button\">` 与原生 `<select class=\"toolbar-select\">`（模板中无任何 el-* 组件，仅 `:231` 引入 ElMessage），因此拿不到全局 `.el-button` 的 hover 反馈（style.css:652-654 primary、:661-665 plain）；本文件内也完全没有 `:hover` / `:active` / `transition`（全文件检索无命中），请求期只能靠文案变化（`:26`「执行中...」、`:110`「重试中...」、`:194`「执行中...」）。",
+          "fix": "改用 `el-button` / `el-select`，或给 `.toolbar-button` 补齐与全局一致的**即时** hover（house style 是即时 `opacity: .9`，不是过渡——先对齐，不要为此新增动效）。若确要过渡只用 `var(--transition-fast)`，且必须包在 `@media (hover:hover) and (pointer:fine)` 内（本文件当前没有该包裹，属全局已知问题在本页的实例）。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBOperationsView.vue:334、350、366",
+          "finding": "三个写操作全部用原生 `window.confirm` 二次确认，其中 `:366` 文案「确认执行当前所有到期连接器吗？」既不说作用范围（取决于 `:9` 的范围选择器），也不说作用数量（`:371` 硬编码 `limit 10`，而「当前到期」的数字只显示在另一个卡片的指标盒 `:163`）。原生模态不可样式化、不继承 token 与过渡，与随后的 ElMessage（`:340`、`:356`、`:372`）视觉语言割裂。",
+          "fix": "改用 `ElMessageBox` 并把「将执行 N 个（上限 10）」写进文案；或将确认下沉为卡片内行内确认。不要在没有后端幂等性结论前直接删除确认（见存疑）。"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBOperationsView.vue:423、429、441、558、603（字号）；:484-496、537-538（颜色）；:615-624（字体）",
+          "finding": "硬编码 16px / 13px / 22px / 14px / 12px 五档字号，以及 `#2f7d1f` / `#b26a07` / `#c03838` / `#8a5800` 与 `rgba()` 状态色，均无 token 来源（style.css:32-35 只有 4 档字号）；同一份 ingest 数据在 EntryView.vue:88-93 显示为「解析失败 / 长期卡住」，本页显示为「失败文档 / 长时间卡住」（`:72`、`:80`）；事件 details 的 `<pre>` 未指定字体，落到浏览器默认等宽，未用 `--font-mono`（style.css:7）。",
+          "fix": "字号改用 `--text-h2` / `--text-body` / `--text-caption`。状态色在本 token 集里没有语义色（无 green / amber / red），直接回退到 slate / blue 会让「失败 / 降级」失去颜色区分——需产品先决定是否补语义色 token，否则宁可维持现状。"
+        }
+      ]
+    },
+    {
+      "report": "11-kb-debugger",
+      "title": "11 检索测试（检索调试器）",
+      "task_steps": 10,
+      "elements": {
+        "necessary": 17,
+        "deletable": 2,
+        "mergeable": 2,
+        "sinkable": 2,
+        "rows": 23,
+        "raw_tags": {
+          "必要": 17,
+          "可下沉": 2,
+          "可合并": 2,
+          "可删": 2
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/RetrievalDebuggerView.vue:209、220-224",
+          "gain": "少一次误操作",
+          "cost_risk": "请求失败时 catch 会清空 `results/retrievalStats/traceId`，而 `hasRun` 已在发请求前置真（RetrievalDebuggerView.vue:209），于是失败被渲染成「未命中任何切片 / 尝试调整查询词或检查知识库内容」（RetrievalDebuggerView.vue:61-66）——用户会据此得出「库里没这块内容」的结论并去改查询词。改法无需新增元素：删掉 catch 里的三行清空，并把 `hasRun` 置真移到成功分支。代价：重跑失败时面板保留上一次的结果，存在被误读成本次结果的风险（toast 是瞬时的，request.ts:128）；若判定该风险不可接受，就得新增一个「本次运行失败」标记，那违反默认删除"
+        },
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/kb/RetrievalDebuggerView.vue:22-32",
+          "gain": "少一次判断",
+          "cost_risk": "两个可选参数常驻在必填路径上，默认路径上用户要对 4 个字段做判断而不是 2 个。折叠后，需要按文档缩小范围的少数用户多一次展开，且折叠期间用户可能不知道有这个能力，把「召回噪声」误判为库内容问题。风险：`limit` 默认 10（RetrievalDebuggerView.vue:178）与后端默认 8（retrieve.py:279）不一致，折叠前应先对齐口径，否则「默认值」含义不明"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/kb/RetrievalDebuggerView.vue:74-81、86-88、99-102、109-113",
+          "gain": "少一次判断",
+          "cost_risk": "同一个概念有三套写法：阶段计数用中文（结构/全文/向量/融合/重排，RetrievalDebuggerView.vue:75-79），重排方式又是一个中文短语（RetrievalDebuggerView.vue:88），卡片里是英文 `Score:`/`Rerank:`（RetrievalDebuggerView.vue:100-101）加后端信号键名（structure/fts/vector/rerank，RetrievalDebuggerView.vue:110-111）。用户要自己推断「融合 3」和「structure 1.2000」是不是同一套通道。代价：改文案会打破现有断言（RetrievalDebuggerView.test.ts:136-141 断言 `structure 1.2000`、`fts 0.8000`、`FTS #1` 等），必须同步改测试；且信号键由后端动态给出（retrieval.py:53），做中文映射时对未知键必须保留原样，否则新信号会显示成空白"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/RetrievalDebuggerView.vue:74-81（配合接口声明 137-149）",
+          "gain": "少一次误操作",
+          "cost_risk": "向量通道失败时后端返回空列表并把 `[\"vector\"]` 写进 `degraded_signals`（vector_store.py:213-217），一路带到 stats（retrieve.py:413-420、retrieve.py:563），本页把它渲染成「向量 0」，与「确实没有向量命中」完全同形；用户会据此去改分块，实际是通道故障。改法不新增元素：`degraded_signals` 非空时，把那一枚 chip 从「向量 0」改成「向量 降级」——同一位置、同一枚 chip，只换语义。代价：前端接口需补 `degraded_signals`（RetrievalDebuggerView.vue:137-149 目前没有该字段），要确认「降级」对非工程用户可读；该字段只在 Qdrant 抛异常时产生，正常数据无法回放，必须人为停 Qdrant 或断网才能验证"
+        },
+        {
+          "action": "降层级",
+          "target": "apps/web/src/views/kb/RetrievalDebuggerView.vue:99-102",
+          "gain": "少一次判断",
+          "cost_risk": "两枚标签用两种语义色表达同一类数据：`Score` 是 `type=\"info\"`（灰）、`Rerank` 是 `type=\"success\"`（绿），而绿色在 Element Plus 里表示「成功」，用户会把它读成质量判定（「这条好」），它其实只是重排分数。同时这两枚标签的信息已分别在 chip 行出现（RetrievalDebuggerView.vue:109-113）。降层级 = 去掉语义色与标签外观，改为与 chip 同级的等宽文本，并让 rerank 只保留一处。代价：卡片头部失去彩色锚点后，10 条结果的分数更难扫读，需要改由字重和列对齐来承担；另需确认删掉 `Score` 标签后该值仍可见——`signal_scores` 里没有 final 总分这个键（retrieval.py:53），只有在 `debug` 缺失时才回退到 `evidence_path.final_score`"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113",
+          "finding": "装饰插图挂 `:hover` 做 `scale(1.05) rotate(2deg)`，300ms，`cubic-bezier(0.34, 1.56, 0.64, 1)`（带过冲），而 `.default-illustration` 内无任何交互监听（EnhancedEmpty.vue:99-109）——纯装饰元素给出了可点的错觉；本页经 `:54`、`:61` 两处渲染该组件，「等待测试」恰是首屏状态",
+          "fix": "删除该 hover 变换与其 transition；若确要保留，须包进 `@media (hover: hover) and (pointer: fine)` 并去掉过冲曲线"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 目的与频次",
+          "location": "apps/web/src/views/kb/RetrievalDebuggerView.vue:49-52、68",
+          "finding": "提交即把整个结果区换成居中 spinner：无延迟阈值、无过渡，旧结果瞬间跳空。检索是几十次/天的高频循环，快请求会闪一下，重跑时用户失去上一轮对照",
+          "fix": "去掉整块 loading-state（结果区内不再放 spinner），只保留按钮 `:loading`（RetrievalDebuggerView.vue:36）与结果区的轻量置灰；若要保留整块替换，至少加 300ms 延迟显示阈值"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长",
+          "location": "apps/web/src/views/kb/RetrievalDebuggerView.vue:50",
+          "finding": "`el-icon.is-loading` 继承 Element Plus 的 `rotating 2s linear infinite`（node_modules/element-plus/theme-chalk/el-icon.css）——检索这种亚秒到数秒的过程，2 秒转一圈偏慢，看不出「还在动」",
+          "fix": "本页覆盖为 ~0.9s linear（保持线性、不引入缓动曲线），或改用 Element Plus 的 `v-loading` 指令统一"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/RetrievalDebuggerView.vue:296、306、327、362、380、393、406、412",
+          "finding": "8 处硬编码 px 字号（12/12/13/16/12/14/12/12），全部绕过已定义的 `--text-caption/--text-body/--text-h2`（style.css:32-35）",
+          "fix": "换成 token；同时 `.results-header h3`（RetrievalDebuggerView.vue:290-292）只设了 margin，字号落到浏览器 UA 默认 1.17em（≈18.7px），比页头 `--text-h2`（1.125rem，PageHeaderCompact.vue:42）还大——层级倒挂，应显式指定 `--text-h2` 或 `--text-body`"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍",
+          "location": "apps/web/src/views/kb/RetrievalDebuggerView.vue:50",
+          "finding": "全局 reduced-motion 规则把动画压成 0.01ms/1 次（style.css:806-815），本页唯一的「进行中」视觉指示因此变成一张静止图标，只剩「检索中...」文案（RetrievalDebuggerView.vue:51）",
+          "fix": "该全局问题已在已知清单；本页特例只需保证文案本身足够（现状可以），或在降低动效时改为 opacity 呼吸"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/kb/RetrievalDebuggerView.vue:68",
+          "finding": "结果刷新没有任何「已更新」反馈（`v-else` 直接切换），用户要重新读一遍才能确认是新结果",
+          "fix": "不建议在此处补位移/缩放动效（几十次/天，按频次规则应砍）；若确实存在「结果是否属于本次查询」的困惑（看存疑），用文本回显本次 query / 时间更省，不动画"
+        }
+      ]
+    },
+    {
+      "report": "12-kb-document",
+      "title": "12 文档详情",
+      "task_steps": 9,
+      "elements": {
+        "necessary": 22,
+        "deletable": 7,
+        "mergeable": 16,
+        "sinkable": 10,
+        "rows": 55,
+        "raw_tags": {
+          "必要": 22,
+          "可删": 7,
+          "可下沉": 10,
+          "可合并": 16
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "`KBDocumentView.vue:18`（配套文案 `:1018`）",
+          "gain": "少一次误操作",
+          "cost_risk": "「按当前版本提问」在 `is_current_version=false` 时，实际请求的是当前页面这一版（`goChat` 无参取 `document.id`，`:1012-1014`），兜底问句（`:1018`）却写着「当前版本」，会有答错版本的观感。改文案会削弱「一键按最新版提问」的直达感；若改为历史版本页禁用该主按钮，则历史版本页失去主按钮位置，需要版本卡内 `:144` 承接。"
+        },
+        {
+          "action": "合并",
+          "target": "`KBDocumentView.vue:93-101`（与 `:18-19`、`:144`、`:158` 共 7 个入口）",
+          "gain": "少一次判断",
+          "cost_risk": "收敛为「头部 1 个主入口 + 版本卡内 1 个绑定该版本的入口」后：提交按钮留在头部，用户在 textarea 打完字要回到顶部提交；留在面板内则和头部主按钮重复，必须二选一并固定位置。版本卡内「按此版本提问」与「比较提问」合并后，单版本提问与对比提问要靠下拉表态，多一次点击。截图焦点入口（`:98`）必须保留，否则「聚焦截图提问」失效。"
+        },
+        {
+          "action": "下沉",
+          "target": "`KBDocumentView.vue:5-17`（编辑 / 切片管理 / 删除 / 重试）",
+          "gain": "少一次误操作",
+          "cost_risk": "四类管理动作收进一个入口后，删除与重试各多一次点击；下拉项需按 `canWrite` / `canManage`（`:535-536`）逐项禁用，否则变成「点开才发现没权限」；重试当前依赖 `latest_job.retryable`（`:10`）即时可见，收进菜单后排障时多一次展开。"
+        },
+        {
+          "action": "删除",
+          "target": "`KBDocumentView.vue:5` 的硬编码返回目标",
+          "gain": "少一步",
+          "cost_risk": "改成 `router.back()` 后，从问答引用（`CitationList.vue:124`）或新标签直接打开时没有浏览历史，会退出站点；必须保留 fallback 到治理列表 `/workspace/kb/governance`（`router/index.ts:108-115`）。另外顶栏面包屑是纯文本 span（`MainLayout.vue:84-90`），不可点，删掉返回按钮后「回到列表」只剩侧边栏一条路。"
+        },
+        {
+          "action": "删除",
+          "target": "`KBDocumentView.vue:227-244`（默认态恒空的差异 tab）",
+          "gain": "少一次误操作",
+          "cost_risk": "按 `compareVersionReady`（`:545`）同条件隐藏后，「当前版本与自身比较」的入口消失（本就没有内容）。风险：隐藏逻辑若复用 `compareVersionReady`，将来后端对 (id,id) 真返回差异时会被一并藏掉；el-tabs 会在两 tab 与三 tab 之间切换，需确认默认选中 `content`（`:504`）仍有效。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "无障碍",
+          "location": "`KBDocumentView.vue:283-291`、`:302`（样式 `:1507-1513`、`:1546-1557`）",
+          "finding": "截图缩略图与区域条只有 `@click`，没有 `tabindex` / `role` / 键盘处理，样式只有 `cursor: pointer`。而「截图焦点」会进入提问上下文（`:565-578`、`:1028-1036`），键盘与读屏用户完全无法设置它。",
+          "fix": "改为 button 语义或加 `tabindex=\"0\"` + `role=\"button\"` + Enter/Space，焦点态用现有 ring 变量；偿还：把每个区域条里的置信度/坐标（`:305-310`）删掉，降低 tab 序列噪音。"
+        },
+        {
+          "severity": "HIGH",
+          "category": "缺失的机会",
+          "location": "`KBDocumentView.vue:143`、`:165-246`",
+          "finding": "点「查看内容」后内容渲染在整套版本列表之后，无滚动定位、无 loading 反馈，唯一可见变化是卡片描边（`:1339-1342`）；同页的截图焦点却已有 `scrollToVisualAnchor`（`:715-729`）。多版本时用户会以为没反应而重复点击。",
+          "fix": "复用 `:715-729` 的模式把检查器滚入视野，或让检查器在卡片内联展开；偿还：`version-card--active` 的 `box-shadow` ring 可删，由内容变化本身承担反馈。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能",
+          "location": "`KBDocumentView.vue:1159-1170` 与 `:764`、`:777`、`:1000`",
+          "finding": "同一次点击同时走显式调用和 watch 两条链路，全量像素 diff 跑两遍：每遍 2 次 `getImageData` + 逐像素循环（`apps/web/src/views/kb/kbVisualCompare.ts:165-193`，320×220 约 7 万像素），并对 `visualDiffState` 连续写两轮。",
+          "fix": "只保留一条触发链路（显式调用或 watch 二选一）。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "可打断性 / 物理性",
+          "location": "`KBDocumentView.vue:728` 与 `:1172-1177`",
+          "finding": "一次区域点击会连续启动两次 `scrollIntoView({behavior:'smooth'})`：`focusVisualRegion`（`:767-778`）先调一次，随后 `router.replace`（`:775`）触发 route watch → `syncVisualFocusFromRoute`（`:731-744`）再调一次，后一次会打断前一次。",
+          "fix": "固定单一 owner（建议 route → sync 一条），去掉点击路径上的直接滚动。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长 / 一致性与 token",
+          "location": "`KBDocumentView.vue:1264`、`:1490`、`:1556`",
+          "finding": "三处 `transition: ... 0.2s ease`：硬编码时长 + CSS 预设曲线 `ease`，未用 `--transition-fast/base`（`apps/web/src/style.css:46-48`）。",
+          "fix": "统一换 token；进入类动效如需自定义用 `cubic-bezier(0.23,1,0.32,1)`。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "`KBDocumentView.vue:897-899`、`kbVisualCompare.ts:182-185`、`KBDocumentView.vue:1515-1520`",
+          "finding": "同一个「变化」概念用了三套颜色：差异框 `#f97316`、掩膜 `rgb(217,45,32)`、缩略图区域框 `#d92d20` + `rgba(217,45,32,0.14)`；图例文案只说「橙框」（`:378-379`），与实际红框不符。",
+          "fix": "收敛到一个 token 色 + 一个描边色；文案改为与颜色一致。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "无障碍",
+          "location": "`KBDocumentView.vue:728`",
+          "finding": "JS 的 smooth scroll 不受 `prefers-reduced-motion` 约束——全局只在 `style.css:806-815` 与 `styles/responsive-enhancements.css:252` 清 CSS 动画与过渡，管不到 `scrollIntoView`。本仓仅此一处 JS 平滑滚动（grep `scrollIntoView` 只有本文件）。",
+          "fix": "读 `matchMedia('(prefers-reduced-motion: reduce)')`，命中时用 `behavior: 'auto'`。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次",
+          "location": "`KBDocumentView.vue:1256-1271`",
+          "finding": "预设问题 chip 的 hover 位移 `translateY(-1px)` + `box-shadow` 属「好看」类，不对应空间一致性/状态指示/操作反馈/防突变任何一类；hover 属数十次/天频次，规则要求极简或砍掉。",
+          "fix": "删掉 `transform` 与投影，只留 border-color / 字重变化；本页唯一的 `:hover` 规则就是这一条。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "无障碍",
+          "location": "`KBDocumentView.vue:1267`",
+          "finding": "该 `:hover` 位移未包在 `@media (hover:hover) and (pointer:fine)` 内；全仓 `*.vue` 中该 media 出现 0 次。触屏上会出现粘滞 hover。",
+          "fix": "与上一条一并处理（位移删掉即无此问题）；如需保留 hover 效果再包裹 media。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次 / 缓动与时长",
+          "location": "`apps/web/src/components/EnhancedEmpty.vue:108-113`（在本页被实例化 8 次：`:110`、`:179`、`:228`、`:254`、`:275`、`:328`、`:339`、`:346`）",
+          "finding": "空状态插画（非交互装饰元素）在 hover 时 `scale(1.05) rotate(2deg)`，缓动是回弹曲线 `cubic-bezier(0.34,1.56,0.64,1)` 0.3s。既不对应任何允许的动效理由，又用在不可点击的元素上。",
+          "fix": "删除 hover 缩放与旋转；如确需提示可交互，改由容器自身状态表达。"
+        },
+        {
+          "severity": "LOW",
+          "category": "物理性与原点",
+          "location": "`KBDocumentView.vue:1493-1497`",
+          "finding": "选中态用 `translateY(-1px)` 表达（在网格里与相邻卡片基线不齐），而选中态已由 border + ring + 背景三重视觉表达。",
+          "fix": "删位移，保留 border/ring；同一时刻只留一个最重的选中信号。"
+        }
+      ]
+    },
+    {
+      "report": "13-kb-chunk",
+      "title": "13 切片管理",
+      "task_steps": 7,
+      "elements": {
+        "necessary": 18,
+        "deletable": 7,
+        "mergeable": 3,
+        "sinkable": 2,
+        "rows": 30,
+        "raw_tags": {
+          "必要": 18,
+          "可合并": 3,
+          "可删": 7,
+          "可下沉": 2
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBChunkReviewView.vue:35、:200-214",
+          "gain": "少一次误操作",
+          "cost_risk": "需要用已返回的 `section_id` / `chunk_index`（apps/services/knowledge-base/src/app/kb_chunk_governance.py:91-93）判\"真实相邻\"：跨小节时按钮消失，用户失去\"跨小节合并\"的假能力（后端本就 409 拒绝，kb_chunk_governance.py:467-468）；确认框还要写明\"保留上一段，后一段的正文与人工备注会被并入后删除\"（后端把文本并进 `chunk_index` 较小的一条并 DELETE 其余，kb_chunk_governance.py:473-509，且合并不带上后一段的 `manual_note`）——文案变长会让这个低频对话框更重"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBChunkReviewView.vue:34、:175-181",
+          "gain": "少一次误操作",
+          "cost_risk": "后端拆分时会把原切片强制 `disabled = FALSE`（apps/services/knowledge-base/src/app/kb_chunk_governance.py:383），所以用户\"拆一段已停用的切片\"会静默把它放回检索。若产品认为\"拆分=人工修边，本就该重新启用\"，只需在拆分对话框加一句提示；若改成禁止拆分已停用切片，用户要先启用再拆分（多一步），且会挡住\"拆完再停用\"的合理路径。前端无法单方面决定，需要后端确认这是有意还是漏写"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBChunkReviewView.vue:11-14、:105、:119-127、:143/:194/:211",
+          "gain": "少一步",
+          "cost_risk": "改成\"列表保持可见（局部 loading）+ 变更落点反馈\"会用到后端已返回的 `counts`（apps/services/knowledge-base/src/app/kb_chunk_routes.py:31-35），而它只在 `include_disabled=true` 时才是全量真值——只改文案不同时改请求参数会显示错误数字；就地替换列表需要消费写接口的返回体（split/merge 已返回 `items`，kb_chunk_governance.py:451、:538；PATCH 只返回单条，kb_chunk_governance.py:346-349），前端逻辑会比现在的\"无脑重取\"复杂，回滚时也不再有一份权威全量"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/kb/KBChunkReviewView.vue:58、:74-80",
+          "gain": "少一次误操作",
+          "cost_risk": "对话框标题拼上 `#序号 / 小节` 后变长，窄屏更容易折行（两个对话框写死 `width=\"600px\"`，`:58`、`:74`，而 Element Plus 的 `.el-dialog` 基础样式没有 max-width，node_modules/element-plus/theme-chalk/src/dialog.scss:18）；给片段删除按钮补文字会压缩 textarea（行内 `flex: 1`，`:77`）；修好图标要在本文件新增一行 `@element-plus/icons-vue` 的 import（全仓无全局注册，apps/web/src/main.ts:27-34），用一行 import 换掉两处字符串图标"
+        },
+        {
+          "action": "降层级",
+          "target": "apps/web/src/views/kb/KBChunkReviewView.vue:31、:33-43、:257-275",
+          "gain": "少一次判断",
+          "cost_risk": "删掉 ID 前缀后，排障时少一个可核对的标识（只能挪进编辑对话框，那又是一处新增信息）；去掉 `warning` 色后「拆分」与「编辑」只靠文字区分（两者都是对同一段做结构/文本修改，本来也不需要色差）；删掉阴影后卡片与页面底色更接近，必须在实机上确认 `--border-color`（rgba 8%）在 `--bg-panel-muted` 上仍能划出边界——这是纯视觉验证项"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/kb/KBChunkReviewView.vue:11-14、:143/:194/:211",
+          "finding": "每个写操作（保存 / 拆分 / 合并）后调 `loadChunks()` 整表重载，列表被 `.loading-state` 整体替换再重建：滚动位置丢失，也没有\"改动落在哪\"的指示，用户得重新找到刚改的那一段",
+          "fix": "消费写接口返回的 `items`（apps/services/knowledge-base/src/app/kb_chunk_governance.py:451、:538）就地替换；或重载后保留滚动位置，只对受影响切片做一次入场反馈（仅 opacity / transform，<300ms）"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长 / 性能",
+          "location": "apps/web/src/styles/theme-extras.css:131-144（在 apps/web/src/layouts/MainLayout.vue:103 生效）",
+          "finding": "本界面唯一的页面级动效是 `page` 过渡：`opacity .25s ease, transform .25s ease` + `translateY(6px)`，用了 `ease` 预设曲线；进入本页时它还与 `loadChunks()` 的加载态叠加——先\"页面滑入 + 加载中\"，再列表出现，同一个\"内容出现\"被表达两次",
+          "fix": "入场曲线换 `cubic-bezier(0.23,1,0.32,1)`，或让首屏加载不参与这次过渡（数据未到时不做位移）"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "无障碍 / 目的与频次",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113（本页空态 apps/web/src/views/kb/KBChunkReviewView.vue:16-21 渲染它）",
+          "finding": "空态插图挂 `:hover` 做 `scale(1.05) rotate(2deg)`、300ms、`cubic-bezier(0.34,1.56,0.64,1)` 过冲曲线；它是纯装饰、无任何交互监听，却给出可点的错觉，且未包在 `@media (hover: hover) and (pointer: fine)` 内（触屏会粘住 hover）。另：全局 reduced-motion 只把 duration 清零（apps/web/src/style.css:806-814），本处 `transform` 仍会瞬间生效",
+          "fix": "删掉该 hover 变换；若保留，reduce 下必须把 scale/rotate 一并去掉。同一组件在 docs/design-audit/round1/07-kb-upload.md 已按 HIGH 记过一次，此处只记录本界面的实例，不另立结论"
+        },
+        {
+          "severity": "LOW",
+          "category": "状态指示 / 一致性与 token",
+          "location": "apps/web/src/views/kb/KBChunkReviewView.vue:263-266",
+          "finding": "禁用态由 `opacity: .6` + `background: var(--bg-body)` 表达，而 `--bg-body` 未定义 → 背景那半条失效，只剩整体降透明度；用户要结合「禁用原因」tag（`:50`）才能确认这是被停用、而非加载或不可用",
+          "fix": "改用已存在的 `--bg-panel-muted`，或左侧 2px 边框；`opacity` 保留即可，不必加过渡（停用是低频操作）"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBChunkReviewView.vue:6、:234、:257-260、:279、:289、:75-80",
+          "finding": "就地数值散落：内联 `margin-left: 16px`（`:6`）与页头自身 12px gap 叠加、容器 padding 16px（`:234`，`--content-gap` 是 20px）、手写阴影（`:260`，全仓唯一）、字号 13px / 14px（`:279`、`:289`，刻度是 12 / 15）、拆分对话框内联 16/10/8px（`:75-80`）",
+          "fix": "统一回到已有 token；`--bg-body` 与手写阴影属死值，可直接删"
+        }
+      ]
+    },
+    {
+      "report": "14-platform-agent",
+      "title": "14 Agent 工作台 / Prompt 库",
+      "task_steps": 9,
+      "elements": {
+        "necessary": 9,
+        "deletable": 8,
+        "mergeable": 4,
+        "sinkable": 0,
+        "rows": 21,
+        "raw_tags": {
+          "可删": 8,
+          "必要": 9,
+          "可合并": 4
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/AgentProfileView.vue:46",
+          "gain": "少一次判断",
+          "cost_risk": "删掉与运行时矛盾的\"未启用任何插件\"，用户不会再把一个其实带 3 个默认工具的智能体当成\"没能力\"而重复配置。代价：空插件状态在卡片正面不再有任何文字，用户要开弹窗才知道详情；若想改成\"默认插件\"文案，则是新增文案元素，偿还物是同时删掉 `:312-317` 的「启用插件:」小标题与 `:43` 这一行"
+        },
+        {
+          "action": "加反馈",
+          "target": "AgentProfileView.vue:125-139（配合 :15-20）",
+          "gain": "少一次误操作",
+          "cost_risk": "`loadData` 只有 try/finally 没有 catch，三个并发请求任一失败时 `profiles` 保持 `[]`（`:133`），页面走 v-else-if 显示\"暂无智能体\"，与\"真的一个都没建\"不可区分（请求层只给一条 3 秒 toast）；补一个失败态后用户不会误以为自己的智能体被删光。真实代价：要新增\"加载失败 + 重试\"这一态与文案（可用 `EnhancedEmpty` 现成 `actions` 槽，`apps/web/src/components/EnhancedEmpty.vue:17-19`），并且本页无单测，只能人工回归"
+        },
+        {
+          "action": "合并",
+          "target": "AgentProfileView.vue:39-40,42-48",
+          "gain": "少一次判断",
+          "cost_risk": "卡片正面三块原始数据（两个布尔标签 + 一串英文工具 id + 一行小标题）合成一行中文事实：能力用弹窗已有的中文名（`:71-74`）、知识库用已加载的 `bases` 名称（`:80,134`）、Prompt 用已返回的模板名（`gateway_platform_store.py:42`）。代价：要做 id→名称映射并处理\"库/模板已被删\"的回退显示；合并后行数减少但每行更长，扫视速度略降；另外，platform_admin 会看到所有人的智能体（`gateway_platform_store.py:150-153`）而卡片不显示归属人，若要在这条事实行里带上归属，前端需比对 `authStore.user.id`（`apps/web/src/store/auth.ts:5,14`）并复制 admin 例外判断"
+        },
+        {
+          "action": "删除",
+          "target": "AgentProfileView.vue:3",
+          "gain": "少一次判断",
+          "cost_risk": "删掉页内 h1 后，\"这张页面叫什么\"只剩侧栏/顶栏一个答案（「Agent 工作台」）。收益不只是去重：标题里的\"市场\"承诺了浏览/共享，而后端 `chat_agent_profiles` 没有任何 visibility/公开列（迁移 006:13-24），列表对非管理员只返回自己的记录（`gateway_platform_store.py:150-153`）。代价：页头只剩一行 12px 副标题（`:3` 的 subtitle 保留），页面上半部分视觉层级变弱；若要保留标题，就需要同时改文案与副标题（新增改动面），本提案选择删除"
+        },
+        {
+          "action": "删除",
+          "target": "AgentProfileView.vue:243,246-249",
+          "gain": "少一次误操作",
+          "cost_risk": "卡片不是可点元素，却给了 hover 边框变色 + 阴影浮起 + `transition`，用户会去点卡片；删掉后不再有假的可点暗示，同时消灭一处未定义 token（`--blue-400`）与一处硬编码阴影色。代价：网格里卡片之间的边界不再有动态强调，扫视时更平；此处只给\"悬停反馈\"这一层信息，删除后无需替代物"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 缓动与时长",
+          "location": "apps/web/src/views/platform/AgentProfileView.vue:243,246-249",
+          "finding": "卡片是不可点容器（只有 `:33-34` 两个按钮有事件），却有 hover 动效：`transition: box-shadow/border-color var(--transition-base)`（`:243`，200ms 本身在 token 内）动的是 `box-shadow` 这类非合成属性；hover 属\"数十次/天\"档，规则要求极简或砍掉；`border-color: var(--blue-400)` 的变量全仓 0 处定义，按 CSS 变量未解析时\"计算值无效\"的规则会落到 `currentColor`（深色）而不是蓝色，`box-shadow: 0 4px 12px rgba(0,0,0,0.05)` 也不等于 `--shadow-md`（`apps/web/src/style.css:51`）",
+          "fix": "删掉 `:246-249` 整块 hover 与 `:243` 的 transition（Less is more 第一步）；若产品确实想让卡片可点，应改成\"整卡可点 + 一条明确的进入动作\"，而不是只补装饰"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "防止突变突兀",
+          "location": "AgentProfileView.vue:10-13 与 :22 互斥，由 :126 的 `loading.value = true` 触发（保存后 :182、删除后 :196）",
+          "finding": "任何一次保存/删除都会把整个网格（`v-else` 分支）卸载，换成居中 spinner 再重建；用户点完\"保存\"看到的是页面被清空又回来，滚动位置与视觉焦点丢失",
+          "fix": "不新增动效：保留旧卡片继续渲染，只在页头/局部给出进行中指示（保存按钮 `:92` 已有 `saving` loading，可复用到删除路径），避免整段卸载重建"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "AgentProfileView.vue:246-249（对照 apps/web/src/views/platform/PromptTemplateView.vue:219-227）",
+          "finding": "同类两个页面（同一 `platform-page` 容器模式）一个卡片有 hover 边框+阴影+transition、另一个完全没有；差异不是能力差，而是两种列表语言",
+          "fix": "以界面 B（无 hover 动效）为基准统一，即在 A 里删除；不要反过来给 B 增加动效"
+        }
+      ]
+    },
+    {
+      "report": "15-platform-models",
+      "title": "15 模型接入",
+      "task_steps": 6,
+      "elements": {
+        "necessary": 28,
+        "deletable": 7,
+        "mergeable": 7,
+        "sinkable": 5,
+        "rows": 47,
+        "raw_tags": {
+          "必要": 28,
+          "可合并": 7,
+          "可下沉": 5,
+          "可删": 7
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/ModelProviderView.vue:55",
+          "gain": "少一次误操作",
+          "cost_risk": "「停用」是唯一的下线入口且即刻生效：请求成功后本地直接过滤掉该行（:362），列表里再也找不到它，无撤销。加确认会多一次点击；若改为「停用后仍留在列表并置灰」，需后端 `list` 接口继续返回 `enabled=false` 的项（当前前端假定它被移除，`script:362`），属于接口契约变更，须先与后端确认。"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/platform/ModelProviderView.vue:37-59",
+          "gain": "少一步",
+          "cost_risk": "把「已保存模型配置」压进探测流程需要把探测到的模型直接写成 `ModelProviderConfig`（当前 `createModelProviderConfig` 只接受弹窗里的手填字段，`script:338-353`），并要求后端打通两套存储；不打通就只能保留现状。另一个风险：核心用户若本来就是「只维护保存好的配置、从不做探测」，下沉会让他的高频路径变长。"
+        },
+        {
+          "action": "降层级",
+          "target": "apps/web/src/views/platform/ModelProviderView.vue:16-35",
+          "gain": "少一次判断",
+          "cost_risk": "四张卡在首屏最上方，会让人以为那是本页主内容，而实际主内容是它下方的探测表单。下沉/删除会牺牲「当前生效配置」的一眼可见性；`Base URL` 与 `密钥状态` 是运维排障时的常用事实，若删掉需确认没有别的入口能一眼看到它们（`已配置路由` 表只在 `routeEntries.length > 0` 时才渲染，`:193`，路由为空时这两项事实会彻底消失）。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/ModelProviderView.vue:151-166",
+          "gain": "少一次判断",
+          "cost_risk": "下拉框与表格同源（`:254`），读者要先判断「该用哪个」。风险：下拉框是键盘可达、可输入筛选的路径，表格 `@row-click`（`:168`）对键盘用户不可达 —— 直接删除会把只靠键盘的用户挡在选模型这一步之外，必须先把行选择补成可聚焦控件，否则不能删。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/ModelProviderView.vue:184-190",
+          "gain": "少一次误操作",
+          "cost_risk": "未选模型时 `<pre>` 仍渲染 `LLM_MODEL=<select-a-model>`（`:277-278`、`:310`），看起来是一份完整可用的配置；复制按钮虽被 `:disabled`（`:184`），但正文仍可被手选复制。改为未选模型时不渲染正文（或显式标记为占位），代价是失去「先看一眼最终产物长什么样」的可预期性，对首次使用者不利；折中是保留结构但把占位符显式标红。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次 / 无障碍",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113（本视图经 apps/web/src/views/platform/ModelProviderView.vue:143-148 触发）",
+          "finding": "空态插画（72px 图标容器）带 `transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)`，hover 时 `scale(1.05) rotate(2deg)`。弹性缓动曲线不在允许集合内；且未包在 `@media (hover:hover) and (pointer:fine)` 内，触屏上会留下粘滞 hover 与倾斜姿态。它不是引导/首次成功类愉悦时刻，只是一个静态占位图标。",
+          "fix": "删除该 hover 位移与缩放；若要保留反馈，仅保留容器 border/背景的 color 过渡，并包进 `@media (hover:hover) and (pointer:fine)`。"
+        },
+        {
+          "severity": "LOW",
+          "category": "缓动与时长",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108",
+          "finding": "时长 0.3s（300ms）未使用既有 token（`--transition-fast/base/smooth` = 150/200/250ms），是 token 外的第三套时长刻度。",
+          "fix": "若保留动效则改用 `--transition-base`；本项目当前 `prefers-reduced-motion` 是用通配符整体清零（apps/web/src/style.css:806-815），所以删动效不额外欠无障碍债。"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/ModelProviderView.vue:138-148",
+          "finding": "`discovering`（`:380`）驱动的三态（加载 / 空 / 结果）之间是硬切换：`:138` 的 `v-if`、`:144` 的 `v-else-if`、`:150` 的 `v-else` 没有任何过渡。加载态出现/消失属于「防止突变突兀」，是允许动效的少数场景之一。",
+          "fix": "只对加载态容器加 opacity 过渡（150–200ms，token 内），不动尺寸；不要从 scale(0) 起。"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/ModelProviderView.vue:421-562（scoped `<style>` 全文）",
+          "finding": "本视图自身零 `transition` / `animation` 声明（全文仅 `:557` 一个 `@media`），所有交互动效都来自 Element Plus 默认值与 `EnhancedEmpty`。这意味着本视图的动效基调完全由外部决定，无法在本文件内统一。",
+          "fix": "无需新增；相反，本视图是本轮里「动效最少」的样板，保持现状即可，不要为了「一致性」引入新动效。"
+        }
+      ]
+    },
+    {
+      "report": "16-platform-monitor",
+      "title": "16 Agent 监控 / 成本分析",
+      "task_steps": 12,
+      "elements": {
+        "necessary": 32,
+        "deletable": 15,
+        "mergeable": 12,
+        "sinkable": 2,
+        "rows": 61,
+        "raw_tags": {
+          "必要": 32,
+          "可删": 15,
+          "可合并": 12,
+          "可下沉": 2
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/AgentMonitorView.vue:14-35",
+          "gain": "少一次误操作",
+          "cost_risk": "会失去「整体是否变差」的一眼概览。5 张卡里 3 张无法原地修好：「总执行次数」要把 `limit=50`（`:321`）与状态筛选（`:322`）拆开才谈得上「总」，而接口的 `total` 就等于本次条数（`apps/services/api-gateway/src/app/gateway_platform_routes.py:216`），要真数字必须新增后端聚合接口；「任务拆解率」「自检通过率」缺少可用判据（后端 summary 恒返回 `complexity_score`（缺省 1）与可为 null 的 `reflection_passed`，`gateway_platform_routes.py:190-192`）。若只留「平均延迟」，它同样只统计 `completed`（`:258`），单独一张卡更需要口径注释，不如删净。另：`.stats-row` 是 5 列硬网格无断点（`:362-367`，`apps/web/src/styles/responsive-enhancements.css` 内无 `.stats-row` 规则），窄屏下每卡约 57px（375px 视口减 40px padding 减 4×12px gap），删卡同时消掉这个溢出风险。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:205、:223、:229、:246、:252；apps/web/src/views/platform/AgentMonitorView.vue:517、:520-522、:579-580、:611、:620",
+          "gain": "少一次误操作",
+          "cost_risk": "这 11 处引用的 `--blue-400`/`--green-400`/`--orange-400`/`--red-400`/`--red-500`/`--red-600` 在仓库里没有任何定义：`apps/web/src/style.css:9-20` 只定义 slate 系列与 `--blue-500/600/700/50`，运行时注入器 `apps/web/src/utils/theme.ts:11-57`（浅色/深色两套）也没有这些键。按 CSS 变量规范，声明会在 computed-value 阶段失效并回退为 unset：条形填充（`:223` 的 gradient、`:246`、`:252`）变透明，状态左边框（`AgentMonitorView:517`、`:520-522`、`:579-580`）整条不再绘制，反思区红蓝强调（`:611`、`:620`）退回普通文字色。修复不得新增色板（本轮约束），只能用已存在的变量：条形改 `--blue-500`，状态色改 Element Plus 语义色 `--el-color-success/-warning/-danger`（Element Plus 在 `:root` 已定义，`AgentMonitorView:283-285` 里的 `#67c23a/#e6a23c/#f56c6c` 正是它们）。风险：EP 语义色与主色 `--blue-600` 并置的对比度、以及深色模式下是否要另调，必须真机看过再定；若选择「删声明不换色」更省事，但会让「哪一步失败 / 是否熔断」失去第一眼信号，所以这里选择换色而不是删。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:21-35（另一个触发点：apps/web/src/views/platform/AgentMonitorView.vue:53-58、:330-340）",
+          "gain": "少一次误操作",
+          "cost_risk": "现在「失败」与「真的是 0」完全同形：成本页 `loadData` 是 try/finally 无 catch（`:182-194`），失败时 `costData` 保持 null，四张卡渲染成 `¥0.000000 / 0 / 0`（`:21-35`），而 ¥0 是一个看起来非常合理的值；Agent 页 `loadRuns` 同样无 catch（`:318-328`），首屏失败显示「暂无运行记录」（`:53-58`），详情请求失败则保留上一条运行的 `runDetail`（`:330-340` 未置空、无 catch），用户会把 A 运行的详情读成 B 的。代价：两个文件都要加失败分支；要净增 0 个元素，就得复用已有的空态/加载态容器（`EnhancedEmpty` / `.loading-state`），把「空」与「失败」映射到同一容器、用文案区分——实现时须确认不会同时渲染两份容器。风险：如果后端在失败时仍返回 200 + 空数组（未验证），前端的失败分支永不触发，那就得先统一后端契约，前端单独改无效。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:132-142",
+          "gain": "少一次误操作",
+          "cost_risk": "趋势窗口硬编码 `by_day.slice(-14)`（`:137`），页头时间范围却是 7/30/90 天（`:5-9`），其余三节都按完整区间渲染（后端按 `period_days` 过滤，`apps/services/api-gateway/src/app/gateway_platform_routes.py:355`）——选「近 90 天」时这张图只画最后 14 天且无任何标注，等于给出一个会被误当成 90 天趋势的图形；柱子数值只存在于原生 `title`（`:138`），键盘与触屏都拿不到。代价：删掉后成本页只剩「按模型 / 按场景」两个切分，判断「本期是否比上期贵」需要外部手段。若不想删，最小修法是让窗口跟随选择器，但 90 根柱子在窄屏会挤成一团，需要先定聚合粒度（如按周），这已不是本页能单独决定的产品取舍。"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:44-112",
+          "gain": "少一次判断",
+          "cost_risk": "「按模型成本分布」与「模型健康状态」是同一批模型的两次呈现，且顺序不同：前者来自 SQL 的 `ORDER BY estimated_cost DESC`（`gateway_platform_routes.py:361`），后者是健康字典的插入顺序（`apps/services/api-gateway/src/app/model_health.py:246-258`）。判断「最贵的模型是否正在熔断」现在必须靠模型名在两处肉眼对齐。风险：两个数据源的模型集合不同——成本只含区间内有调用的模型，健康表含进程内见过的所有模型，取交集还是并集决定了是否会出现「成本 0 但状态健康」的行；合并后行内会有 6–7 列，窄屏需要横向滚动（当前 `model-health-grid` 用 `minmax(260px, 1fr)` 自适应，`:227`）。这两点必须在实现前定下来。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 缓动与时长",
+          "location": "apps/web/src/views/platform/CostDashboardView.vue:223、:246、:252",
+          "finding": "三处 `transition` 动的是 `width`（0.5s）/ `height`（0.3s）——布局属性，属明令禁止项；0.5s 超过 UI 动效 300ms 上限；未使用 `--transition-*` token（走浏览器默认 `ease`）。同时这三处过渡大概率从不播放：刷新时 `v-if=\"loading\"`（`:38`）先卸载整个 `<template v-else>` 内容，重建后的元素不会再触发首次样式过渡。",
+          "fix": "直接删除这三处 `transition`。若确实要提示「数值变了」，用 `opacity`/`color`（≤200ms，token 内），不要动尺寸。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 一致性与 token",
+          "location": "apps/web/src/views/platform/AgentMonitorView.vue:178、:182、:186、:190（同类：apps/web/src/views/platform/CostDashboardView.vue:90）",
+          "finding": "继承 Element Plus 默认：`node_modules/element-plus/theme-chalk/el-progress.css` 的 `.el-progress-bar__inner{transition:width .6s ease}`。600ms 是上限的两倍，且动的是 `width`；本组两页共 5 处 `el-progress` 全部命中。",
+          "fix": "若保留进度条，加 scoped `:deep(.el-progress-bar__inner){transition:none}`（或改为只过渡 `transform`）；若采纳元素清单里「进度条可合并/可删」的意见，本条随之消失。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "无障碍 / 一致性与 token",
+          "location": "apps/web/src/views/platform/AgentMonitorView.vue:427-429（同类：apps/web/src/views/platform/CostDashboardView.vue:253）",
+          "finding": "`:hover` 未包在 `@media (hover:hover) and (pointer:fine)` 内（全局已知问题，此处是本文件的特例）：hover 用的 `--blue-400` 未定义，悬停边框实际回退为 `currentColor`（深墨色），而选中态用的是已定义的 `--blue-500`（`:431-434`）→ 同一张卡片上「悬停」比「选中」更重，两套反馈语言；触屏上该悬停态会粘滞残留。",
+          "fix": "触屏部分用 `@media (hover:hover) and (pointer:fine)` 包住；色值改用已存在的 `--blue-500`，或干脆去掉 hover 变色（选中态已足够表达当前项）。"
+        },
+        {
+          "severity": "LOW",
+          "category": "目的与频次",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113（本组经 apps/web/src/views/platform/AgentMonitorView.vue:53-58、apps/web/src/views/platform/CostDashboardView.vue:130、:142 触发）",
+          "finding": "空态插画 hover 时 `scale(1.05) rotate(2deg)`，0.3s 弹性曲线 `cubic-bezier(0.34,1.56,0.64,1)`，且未包 hover 媒体查询。空态是静态占位，不属于「空间一致性/状态指示/操作反馈/防止突变」四类允许理由。",
+          "fix": "删掉位移与旋转；若要保留反馈只保留 `opacity`/`color`。同一发现已在 `docs/design-audit/round1/15-platform-models.md` 登记为组件级问题，此处仅登记本组的触发点。"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/AgentMonitorView.vue:48-58（同类：apps/web/src/views/platform/CostDashboardView.vue:38-43）",
+          "finding": "加载态 → 空态/内容之间是硬切换，无过渡。",
+          "fix": "不建议新增：刷新是用户主动触发的「数十次/天」档动作，按规则应保持不动。仅当真机上确认加载态闪烁明显时，才用 `opacity` 150ms（token 内）过渡，且不动尺寸、不入场缩放。"
+        }
+      ]
+    },
+    {
+      "report": "17-platform-tools",
+      "title": "17 工具管理 / 记忆管理",
+      "task_steps": 10,
+      "elements": {
+        "necessary": 22,
+        "deletable": 13,
+        "mergeable": 5,
+        "sinkable": 3,
+        "rows": 43,
+        "raw_tags": {
+          "必要": 22,
+          "可删": 13,
+          "可合并": 5,
+          "可下沉": 3
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/MemoryManagerView.vue:122-131",
+          "gain": "少一次误操作",
+          "cost_risk": "搜索态下分页器会把用户带到未经过滤的数据：`@current-change=\"loadMemories\"`（`:128`）恒调列表接口，而搜索走的是另一条链路（`:222-237`），且搜索返回的 `total` 就是它返回的行数、上限 50（`gateway_platform_routes.py:322`、`:310`，前端写死 `limit: 50` 见 `:229`）。命中超过 pageSize=20（`:177`）时，点第 2 页看到的是与关键词无关的记忆，用户可能在那里停用错误的条目。代价：禁用分页器后（仅搜索态）用户无法翻看第 21-50 条匹配结果；根治办法是给搜索加 offset 分页，但后端 `search` 路由没有 offset 参数（`gateway_platform_routes.py:310`），在补齐前\"隐藏分页器\"比\"显示一个会跳错数据的分页器\"更保守。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/ToolManagerView.vue:60-62",
+          "gain": "少一次判断",
+          "cost_risk": "同一状态在卡内有 tag 与开关两处表达，且 `effect=\"dark\"` 的 tag 是卡内最重的视觉元素，与工具名（`:59`）争夺第一眼。只能删 tag：删开关会失去唯一操作入口。代价：扫视多张卡时\"哪些被停用\"的识别信号变弱，只能靠开关小圆点的位置/颜色（Element Plus 默认尺寸较小，色彩编码对色觉障碍用户不友好），需确认停用状态在实际网格里是否仍能一眼分辨。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/ToolManagerView.vue:14-31",
+          "gain": "少一次判断",
+          "cost_risk": "四张卡占据首屏最上方、最重的层级，但它们不参与\"定位并停用某工具\"：`:19-22` 与 `:34-37` 的 Tab 同源，`:23-26`、`:27-30` 在本页没有任何操作入口，`:15-18` 还会与分类过滤后的列表长度冲突。代价：MCP 服务数与缓存条目数将失去全站唯一展示位（`getToolRegistrySummary` 在整个前端只被 `:104` 这一处引用），需确认这两个数字是否还有人消费；另外首屏不再显示工具总数，分类过滤时列表长度不等于总数。"
+        },
+        {
+          "action": "降层级",
+          "target": "apps/web/src/views/platform/MemoryManagerView.vue:85-91",
+          "gain": "少一次判断",
+          "cost_risk": "置信度用了\"条长 + 三档色 + 数字\"三重编码，而决策只需要数字本身；`:87` 的三个色值是 EP 默认色板、不在 token 内，等于在本页引入了第三套颜色语义。代价：失去按低/中/高扫视分组的能力，而表格没有 `sortable`、也没有按置信度筛选的入口——如果\"靠颜色一眼找出低置信度记忆\"是用户的真实工作流，降为纯数字会让它变慢。需先确认该工作流是否存在，再在\"保留色彩编码并补排序\"与\"降为纯数字\"之间二选一。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/MemoryManagerView.vue:135-143",
+          "gain": "少一次判断",
+          "cost_risk": "chips 有圆角胶囊外观却没有任何交互（`:139` 无 `@click`），给用户\"可以点进去看这个主体的记忆\"的错误预期；且位于表格与分页之后，与本页唯一任务无关。代价：失去记忆库主题分布的唯一致视图；若产品确有\"点主体即筛选\"的意图，后端 `search` 已支持 `subject ILIKE`（`gateway_platform_routes.py:313`）具备实现条件，但那是新增交互，需要先偿还——不能以\"将来可能有用\"作为保留理由。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/ToolManagerView.vue:246-248",
+          "finding": "`.tool-card:hover` 的 `border-color: var(--blue-400)` 引用了一个不存在的变量：`--blue-400` 在 style.css:17-20 与 utils/theme.ts:11-35（明暗两套）中都没有定义，本仓库 `src/` 内共有 8 个文件、9 处引用它，0 处定义。自定义属性未定义时该声明在计算值阶段失效，`border-color` 回退到初始值 `currentColor`——即卡内继承的文字色：浅色主题下 hover 让边框变近黑，深色主题下变近白，与\"蓝色高亮\"的意图完全相反。",
+          "fix": "二选一：删除整条 hover（该卡不可点击，见下条）；或改用已定义的 `--blue-500`/`--blue-600`。变量本身应补进 style.css:1-84 与 utils/theme.ts 的明暗两套变量——这是跨界面的全局决策，本文件不宜单独引入新色值。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次",
+          "location": "apps/web/src/views/platform/ToolManagerView.vue:243,246-248",
+          "finding": "hover 只改边框色，却加在一个没有任何 click / keydown handler 的静态卡上（`:52`），对不可交互的元素发出\"可交互\"信号；同时它也改变了整张卡片的边框（`:235-238` 的 `1px` 边框），属于\"用边框区分状态\"。按频次规则，hover 属\"数十次/天\"，应极简或砍掉。",
+          "fix": "删除 `:246-248`，以及随之失去意义的 `transition: border-color`（`:243`）。若将来给卡片加上真正的点击目标（例如打开工具详情），再把 hover 恢复到 `@media (hover:hover) and (pointer:fine)` 内并使用 token 时长。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会 / 性能",
+          "location": "apps/web/src/views/platform/ToolManagerView.vue:39-49 与 apps/web/src/views/platform/MemoryManagerView.vue:55-65",
+          "finding": "两个页面都是三态硬切换（`v-if loading` / `v-else-if !length` / `v-else`）。滚动容器是 `.platform-content`（`:184-189`、`:267-272`），加载态把内容整体替换成一个 padding 48px 的提示块（`:218-226`、`:307-315`），容器高度塌陷：切 Tab（`:140-142`）、点刷新（`:5`）、翻页（`:128`）都会让整块内容闪一次、滚动位置回到顶部。加载指示属于允许动效的\"状态指示 / 防止突变突兀\"，但当前做法是\"替换内容\"，方向与目的相反。",
+          "fix": "不要新增动效：保留既有列表，把 loading 表达为覆盖层或行内小指示（刷新按钮已有 loading，`:5`），让内容不再塌陷。若确需过渡，只对指示器本身做 opacity，150–200ms，用 token（`--transition-fast`/`--transition-base`），不动任何布局尺寸。"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/MemoryManagerView.vue:367",
+          "finding": "`.subject-count` 的 `background: var(--blue-100)` 同样引用未定义变量（与动效发现 1 同一类问题）：`background` 简写在计算值阶段失效、回退初始值 `transparent`，计数胶囊实际没有底色，只剩 `:368` 的蓝色文字和 `:369-370` 的圆角内边距。",
+          "fix": "随动效发现 1 一并处理：先补全局定义，或就地改用已定义的 `--blue-50`（style.css:20）。本行是 1 的特例，不单独修复。"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/MemoryManagerView.vue:245-248",
+          "finding": "停用成功后本地直接把 `memory.is_active` 置为 false（`:247`），该行状态 tag 由「活跃」瞬间翻成「停用」（`:96-98`）、操作按钮被替换为纯文本（`:117`），没有任何过渡或短暂强调。在多行列表里，用户不容易确认\"改变的正是我刚点的那一行\"——属于允许动效的\"状态指示 / 操作反馈\"。",
+          "fix": "若判定列表足够短、误认概率低，这条不加也成立。若加：只在本行做一次短暂的颜色/透明度强调（opacity/color，≤200ms，token 内，可被下一次操作打断），并从 `:117` 删除重复的「已停用」文本作为等价偿还。"
+        }
+      ]
+    },
+    {
+      "report": "18-platform-scene",
+      "title": "18 场景模板 / 缓存管理 / 指令模板市场",
+      "task_steps": 18,
+      "elements": {
+        "necessary": 20,
+        "deletable": 10,
+        "mergeable": 8,
+        "sinkable": 6,
+        "rows": 44,
+        "raw_tags": {
+          "必要": 20,
+          "可删": 10,
+          "可合并": 8,
+          "可下沉": 6
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/CacheManagerView.vue:86、:95、:220-222",
+          "gain": "少一次误操作",
+          "cost_risk": "空输入时按钮当前仍可点：`params` 被条件拼成空对象（`:220-221`），后端把三个空串归一为空（apps/services/api-gateway/src/app/gateway_schemas.py:177-185），`clear_all = not any((corpus_id, question, model_name))` 判真（apps/services/api-gateway/src/app/semantic_cache.py:217）→ **点「失效该知识库缓存」（橙色，非危险色）会静默清空全部缓存，而\"清空全部\"本身有二次确认**。代价：需要前端 disabled 校验（含纯空格，后端会 strip）+ 复用 `:203` 已有的危险确认文案；禁用态还需一句说明为什么不能点，否则用户会以为是 bug。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/InstructionMarketView.vue:45（配套 apps/web/src/api/platform.ts:376）",
+          "gain": "少一次误操作",
+          "cost_risk": "「使用」是页面唯一实质出口，点下去必得两条错误提示（拦截器 `apps/web/src/api/request.ts:128` 的\"请求的资源不存在\" + 视图层的\"应用失败\" `:111`）。代价：删掉后「市场」退化为只读目录，用户看完正文无处可去；恢复必须先补后端 `POST /platform/prompt-templates/{id}/apply`（需要产品决定\"应用模板\"到底改什么状态）。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/SceneManagerView.vue:8-20、:66、:76-92",
+          "gain": "少一步",
+          "cost_risk": "一次删掉三个同源元素：标签筛选条（12 标签 × 每标签只命中 1 张卡）、卡片内 prompt 预览、预览弹窗与其中重复的 el-descriptions。代价：若后端将来返回真实长 prompt，被截断的卡片会需要弹窗回来；12 个标签将无处显示（它们对用户目前零判别价值）；删后每张卡只剩 1 个动作，页面变薄——需要接受\"6 张卡一屏看完\"的极简形态。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/SceneManagerView.vue:67-69、:165-184",
+          "gain": "少一次误操作",
+          "cost_risk": "按钮写着「应用此场景」，实际是 `updateAgentProfile('default', {scene_template_key, name})`：`scene_template_key` 不是任何请求模型的字段（apps/services/api-gateway/src/app/gateway_schemas.py:447-453、:475-481），全仓无 `scene_template` 引用，`scene_templates.py` 已在提交 f7f878d 被物理删除；PATCH 失败则回退 `createAgentProfile`（`:171-178`）——重复点击会重复创建同名 Agent Profile，而提示始终是「已应用场景」（`:180`）。代价：要在 UI 上说真话必须先定义\"场景\"与\"Agent Profile\"的关系（是绑定预设还是新建实体）；语义改成\"创建/更新 Agent Profile\"后按钮的理想形态是需要一个目标选择器（新增一个选择器 → 偿还：删掉本轮提案 3 里的标签条与预览弹窗两个元素）。"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/platform/InstructionMarketView.vue:12-20",
+          "gain": "少一次判断",
+          "cost_risk": "三个控件筛同一份列表：搜索（`:12`）、标签下拉（`:13-15`）、可见性单选（`:16-20`）；其中「私有」因取值不匹配恒为空结果（`:89` vs apps/services/api-gateway/src/app/gateway_schemas.py:405）。代价：只剩搜索后，\"只看公共模板\"的批量浏览路径消失（需要确认它是否真是浏览习惯）；标签下拉收起后卡片 tags（`:32-36`）成为唯一出口；删 `private` 态需要产品确认是否真的不做\"仅自己可见\"。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "一致性与 token / 性能",
+          "location": "apps/web/src/views/platform/SceneManagerView.vue:199-201",
+          "finding": "卡片 hover 过渡的是 `border-color` + `box-shadow`：`box-shadow` 不是可合成属性（规则要求只动 transform/opacity）。更实际的问题是 `border-color: var(--blue-400)`（`:200`）引用了**未定义**的变量——全仓无 `--blue-400` 定义（`--blue-600` 才在 apps/web/src/style.css:18）→ 悬停时边框色声明被浏览器丢弃，只剩阴影在变，反馈实际是半失效的",
+          "fix": "悬停只改 `border-color`，色值改用已定义的 `--blue-500`（apps/web/src/style.css:17）或 `--border-strong`（:38）；阴影复用 `--shadow-md` 而非字面量，并把 transition 限定在 `border-color` 上"
+        },
+        {
+          "severity": "HIGH",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/InstructionMarketView.vue:126-127",
+          "finding": "`.template-card:hover { border-color: ... }` 整段 scoped 样式没有任何 `transition` → 悬停瞬间跳变（突变突兀），且这是全页唯一的悬停反馈；同区另一个卡片列表（SceneManagerView:199）却带 200ms 过渡",
+          "fix": "加 `transition: border-color var(--transition-fast)`（apps/web/src/style.css:46）；色值从 `--el-color-primary` 换成 design token `--blue-500`"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/SceneManagerView.vue:199、:200-201 vs apps/web/src/views/platform/InstructionMarketView.vue:126-127、:134",
+          "finding": "同属 platform 区的两个卡片列表用了两套悬停语言：一个靠阴影（SceneManagerView），一个靠主题色边框且无过渡（InstructionMarketView）；圆角也两套：`--radius-md`（12px，apps/web/src/views/platform/SceneManagerView.vue:199）vs 硬编码 `10px`（apps/web/src/views/platform/InstructionMarketView.vue:126），弹窗内 `pre` 又写 `6px`（`:134`，恰为 `--radius-xs` 的值）",
+          "fix": "统一为一个卡片 recipe：`border-color` + `--radius-md` + `--transition-fast`；字面量圆角改回 `--radius-xs` / `--radius-md`"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/CacheManagerView.vue:14-35",
+          "finding": "5 张 stats 卡在 `v-if=\"loading\"`（`:37`）之外，加载中渲染 5 个真实的 `0`（`:16-33` 全部 `|| 0` 兜底），与\"缓存确实为空\"不可区分；页面唯一的\"在加载\"信号是下方一个旋转图标",
+          "fix": "加载中让数值位保持占位（不显示 0），或把 stats 纳入同一个加载态分支；不要把 `null` 兜底成看起来有效的数值"
+        },
+        {
+          "severity": "LOW",
+          "category": "缓动与时长",
+          "location": "apps/web/src/views/platform/SceneManagerView.vue:199",
+          "finding": "卡片悬停用 `--transition-base`（200ms，apps/web/src/style.css:47）；悬停属高频反馈，token 里已有更合适的 `--transition-fast`（150ms，:46）",
+          "fix": "悬停改 `--transition-fast`"
+        }
+      ]
+    },
+    {
+      "report": "19-platform-security",
+      "title": "19 API Key 管理 / Webhook 管理 / PII 脱敏配置",
+      "task_steps": 23,
+      "elements": {
+        "necessary": 28,
+        "deletable": 11,
+        "mergeable": 4,
+        "sinkable": 2,
+        "rows": 45,
+        "raw_tags": {
+          "可删": 11,
+          "必要": 28,
+          "可合并": 4,
+          "可下沉": 2
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/ApiKeyManagerView.vue:99-105（配套 :176-179）",
+          "gain": "少一次误操作",
+          "cost_risk": "明文 Key 只能看一次（api_key_manager.py:140），但关闭方式有三种且都不设防：点亮「关闭」X、按 ESC、**点遮罩**（依赖默认 `closeOnClickModal: true`，apps/web/node_modules/element-plus/es/components/dialog/src/dialog.mjs:143）。任何一次误触 = Key 永久不可见，只能重建。改法：`:close-on-click-modal=\"false\"` + 复制改为 `await` 并在失败时给错误提示（现在无条件提示「已复制到剪贴板」，`:177-178`）+ 底部加一个「我已保存，关闭」。代价：新增 1 个按钮（等价删除 = 本报告元素清单里三页重复的页面级标题，共 3 个元素，净 -2）；若同时禁掉 ESC 关闭，会与用户对弹窗的肌肉记忆冲突，建议只禁遮罩、保留 ESC。风险：`navigator.clipboard` 在非 HTTPS 环境必然 reject（验证方法见存疑），改后需在 http:// 下复测提示文案是否如实"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/WebhookManagerView.vue:36、:142-146",
+          "gain": "少一次误操作",
+          "cost_risk": "「删除」直接调接口且无确认、无撤销（对比 ApiKeyManagerView.vue:169 的撤销有确认）；删除后投递历史也随之消失（后端 `unregister`，gateway_platform_routes.py:691-697），不可恢复。改法与既有习惯对齐：包一层 `ElMessageBox.confirm`。代价：新增 1 次确认交互（等价删除 = 同表「重试」列，元素清单第 27 项，恒为同值零信息，净 -1 元素）。风险：删除是低频动作，确认不会拖慢主流程；但需确认产品是否希望\"删除\"直接放到停用之后（先停用观察一段时间再删）——若是，则确认文案应引导先停用"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/PiiConfigView.vue:122、:51-65",
+          "gain": "少一次判断",
+          "cost_risk": "「测试脱敏」只把 strategy 传下去（`:122`），而检测类型与遮盖字符都取服务端**已保存**的配置（gateway_platform_routes.py:760、:762）→ 用户改了开关或遮盖字符后点击测试，看到的仍是旧口径，容易得出\"我配的生效了/没生效\"的错误结论。改法二选一：测试按钮旁常驻一句「测试使用已保存配置」，并在有未保存改动时禁用测试或提示先保存；或改后端让测试接受 `enabled_types`/`mask_char`。代价：前者新增一段说明文案与一个 dirty 判断（等价删除 = 同页 8 个类型 tag，元素清单第 41 项，净 -7 元素）；后者是接口行为变更，需同步 `docs/`。风险：若选择\"禁用测试直到保存\"，会让\"先试再定\"的探索路径变长一步——这与收益相反，故偏向前者"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/ApiKeyManagerView.vue:15-28",
+          "gain": "少一次判断",
+          "cost_risk": "三张卡里「活跃 Key」展示的是全部 Key 数（`:17-18`），会把已撤销/已过期的 Key 算成活跃 → 用户据此判断\"我还有 5 个在用的 Key\"，实际可能只有 2 个；另两张卡是对表格同数据的聚合（依据见元素清单）。删除后：状态与配额仍逐行可见（`:44-61`）。代价：失去\"一眼看到有几个 Key 配额耗尽\"的聚合信号，用户需扫表；配额耗尽在行内仍有红色进度条兜底（`:49` 的 `exception` 态，阈值 90%）。风险：若将来列表变长（>50 行），聚合信号的价值会上升，届时更该做的是筛选器而不是三张卡"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/WebhookManagerView.vue:27-29、:53-56",
+          "gain": "少一次判断",
+          "cost_risk": "一次改动换掉两个零信息元素：「重试」列全表恒为 3（依据见元素清单），「HTTP」「耗时」两列在失败时给出 `0` 和无效数值。把省下的宽度用来显示失败原因 `error`（\"HTTP 500\" / 连接异常，webhook_manager.py:284-288）——排障时不必再去翻服务端日志，这是\"少一步\"。代价：`error` 字段目前不在这张表的列里，需要新增一列（等价删除 = 上面的「重试」列 + HTTP/耗时并成一格，净 0 元素）；且后端已把 `error` 存库（webhook_manager.py:302），前端拿得到，无需改接口。风险：错误文本可能很长（异常字符串），需要限宽 + `show-overflow-tooltip`，否则会把表格撑变形"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 缓动与时长",
+          "location": "apps/web/src/views/platform/ApiKeyManagerView.vue:47-51（样式来源：依赖内 element-plus/theme-chalk/el-progress.css:1）",
+          "finding": "三个页面的唯一自有动效来自组件库的配额进度条：`.el-progress-bar__inner { transition: width .6s ease }` —— 动的是 `width`（布局属性，规则要求只动 transform/opacity），600ms 超过\"UI 动效一律 <300ms\"，且 `ease` 属被禁的 CSS 预设曲线。表格每行同时有一条这样的过渡（`:44-56` 每行渲染一个 el-progress）",
+          "fix": "在这张表作用域内覆盖为 `transition: none`（数据加载时不该做宽度动画）；若想保留\"配额变化\"的状态指示，改用透明度/颜色这类可合成属性、时长 ≤150ms，并复用 `--transition-fast`（apps/web/src/style.css:46）"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/PiiConfigView.vue:34（样式来源：依赖内 element-plus/theme-chalk/el-switch.css:1）",
+          "finding": "8 个开关共用库默认 300ms（`--el-transition-duration`，theme-chalk/index.css:1）。开关切换属\"数十次/天\"频次，按规则应 ≤150ms；仓库自身有 `--transition-fast: 150ms`（apps/web/src/style.css:46），形成两套时长体系",
+          "fix": "在本页把 el-switch 的过渡覆盖为 `var(--transition-fast)`；不要新增动效，只是把已有的调快"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/platform/ApiKeyManagerView.vue:72、:99；apps/web/src/views/platform/WebhookManagerView.vue:64（样式来源：依赖内 element-plus/theme-chalk/el-dialog.css:1）",
+          "finding": "三页共 3 个弹窗，入场走库默认：遮罩 200ms `ease`、弹窗 300ms。弹窗属\"偶尔\"频次、300ms 在允许区间（200-500ms），**不要求改**；但遮罩用的 `ease` 是被禁曲线，且与仓库 token 曲线（style.css:46-48）不同源",
+          "fix": "记录为已知库默认即可；若要统一，用仓库 token 覆盖 `--el-transition-duration` 与曲线，不要为这三页新写 keyframes"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/WebhookManagerView.vue:129-134",
+          "finding": "点「测试」后只有一句 toast：接口返回的投递结果（含 http_status/耗时，gateway_platform_routes.py:669）被直接丢弃，`deliveries` 也不重新加载（`:106-117` 只在挂载时取一次）→ 页面无任何可视变化，用户无法判断\"目标服务到底通不通\"",
+          "fix": "这不是动效问题，是操作反馈缺失：把返回结果写进提示文案（如「测试已发送：HTTP 200 / 128ms」）或把新投递插到记录表首行。不需要动画"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/PiiConfigView.vue:52-65",
+          "finding": "测试结果区由 `v-if` 从无到有整块出现（含计数、类型标签、脱敏文本），无任何过渡；属\"防止突变突兀\"的可选场景",
+          "fix": "结论是**不加**：这是低频、用户主动触发的整块内容揭示，突变不带来误解；若日后有人要加，下限是 opacity 150ms，且不得用位移/缩放"
+        }
+      ]
+    },
+    {
+      "report": "20-platform-exp",
+      "title": "20 A/B 实验 / Agent 协作编排 / 审计日志",
+      "task_steps": 21,
+      "elements": {
+        "necessary": 38,
+        "deletable": 14,
+        "mergeable": 9,
+        "sinkable": 8,
+        "rows": 69,
+        "raw_tags": {
+          "可删": 14,
+          "必要": 38,
+          "可合并": 9,
+          "可下沉": 8
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/AuditView.vue:24-27",
+          "gain": "少一次判断",
+          "cost_risk": "一级筛选从 6 个控件降到「服务 + 结果」2 个，其余四个移入可展开的高级筛选。代价：想按动作筛的人多一次展开。风险：如果真实查询分布里「动作」其实是高频维度，下沉反而让高频路径变长 —— 这一点我无法从代码判断，需要真实查询日志或使用者访谈验证后再动。"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/AbExperimentView.vue:12-25",
+          "gain": "少一次判断",
+          "cost_risk": "三张卡与列表里的状态 tag 重复表达同一批事实，且「已完成」(:23) 与 tag 文案「已停止」(:36) 用两个词说同一状态，读者要判断它们是不是一回事。代价：列表为空时失去「一共几个实验」这个一眼可见的数。风险：`apps/web/src/views/**` 下另有 7 个视图有同款统计行（AbExperimentView.vue:191-194 与 AgentOrchestrationView.vue:158-161、ApiKeyManagerView.vue:206-209 逐字相同），单删本页会让 platform 区的视觉节奏不一致；要做就整批做，或先确认这是否是刻意的「平台页统一抬头」。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/AuditView.vue:102-114",
+          "gain": "少一次误操作",
+          "cost_risk": "两件事合并在同一个函数里：① `loadAuditEvents` 只有 `try/finally`，没有 `catch`，请求失败时 `events` 保持 `[]`，于是 :34-40 渲染出「暂无审计事件 / 符合条件的审计记录将在此展示」—— 把「查询出错」说成「没有符合条件的记录」，审查者据此可能得出错误结论；② 请求硬编码 `limit: 50, offset: 0`（:107-108），后端返回的 `pagination` 元数据（`apps/services/api-gateway/src/app/gateway_admin_routes.py:78`）被丢弃，用户不知道是否还有更多。代价：需要一个失败态分支与一行范围提示（或分页控件）。风险：后端 `pagination` 只回 `limit/offset/returned`，**没有 total**，所以做不出「共 N 条」，最多说「已加载 50 条，可能还有更多」；要真 total 需改后端。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/AbExperimentView.vue:52",
+          "gain": "少一次误操作",
+          "cost_risk": "「停止」是唯一的实验下线入口，点击即刻生效（:154 → `gateway_platform_routes.py:794-800` → `instruction_evaluator.py:148-153` 置 `is_active=FALSE`），界面无二次确认；同时 `stopExperiment`（:153-157）没有 `try/catch`，请求失败时既不回滚也无任何提示，用户会以为已停而实际还在跑。代价：低频操作多一次点击。偿还：同页删除 3 张统计卡（:12-25）与「创建于」行（:47-49）之后，本页净元素仍为减少。风险：加确认对话框会引入一个 `ElMessageBox`，需确认它在深色主题下的样式已被 `theme-extras.css:64-74` 覆盖（已覆盖，此项风险低）。"
+        },
+        {
+          "action": "加反馈",
+          "target": "apps/web/src/views/platform/AgentOrchestrationView.vue:18-21",
+          "gain": "少一次误操作",
+          "cost_risk": "「执行成功率」按 `failure_count === 0` 计成功（:132），零 Worker 的运行（`sub_tasks` 为空或全部未执行）也会被算成成功，卡片可能显示一个偏乐观的数；同时分母是当前返回条数（:131），后端 limit 默认 50（`gateway_platform_routes.py:815`）而界面从不说明。代价：卡片下方多一行口径说明（或改成「最近 N 次运行中的成功率」）。风险：我这个判断基于对 `:132` 的静态阅读，**没有确认后端在运行进行中 / 被取消时如何填 `success_count` / `failure_count`** —— 见存疑第 2 条，验证前不要改逻辑本身的语义。"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 无障碍",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113（本报告经 `apps/web/src/views/platform/AbExperimentView.vue:28` 与 `apps/web/src/views/AuditView.vue:34-40` 两处触发）",
+          "finding": "空态插画（72px 容器）带 `transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)`，`:hover` 时 `scale(1.05) rotate(2deg)`。该图标不可点击，hover 不改变任何状态，旋转 2° 是纯装饰；曲线含超调，不在允许集合内；且 hover 未包在 `@media (hover:hover) and (pointer:fine)` 内，触屏上会留下粘滞姿态。",
+          "fix": "删除该 hover 与整条 transition。空态不表达任何状态，属于「可以完全不动」的场景。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108",
+          "finding": "时长 300ms 已达「UI 动效一律 <300ms」的上限，且未使用既有 token（`--transition-fast/base/smooth` = 150/200/250ms，`apps/web/src/style.css:46-48`），是 token 外的第三套时长刻度。",
+          "fix": "若保留则改用 `--transition-base` 并降到 ≤200ms。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/style.css:46-48 vs apps/web/src/views/platform/AbExperimentView.vue:56、:80 / apps/web/src/views/platform/AgentOrchestrationView.vue:63 / apps/web/src/views/AuditView.vue:67",
+          "finding": "项目声明了 `--transition-fast/base/smooth`（`apps/web/src/style.css:46-48`），但全仓没有任何 `--el-transition-*` 覆写（对 `apps/web/src/style.css` 与 `apps/web/src/styles/*.css` 的检索命中数为 0）。因此本报告三个界面里的全部弹窗与抽屉入场动效走 Element Plus 默认曲线与时长，完全不受 design token 管辖 —— 这三页自身零 `transition` / `animation` 声明，动效基调由外部决定。",
+          "fix": "在 `theme-extras.css` 集中把 Element Plus 的过渡变量映射到 `--transition-*`，不要在各视图内单独覆写。"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 一致性",
+          "location": "apps/web/src/styles/theme-extras.css:131-143（经 `apps/web/src/layouts/MainLayout.vue:103` 的 `mode=\"out-in\"` 作用于本报告三个页面）",
+          "finding": "路由过渡 `page` 用 `transition: opacity 0.25s ease, transform 0.25s ease` + `translateY(±6px)`。`ease` 属于被禁止的 CSS 预设曲线；`mode=\"out-in\"` 意味着离场与入场串行，而这三个页面是本次审计里最重的（审计日志是 10 列 × 最多 50 行的整表），整页位移会让大表被合成两次。",
+          "fix": "这三个重内容页收掉位移分量、只留 opacity，或把 `translateY` 换成不含位移的进入方式；曲线改用 `cubic-bezier(0.23, 1, 0.32, 1)`。"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/views/platform/AgentOrchestrationView.vue:33",
+          "finding": "整行可点击打开抽屉，但没有指针光标也没有悬停提示：已核实 `apps/web/node_modules/element-plus/dist/index.css` 只为可排序表头（`.el-table th.el-table__cell.is-sortable`）设 `cursor:pointer`，没有给表体行设置，全仓也没有为 `.el-table__row` 补过。用户不知道行可点。",
+          "fix": "加 `cursor: pointer`（静态样式，零动效成本），不要为此加动效。"
+        }
+      ]
+    },
+    {
+      "report": "21-shared-components",
+      "title": "21 共享组件（页头/空状态/筛选栏/引用列表/文档事件/主题切换）",
+      "task_steps": 8,
+      "elements": {
+        "necessary": 9,
+        "deletable": 26,
+        "mergeable": 7,
+        "sinkable": 3,
+        "rows": 45,
+        "raw_tags": {
+          "可删": 26,
+          "必要": 9,
+          "可下沉": 3,
+          "可合并": 7
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "合并",
+          "target": "apps/web/src/components/CitationList.vue:26-39, :308-318",
+          "gain": "少一次判断",
+          "cost_risk": "meta 行把 9 个字段塞进一行 `white-space: nowrap` + `text-overflow: ellipsis`（:308-318），末尾的「置信度/页码/区域」能不能看见取决于前面字符串的长度——同一条回答里，用户看到的字段集合会随机变化，且被截断的部分没有 title 可查、不能换行。收敛为 3 类（版本 / 位置 / 分数）并允许 `flex-wrap`，同时与 :64-75 的相关性条二选一，行高换来的空间由删除摘要徽章（提案 3）偿还。风险：换行后每张卡高 1–2 行，一屏可见来源数下降；「置信度」与「相关性」语义不同（前者是引用自评，后者来自 `evidence_path.relevance`），保留哪一个必须由后端确认是否同源，选错会让用户拿到不再单调可比的数字；`Math.min/Math.max` 的宽度钳制（:69）在换行后需重新确认不会挤出卡片"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/components/DocumentEvents.vue:30-35",
+          "gain": "少一次判断",
+          "cost_risk": "一个事件的状态被写三遍：图标、流程词、状态 tag。failed 与 uploaded 时流程词与 tag 渲染的是同一串字（:92 与 apps/web/src/utils/status.ts:16；:85 与 :9），ready 时却变成两个词「流程完成」/「可问答」——用户需要判断这两个词是不是一回事，而它恰好是「文档能不能开始问答」这个最关键的状态。保留 el-tag（唯一经过 statusMeta 收敛、且被其它页面共用）或保留图标 + 流程词。风险：statusMeta 也被 KBDocumentView/KBUploadView 的其它位置复用，改 tag 文案会外溢；若选择保留 STAGE_LABELS，则要接受它与全局状态词表出现两套词汇（需要在 utils/status.ts 里对齐，改动跨 3 个文件）"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/components/CitationList.vue:11-16, :231-251",
+          "gain": "少一次判断",
+          "cost_risk": "摘要行右侧固定渲染 3 个 20px 徽章，内容只是 `i + 1`（1、2、3）和一个 `...`：它们看起来是\"来源头像/缩略预览\"，实际不携带任何文档信息，与同一行左侧的「N 个引用来源」完全重复；折叠态下这 3 个数字也无法与任何具体内容对应。风险：头部行会只剩「图标 + N 个引用来源 + 展开箭头」，在窄容器（`.citation-grid` 最小列宽 280px，:256）里视觉上更空，需要确认折叠态的点击热区仍然明显；删除后若产品希望折叠态展示来源线索，只能靠文档名（需要后端在 citations 里稳定提供，当前 `section_title` 可能为空，:25）"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/components/PageHeaderCompact.vue:5-7, :49-57（19 个静态文案调用点，如 AgentMonitorView.vue:3、AbExperimentView.vue:3、ToolManagerView.vue:3、ModelProviderView.vue:5）",
+          "gain": "少一次判断",
+          "cost_risk": "页头副标题承载的是\"这一页是干什么的\"自述文案，与侧栏高亮项、顶栏面包屑表达同一件事，却占掉页头约 24px 高度（56px → 约 78px），把首屏内容整体下压；用户读完标题还要读第二行才知道能不能跳过。删除后页头只剩「标题（已由外壳承担）+ 操作」。风险：KB 类页面用同一槽位显示当前对象名（KBChunkReviewView.vue:3 文件名、KBDocumentView.vue:3 文档名、KBUploadView.vue:3 知识库名），这三处不能删，否则失去\"我在操作哪个对象\"；如果保留 prop 只删文案，会留下\"有时有副标题有时没有\"的不一致，需要按页面类型写进约定；功能说明文案要迁到文档或首次进入引导，否则新用户失去唯一的\"这页能做什么\"提示"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/components/CitationList.vue:121（配合 apps/web/src/views/chat/components/ChatMessageItem.vue:141-145）",
+          "gain": "少一步",
+          "cost_risk": "引用是回答可核查性的本体，但 `activeNames` 初值是空数组（:121）→ 每条回答都必须先点一次「N 个引用来源」才能看到任何一个来源；同时正文里的角标与来源卡片之间没有任何点击联动（ChatMessageItem.vue:141-145 只处理代码复制按钮），核对一条来源的完整路径是\"展开 → 目视按序号找卡片 → 点 44px 链接\"。改为默认展开（或来源数 ≤3 时默认展开）后，核对动作少一步；新增的高度由删除摘要徽章（提案 3）与装饰插画偿还，净增 0 元素。风险：来源多、回答长时每条消息高度显著增加，长会话滚动变长，需要限制默认展开条数（例如展开前 3 条 + \"查看其余 N 条\"），否则\"引用\"从可选项变成必读项；这属于产品对\"证据是否必读\"的取舍，若产品有意弱化引用，应保持现状并只保留提案 1、3；另需确认默认展开后 el-collapse 的 aria-expanded / 键盘路径仍正确（现由 el-collapse 管理，会随 v-model 初值变化）"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "目的与频次 / 物理性与原点",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108-113",
+          "finding": "装饰插画容器（:99-109 内无任何交互监听）挂 `:hover` 做 `scale(1.05) rotate(2deg)`：300ms、回弹过冲曲线 `cubic-bezier(0.34, 1.56, 0.64, 1)`，既不属于允许的四类理由，又对非可点元素给出可点错觉。该组件在 16 个视图被引用（本报告所属组件即为归属方），docs/design-audit/round1/{03,07,11,12,13,15,16} 已各自登记过实例，此处给出组件层结论",
+          "fix": "删除 `:108` 的 transition 与 `:111-113` 的 hover 规则；空态是静态占位，不需要等价替代物"
+        },
+        {
+          "severity": "HIGH",
+          "category": "一致性与 token",
+          "location": "apps/web/src/components/CitationList.vue:351-355",
+          "finding": "`.source-link:hover` 同时改 color / border-color / background（:348 声明了 3 个 0.2s 过渡），但 `border-color: var(--blue-200)`（:353）引用的变量全仓无定义（apps/web/src/style.css:17-20 与 apps/web/src/utils/theme.ts:27-30 只定义 blue-50/500/600/700）→ 该声明在计算值阶段失效，hover 时只有文字与底色变化，描边退回继承色，恰好是\"原文链接\"这个唯一外部入口的反馈不一致",
+          "fix": "删除该声明（三个信号里留两个即可），或改用已定义 token（--border-strong / --blue-500）；同类未定义变量（--blue-400/--blue-100/--green-400/--red-400-500-600）还散布在 8 个视图，见返回摘要 systemic_candidates"
+        },
+        {
+          "severity": "HIGH",
+          "category": "性能 / 缓动与时长",
+          "location": "apps/web/src/components/CitationList.vue:431-435",
+          "finding": "`.relevance-fill { transition: width 0.5s ease }`：动画属性是 `width`（布局属性，规则禁止），时长 500ms 超过 300ms 上限，缓动用的是被禁的 `ease` 预设；而宽度是渲染时由 `:style`（:69）一次性写入的静态值，卡片挂载后再无变更 → 这是一条几乎永不触发的死过渡，一旦触发（流式追加引用导致同卡重算）就是整列卡片同时重排",
+          "fix": "删除该 transition；若确实需要在数据到达时有反馈，用 `opacity` 或条内 `scaleX`（transform）替代，时长 ≤200ms"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "物理性与原点 / 可打断性",
+          "location": "apps/web/src/components/ThemeToggle.vue:117-130, :4",
+          "finding": "icon-spin 入场从 `rotate(-180deg) scale(0.5)` 起（低于入场下限 scale(0.95)），出场到 `rotate(180deg) scale(0.5)`，配 `mode=\"out-in\"` 后一次换图标跑两段约 600ms；旋转方向由 enter/leave 决定，不编码 light→dark 或 dark→light，不构成空间一致性",
+          "fix": "删除旋转与缩放，只保留 opacity 交叉淡入（≤150ms）；或整段删除，图标直接切换"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 一致性",
+          "location": "apps/web/src/components/DocumentEvents.vue:264-274",
+          "finding": "`.event-details` 只有 `overflow: auto`（:267）而无 max-height，高度约束不存在时 auto 不产生滚动条，展开后卡片高度 = JSON 全文高度；它又与 el-collapse 的展开动画叠加在同一条时间线上，长 payload 会把后续事件推出视口。同类未 token 化：`:228` 硬编码 `border-radius: 12px`（应为 --radius-md）",
+          "fix": "给 `.event-details` 加 `max-height` + 滚动，或把详情收进抽屉；圆角改用 --radius-md"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/components/CitationList.vue:237, :285, :334, :366",
+          "finding": "卡片内部的圆角硬编码为 4px（徽章 :237、序号 :285）、3px（meta 标签 :334），都低于圆角刻度的最小档 --radius-xs 6px；缩略图另用 8px 而非 --radius-sm。同一张卡里出现 3/4/8px 三种未入册的圆角，与全站 6/8/12/14 的刻度不一致",
+          "fix": "收敛到 --radius-xs / --radius-sm 两档；与提案 1（meta 行重构）同一处改动"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍 / 状态指示",
+          "location": "apps/web/src/components/ThemeToggle.vue:3, :17, :24",
+          "finding": "触发按钮没有 aria-label，只有 `:title=\"currentLabel\"` 充当可访问名（读屏可用但不稳定，且 tooltip 依赖指针悬停）；菜单里\"当前主题\"同时用 `disabled`、Check 图标、图标色三种方式表达",
+          "fix": "补 aria-label=\"主题：{currentLabel}\"；状态指示只留 Check 一种"
+        },
+        {
+          "severity": "LOW",
+          "category": "缺失的机会",
+          "location": "apps/web/src/components/CitationList.vue:121, :3-18",
+          "finding": "展开/收起属于\"偶尔\"频次，允许一次正常动效；当前完全交给 el-collapse 默认高度过渡，没有任何方向或原点提示（浮层/披露的原点应对齐触发点，模态框除外）。反过来看：若采纳提案 5 让引用默认展开，这条动效需求自然消失",
+          "fix": "维持现状即可，不要为此新增动效；若要动，只做 ≤200ms 的 opacity，不做位移"
+        }
+      ]
+    },
+    {
+      "report": "90-sweep-a11y",
+      "title": "90 跨页扫描：无障碍与交互规则符合性",
+      "task_steps": 6,
+      "elements": {
+        "necessary": 3,
+        "deletable": 4,
+        "mergeable": 3,
+        "sinkable": 1,
+        "rows": 11,
+        "raw_tags": {
+          "必要": 3,
+          "可下沉": 1,
+          "可合并": 3,
+          "可删": 4
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "下沉",
+          "target": "apps/web/src/style.css:53 + apps/web/src/utils/theme.ts:26",
+          "gain": "少一次误操作",
+          "cost_risk": "焦点环改实心 `var(--blue-600)`（1.33:1 → 5.17:1）。代价：浅/深两处 token 必须同时改，且所有原生按钮、链接、input 的焦点外观会明显变重，需视觉回归一遍；另外 `responsive-enhancements.css:286-292` 的 outline 方案要一并合并，否则两套并存继续分叉"
+        },
+        {
+          "action": "下沉",
+          "target": "apps/web/src/style.css:682,700",
+          "gain": "少一次误操作",
+          "cost_risk": "删掉 `background:#ffffff !important` 改 `var(--bg-panel)`。代价：这两条 `!important` 原本是为了压 Element Plus 默认底色，改动后会与 EP 的 `--el-fill-color-blank` 交互，需确认浅色下输入框仍是纯白（否则浅色观感回退）；且影响全站每个表单"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/style.css:806-815",
+          "gain": "少一次判断",
+          "cost_risk": "通配符减动效改为显式白名单，保留加载旋转。代价：必须逐个列出要禁的过渡属性，遗漏项会继续动；同时要确认保留 `animation` 不会让 `el-loading` 的 `scale(1.2)`（responsive-enhancements.css:299-301）在减动效下产生位移感"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/styles/responsive-enhancements.css:33-40",
+          "gain": "少一次误操作",
+          "cost_risk": "把 `.action-chip`/`.text-action-btn`/`.smart-ask-preset`/`.toolbar-button`/`.link-button` 并入触摸目标 `min-height: 44px` 列表。代价：移动端工具栏与聊天头部纵向变高，首屏可见内容减少；`.text-action-btn` 从 16px 涨到 44px 后消息尾部间距会明显变大，需要重新排版"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:252,253 + :254",
+          "gain": "少一次误操作",
+          "cost_risk": "删掉 `.daily-bar` 的 `cursor:pointer` 与 `:hover`，并把 `.daily-label` 的 9px + `rotate(-45deg)` 改成 `var(--text-caption)` 水平排布。代价：柱状图失去 hover 高亮的可探索感，且水平标签在 14 根柱子下可能重叠，需要减少展示天数或改用稀疏刻度"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "无障碍",
+          "location": "apps/web/src/style.css:812",
+          "finding": "`animation-iteration-count: 1 !important` 连带停掉 `.el-icon.is-loading` 的 `rotating` 关键帧，17 处加载指示器在减动效下静止，丢掉\"仍在进行\"这一状态指示",
+          "fix": "改为显式白名单；旋转类动画保留（可降速至 3s），只对 `transition` 的位移/缩放做清零"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能 / 缓动与时长",
+          "location": "apps/web/src/views/platform/CostDashboardView.vue:223",
+          "finding": "`transition: width 0.5s` 动布局属性 `width`，且 500ms 超过 UI 动效 <300ms 上限；同类 :246 `.scene-bar { transition: width 0.5s }`、:252 `.daily-bar { transition: height 0.3s }`，三者都未用 `--transition-*` token",
+          "fix": "改 `transform: scaleX()` + `transform-origin: left`，时长落到 200ms，用 `--transition-base`"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token / 可打断性",
+          "location": "apps/web/src/styles/theme-extras.css:133",
+          "finding": "`.page-enter-active { transition: opacity 0.25s ease, transform 0.25s ease }` 使用 CSS 预设曲线 `ease`（规则明令禁止预设曲线）；`apps/web/src/style.css:175` 的 `.skip-link { transition: transform 0.22s ease }` 同一问题；两者都绕过了 `--transition-*` token",
+          "fix": "改用 `--transition-smooth` 或 `cubic-bezier(0.23,1,0.32,1)`"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "物理性与原点",
+          "location": "apps/web/src/views/kb/KBDocumentView.vue:1264,1268",
+          "finding": "`.smart-ask-preset` 的 transition 同时含 `transform`，`:hover` 用 `translateY(-1px)` 位移；该位移未包在 `@media (hover:hover) and (pointer:fine)` 内，触屏会粘滞残留",
+          "fix": "位移规则包进 `@media (hover:hover) and (pointer:fine)`；transition 收敛为 `transform`+`border-color`"
+        }
+      ]
+    },
+    {
+      "report": "91-sweep-visual",
+      "title": "91 跨页扫描：视觉规则与 design token 符合性",
+      "task_steps": 7,
+      "elements": {
+        "necessary": 6,
+        "deletable": 6,
+        "mergeable": 4,
+        "sinkable": 4,
+        "rows": 20,
+        "raw_tags": {
+          "必要": 6,
+          "可下沉": 4,
+          "可删": 6,
+          "可合并": 4
+        },
+        "unmapped": []
+      },
+      "proposals": [
+        {
+          "action": "合并",
+          "target": "apps/web/src/views/platform/CostDashboardView.vue:205、:223、:246、:252；apps/web/src/views/platform/AgentMonitorView.vue:428、:517、:520-522、:579-580、:611、:620；apps/web/src/views/chat/UnifiedChatView.vue:336；apps/web/src/views/platform/AgentProfileView.vue:247、:261；apps/web/src/views/platform/SceneManagerView.vue:200；apps/web/src/views/platform/ToolManagerView.vue:247；apps/web/src/views/platform/CacheManagerView.vue:264；apps/web/src/components/CitationList.vue:353；apps/web/src/views/kb/KBChunkReviewView.vue:265；apps/web/src/views/platform/PromptTemplateView.vue:259；apps/web/src/views/kb/KBConnectorsView.vue:461；apps/web/src/views/platform/MemoryManagerView.vue:367（12 文件约 40 处）",
+          "gain": "少一次误操作",
+          "cost_risk": "修完之前，4 个可视化（成本条形、场景成本条、每日趋势柱、DAG 状态轨）在非降级数据下也呈现为空白，用户会把\"渲染失败\"当成\"数据为 0\"并据此判断系统正常。风险：映射到现有色板会改变浅色下的观感（`--blue-400` 原意是比 `--blue-500` 更浅的一档，映射到 `--blue-500` 后条形更深），需要一次浅色目视；`--red-500/--red-600` 分别承担\"强警告文字\"和\"错误列表文字\"两种强度，映射到同一个 EP danger 会丢失强度差，需要在 token 层保留 2 档；`border-left` 失效属规范行为推断（未真机复现），落地前必须先用 devtools 确认 `.dag-node` 的 computed border-left-style 为 none"
+        },
+        {
+          "action": "合并",
+          "target": "apps/web/src/style.css:658、:682、:700；apps/web/src/views/kb/KBDocumentView.vue:1221、:1578；apps/web/src/views/kb/KBUploadView.vue:895-896；apps/web/src/views/platform/CostDashboardView.vue:205、:229；apps/web/src/views/platform/ToolManagerView.vue:158-159；apps/web/src/views/platform/MemoryManagerView.vue:367；apps/web/src/views/chat/components/ChatMessageItem.vue:262-263、:307-308、:313-314、:324、:334；apps/web/src/views/chat/components/ChatHeader.vue:230-238；apps/web/src/views/chat/components/ChatInterruptCard.vue:110-111、:140、:146、:165-166；apps/web/src/components/CitationList.vue:353-354；apps/web/src/views/platform/AbExperimentView.vue:192；apps/web/src/utils/theme.ts:11-35",
+          "gain": "少一次误操作",
+          "cost_risk": "深色模式下输入框、文本域、默认按钮是白底 + `#cbd5e1` 文字，用户读不清自己刚输入的内容，可能重复提交。风险：`background: #ffffff !important` 是当初为压住 EP 默认值加的，去掉 `!important` 后 EP 的 `--el-fill-color-blank` 生效，但该变量在浅色下由 apps/web/src/utils/theme.ts:54 内联写入，与 apps/web/src/style.css:67 重复——两处值相同，浅色下无变化，深色下才切换到 #131b2e；组件内 14 处硬编码浅底替换为 `--bg-panel` 后，浅色下会有 #ffffff↔#ffffff 与 #f8fbff→#f1f5f9 的细微色差，需要一次浅色截图回归；还有一批硬编码色（如 #275dad、#059669、#b45309）是深色化文字色，替换时容易连同文字一起改错，建议先只改背景、文字色单独立项"
+        },
+        {
+          "action": "合并",
+          "target": "全仓 331 条 font-size 声明中的 293 条裸值；重点 apps/web/src/views/platform/AgentMonitorView.vue:378-646、apps/web/src/views/platform/CostDashboardView.vue:206-254、apps/web/src/views/chat/components/ChatMessageItem.vue:239-385、apps/web/src/views/EntryView.vue:481-914、apps/web/src/views/platform/CacheManagerView.vue:241-281、apps/web/src/components/CitationList.vue:191-442",
+          "gain": "少一次判断",
+          "cost_risk": "同屏 8 档字号收敛到 ≤3 档后，用户不必再靠字号猜\"哪个数字是主指标\"。风险：12px/15px/18px/22px 这四个裸值与 token 等值，可直接机械替换（92+11+9+5=117 处，零视觉变化，但会改变 CSS 文本，需要过 eslint/stylelint 与 `npm run build`）；13px→12px、11px→12px 共 89 处会让长文本行宽变化、换行点移动，表格行高与固定高度容器（如 apps/web/src/views/platform/CostDashboardView.vue:250 的 120px 趋势区）可能溢出；14px→15px、16px→15px 共 34 处会让紧凑工具栏变高，apps/web/src/views/kb/KBDocumentView.vue 单页 19 条声明需要单独评审；apps/web/src/styles/responsive-enhancements.css:60-190 里还有一组 `!important` 字号覆盖，改组件内字号后需重新核对断点行为"
+        },
+        {
+          "action": "下沉",
+          "target": "apps/web/src/views/kb/KBGovernanceView.vue:916、:926、:928、:929（模板 apps/web/src/views/kb/KBGovernanceView.vue:244→:259→:292→:295）；apps/web/src/views/kb/KBDocumentView.vue:1370-1378→:1419、:1569-1579→:1616；apps/web/src/views/EntryView.vue:470-477→:756-763；apps/web/src/views/kb/KBUploadView.vue:726-729→:739-745；apps/web/src/views/kb/KBConnectorsView.vue:375-380→:439-442；apps/web/src/views/platform/ModelProviderView.vue:469-473→:439-441；apps/web/src/views/platform/PromptTemplateView.vue:221-227→:260-261",
+          "gain": "少一次判断",
+          "cost_risk": "去掉内层表面后，用户不必再区分\"哪层框是可点的卡片、哪层只是分组\"。风险：最深的 4 层那处（apps/web/src/views/kb/KBGovernanceView.vue 低置信区域）一旦去掉后两层底色，展开区就只剩文本，需要改用 2px 左侧竖线 + 8px 缩进表达从属——缩进会压缩该 card 的可用宽度，而它本身已在双列 queue-grid 里（apps/web/src/views/kb/KBGovernanceView.vue:243），窄屏下需要退回单列；`.panel` 同时被 8 个 KB 界面共用（apps/web/src/views/kb/KBGovernanceView.vue:916 与 `.summary-card` 合并为同一条规则），改这一条会影响汇总卡，必须先拆分选择器；EntryView 的 9 个 `.metric-box` 去掉边框后要靠间距区分，19 条相关 scoped 规则需要连带调整；`--border-color` 仅 8% 不透明度（apps/web/src/style.css:37），删除边框后若有元素只剩底色，在浅色下可能几乎不可见，需要保留 `--bg-panel-muted` 一处作为最小可见分组信号"
+        },
+        {
+          "action": "删除",
+          "target": "apps/web/src/views/kb/KBDocumentView.vue:1219-1221、:1576-1578；apps/web/src/views/chat/components/ChatInterruptCard.vue:95；apps/web/src/components/FilterBarSticky.vue:24-27；apps/web/src/views/platform/AgentMonitorView.vue:433；apps/web/src/views/platform/SceneManagerView.vue:200-201；apps/web/src/views/kb/KBDocumentView.vue:1270；apps/web/src/views/chat/components/ChatInterruptCard.vue:147",
+          "gain": "少一次判断",
+          "cost_risk": "装饰渐变与彩色光晕被用户当状态高亮读（尤其 apps/web/src/views/kb/KBDocumentView.vue:1576-1578 的橙色径向光晕与同页\"变化热区\"语义撞车），删掉后\"选中/激活\"只剩边框色一套编码。风险：`apps/web/src/components/FilterBarSticky.vue:25` 的 `color-mix(...,85%,transparent)` 与 backdrop-filter 是一对，只删 backdrop-filter 会留下半透明底导致吸顶栏下方文字透出，两行必须一起删并回退到 :23 的 `var(--bg-panel)`；apps/web/src/views/kb/KBDocumentView.vue:1219-1221 删除后 `.smart-ask-panel` 只剩 1px 边框（:1217），在 KB 文档页一堆同类面板中会与其他 panel 无法区分，需要靠 :1231-1235 的 16px 标题字重来承担\"这是智能提问区\"；三处彩色阴影删除后选中态变弱，需要同时确认 `:hover` 有替代反馈（apps/web/src/views/platform/SceneManagerView.vue:199 已有 border-color 过渡可复用）；渐变删除会让深色模式下这两块的浅底问题一并消失，属于顺带修复，但需在深色下重新确认对比度"
+        }
+      ],
+      "motion_findings": [
+        {
+          "severity": "HIGH",
+          "category": "性能 / 物理性",
+          "location": "apps/web/src/views/platform/CostDashboardView.vue:223、:246、:252",
+          "finding": "三处给布局属性加过渡：`.mc-bar`/`.scene-bar` 是 `transition: width 0.5s`，`.daily-bar` 是 `transition: height 0.3s`，且都用默认 `ease`；同时违反\"只动 transform 和 opacity\"与\"UI 动效一律 <300ms\"",
+          "fix": "改为 `transform: scaleX()/scaleY()` + `transform-origin: left/bottom`，时长 ≤250ms 并引用 `--transition-smooth`；或直接删除过渡（数据首次加载本来就没有\"从 0 长出来\"的语义）"
+        },
+        {
+          "severity": "HIGH",
+          "category": "性能 / 物理性",
+          "location": "apps/web/src/views/chat/components/ChatSidebar.vue:107、apps/web/src/styles/responsive-enhancements.css:394、:520、:632",
+          "finding": "4 处给 width/height 加过渡：侧栏 `transition: width 0.3s ease`（apps/web/src/views/chat/components/ChatSidebar.vue:107）、EP 进度条 `width 0.4s cubic-bezier(0.4,0,0.2,1)`、EP 滑块 `height 0.2s ease`、`.el-progress-bar__inner--anim` `width 0.6s`（该 class 在 element-plus 内无对应修饰符，疑为死规则，见存疑）。前两处是活跃组件：el-progress 在 6 个界面使用（apps/web/src/views/platform/AgentMonitorView.vue:178-190、apps/web/src/views/kb/KBUploadView.vue:152、apps/web/src/views/platform/AbExperimentView.vue:40、apps/web/src/views/platform/ApiKeyManagerView.vue:47、apps/web/src/views/platform/CostDashboardView.vue:90、apps/web/src/views/platform/MemoryManagerView.vue:85）",
+          "fix": "侧栏展开改用 `transform: translateX()` 或直接去掉过渡（数十次/天的操作，规则要求极简或砍掉）；EP 内部属性不要覆盖，删除这 3 条全局规则"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "性能",
+          "location": "apps/web/src/style.css:641、apps/web/src/layouts/AuthLayout.vue:137、apps/web/src/views/kb/KBDocumentView.vue:1264、:1490、:1556、apps/web/src/views/platform/AgentMonitorView.vue:424、apps/web/src/views/platform/AgentProfileView.vue:243、apps/web/src/views/platform/SceneManagerView.vue:199",
+          "finding": "8 处把 box-shadow 放进 transition（例如 apps/web/src/style.css:641 `transition: box-shadow 0.22s ease, transform 0.22s ease` 作用在 `.el-card/.el-alert/.el-timeline-item__node`）。box-shadow 不是合成属性，hover 密集时（卡片列表）会持续重绘",
+          "fix": "选中/悬浮态改为只过渡 border-color 与 opacity；若一定要有阴影变化，把阴影画在一个伪元素的 opacity 上并只过渡 opacity"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "缓动与时长 / 一致性与 token",
+          "location": "全仓 56 条 transition 声明",
+          "finding": "只有 12 条引用 `--transition-*`，10 条用自写 cubic-bezier，**30 条用被规则禁止的 CSS 预设曲线或省略缓动**（省略即 `ease`）：apps/web/src/components/CitationList.vue:348、:434、apps/web/src/components/ThemeToggle.vue:137、apps/web/src/style.css:175、:303、:349、:377、:550、:641、apps/web/src/styles/theme-extras.css:133、apps/web/src/styles/responsive-enhancements.css:368、:400、:410、:425、:466、:520、:581、:608、:644、:688、apps/web/src/views/chat/components/ChatComposer.vue:102、apps/web/src/views/chat/components/ChatHeader.vue:214、apps/web/src/views/chat/components/ChatSidebar.vue:107、:130、:190、:253、apps/web/src/views/chat/UnifiedChatView.vue:331、:431、apps/web/src/views/kb/KBDocumentView.vue:1264、:1490、:1556、apps/web/src/views/platform/CostDashboardView.vue:223、:246、:252",
+          "fix": "缓动曲线在 20 个文件里各写一遍，全站没有两种动效是同一手感；token 里的三条曲线实际覆盖率 21%"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "目的与频次",
+          "location": "apps/web/src/components/EnhancedEmpty.vue:108、:112",
+          "finding": "空状态插画 `transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1)` + `:hover { transform: scale(1.05) rotate(2deg) }`：回弹曲线 + 缩放 + 旋转叠加在**不可点击**的装饰插画上，且 EnhancedEmpty 在 18 处使用，是全站出现最频繁的组件之一",
+          "fix": "整段删除 hover 变换（插画不可点，动效不携带任何状态或空间信息，属规则里\"允许动的理由\"之外）"
+        },
+        {
+          "severity": "MEDIUM",
+          "category": "一致性与 token",
+          "location": "apps/web/src/components/CitationList.vue:434、apps/web/src/views/platform/CostDashboardView.vue:223、:246",
+          "finding": "进度/占比类条形用 `width 0.5s`，其中 apps/web/src/components/CitationList.vue:434 的 `.relevance-fill` 是引用相关度条，属\"数十次/天\"的列表内滚动即可见元素",
+          "fix": "改 `transform: scaleX()` + ≤200ms；相关度条建议完全不动（滚动中出现时动画观感是延迟）"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/chat/UnifiedChatView.vue:331、:431",
+          "finding": "两处过渡都没走 token：`:331` 是 `transition: all 0.2s`（无缓动关键字 + `all`），`:431` 是 `opacity 0.3s ease, transform 0.3s ease`（预设曲线；`all` 已在全局清单，此处报\"无缓动关键字\"这一特例）",
+          "fix": "明确列出要过渡的属性（background-color/border-color/transform），曲线与时长引用 token"
+        },
+        {
+          "severity": "LOW",
+          "category": "一致性与 token",
+          "location": "apps/web/src/views/kb/KBDocumentView.vue:1264、:1490、:1556",
+          "finding": "三处同时过渡 `transform + border-color + box-shadow`（`:1556` 还加 `background`），单条 transition 覆盖 4 个属性，其中 2 个触发重绘",
+          "fix": "拆成两条：`transform`（合成）与 `border-color`（重绘但面积小）；删除 box-shadow/background 过渡"
+        },
+        {
+          "severity": "LOW",
+          "category": "无障碍",
+          "location": "apps/web/src/views/platform/CostDashboardView.vue:253",
+          "finding": "`.daily-bar:hover { background: var(--blue-600) }` 是柱状图唯一的取值反馈，但没有任何数值提示（无 title/无 tooltip），触屏上 hover 不可用（本页 8 档字号中 9px 的标签就是它）",
+          "fix": "若保留交互则改为点击后在固定位置显示数值文本，而不是只改颜色"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "proposals": 115,
+    "proposals_by_action": {
+      "删除": 53,
+      "加反馈": 28,
+      "降层级": 5,
+      "合并": 20,
+      "下沉": 9
+    },
+    "motion_findings": 130,
+    "motion_by_severity": {
+      "HIGH": 26,
+      "MEDIUM": 61,
+      "LOW": 43
+    },
+    "elements": {
+      "necessary": 442,
+      "deletable": 218,
+      "mergeable": 139,
+      "sinkable": 84
+    },
+    "task_steps": 246
+  }
+}
