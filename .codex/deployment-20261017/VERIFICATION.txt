@@ -1,0 +1,56 @@
+Deployment verification record
+Date: 2026-10-17 (Asia/Shanghai)
+Deployment mode: direct SSH/SCP source archive deployment; GitHub Actions was not used.
+Source commit: 8feb249
+Source archive SHA256: fdc52868c1aaad247ada5121fc8c203a9951c275581b92a2009e740bdf6f0abe
+Server: 106.12.154.163
+Application URL: https://kb.byted.online/
+
+Changed branch/field
+- Branch: main
+- Changed field: apps/web/src/router/index.ts platform route access guard and navigation metadata.
+
+Artifacts
+- MODIFIED_FILE: .codex/deployment-20261017/MODIFIED_FILE
+- DIFF_FILE: .codex/deployment-20261017/DIFF_FILE
+- VERIFICATION.txt: .codex/deployment-20261017/VERIFICATION.txt
+- ROLLBACK.sh: .codex/deployment-20261017/ROLLBACK.sh
+
+BASELINE
+Command: npm run test:unit -- src/router/operationsRoute.test.ts (with apps/web/src/router/index.ts restored from HEAD^)
+Literal result: Test Files 1 passed (1); Tests 4 passed (4); BASELINE_EXIT=0
+Exit status: 0
+
+MODIFIED
+Command: npm run test:unit -- src/router/operationsRoute.test.ts
+Literal result: Test Files 1 passed (1); Tests 4 passed (4); MODIFIED_EXIT=0
+Exit status: 0
+Command: cd apps/web && npm run build
+Literal result: build completed successfully; 1679 modules transformed.
+Exit status: 0
+
+DEPLOY
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml build kb-service gateway
+Literal result: kb-service Built; gateway Built
+Exit status: 0
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml run --rm stack-init python -m shared.stack_init
+Literal result: status=ok; gateway already_applied=11 and applied_versions=[012_agent_memory_entries.sql,013_platform_resources.sql]; kb already_applied=13; vector_rebuild skipped (disabled_by_config)
+Exit status: 0
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml up -d --no-build kb-service gateway
+Literal result: gateway healthy; kb-service healthy; qdrant healthy
+Exit status: 0
+Command: curl -fsS http://127.0.0.1:8300/readyz
+Literal result: {"status":"ready"}
+Exit status: 0
+Command: curl -fsS http://127.0.0.1:8080/readyz
+Literal result: {"status":"ready"}
+Exit status: 0
+Command: curl -fsSI https://kb.byted.online/
+Literal result: HTTP/1.1 200 OK
+Exit status: 0
+
+ROLLBACK
+Command: bash .codex/deployment-20261017/ROLLBACK.sh baseline-copy rollback-copy
+Literal result: restored=rollback-copy
+Exit status: 0
+Restored behavior/status: rollback-copy SHA256 equals baseline-copy SHA256; MODIFIED_FILE remains the modified router source.
