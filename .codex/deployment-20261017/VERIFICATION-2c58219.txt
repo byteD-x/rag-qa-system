@@ -1,0 +1,41 @@
+Deployment verification record
+Date: 2026-10-17 (Asia/Shanghai)
+Deployment mode: direct SSH/SCP source archive deployment; GitHub Actions was not used.
+Source commit: 2c58219
+Source archive SHA256: 03b308a987db4419f9d645837c65788204f46de49a0c5a2f7f6a0b90d37bd33b
+Server: 106.12.154.163
+Application URL: https://kb.byted.online/
+
+Changed branch/field
+- Branch: main
+- Changed fields: right-side workspace tabs; business dashboard information architecture and summary metrics.
+
+DEPLOY
+Command: scp .codex/deployment-20261017/rag-qa-system-2c58219.tar root@106.12.154.163:/tmp/rag-qa-system-2c58219.tar
+Literal result: remote SHA256 matched 03b308a987db4419f9d645837c65788204f46de49a0c5a2f7f6a0b90d37bd33b
+Exit status: 0
+Command: cd apps/web && npm ci && npm run build (server)
+Literal result: added 298 packages; 1682 modules transformed; build completed successfully
+Exit status: 0
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml build kb-service gateway
+Literal result: kb-service Built; gateway Built
+Exit status: 0
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml run --rm stack-init python -m shared.stack_init
+Literal result: status=ok; gateway already_applied=13; kb already_applied=13; vector_rebuild skipped (disabled_by_config)
+Exit status: 0
+Command: docker compose -f ops/deploy/docker-compose.lowmem.yml up -d --no-build kb-service gateway
+Literal result: gateway healthy; kb-service healthy; qdrant healthy
+Exit status: 0
+Command: curl -fsS http://127.0.0.1:8300/readyz
+Literal result: {"status":"ready"}
+Exit status: 0
+Command: curl -fsS http://127.0.0.1:8080/readyz
+Literal result: {"status":"ready"}
+Exit status: 0
+Command: curl -fsSI https://kb.byted.online/
+Literal result: HTTP/1.1 200 OK
+Exit status: 0
+
+Rollback
+- Previous source backup: /opt/rag-qa-system-backup-20261017162528.tgz
+- Runtime data and server .env were preserved.
