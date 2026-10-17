@@ -39,3 +39,4 @@ Exit status: 0
 Rollback
 - Previous source backup: /opt/rag-qa-system-backup-20261017162528.tgz
 - Runtime data and server .env were preserved.
+- Updated the server cleanup script line endings before the deployment backup step.
