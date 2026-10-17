@@ -93,7 +93,19 @@
         </header>
 
         <main id="workspace-main-content" class="workspace-content">
-          <router-view />
+          <WorkspaceTabs
+            :tabs="workspaceTabs"
+            :active-key="route.fullPath"
+            @select="selectWorkspaceTab"
+            @remove="removeWorkspaceTab"
+          />
+          <div class="workspace-route-view">
+            <router-view v-slot="{ Component, route: viewRoute }">
+              <KeepAlive :max="8">
+                <component :is="Component" :key="String(viewRoute.name || viewRoute.path)" />
+              </KeepAlive>
+            </router-view>
+          </div>
         </main>
       </div>
     </div>
@@ -191,11 +203,13 @@ import {
   Setting
 } from '@element-plus/icons-vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
+import WorkspaceTabs, { type WorkspaceTab } from '@/components/WorkspaceTabs.vue';
 
 const authStore = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const mobileDrawerVisible = ref(false);
+const workspaceTabs = ref<WorkspaceTab[]>([]);
 
 const navItemsPrimary = [
   {
@@ -320,8 +334,43 @@ watch(
   () => route.fullPath,
   () => {
     mobileDrawerVisible.value = false;
+    openWorkspaceTab();
   }
 );
+
+const openWorkspaceTab = () => {
+  if (!route.path.startsWith('/workspace/') || route.path === '/workspace/forbidden') return;
+  const key = route.fullPath;
+  if (workspaceTabs.value.some((tab) => tab.key === key)) return;
+  workspaceTabs.value.push({
+    key,
+    title: String(route.meta.title || '工作台'),
+    pinned: route.path === '/workspace/entry'
+  });
+  const maxTabs = 8;
+  while (workspaceTabs.value.length > maxTabs) {
+    const removableIndex = workspaceTabs.value.findIndex((tab) => !tab.pinned && tab.key !== route.fullPath);
+    if (removableIndex < 0) break;
+    workspaceTabs.value.splice(removableIndex, 1);
+  }
+};
+
+const selectWorkspaceTab = (key: string) => {
+  if (key !== route.fullPath) router.push(key);
+};
+
+const removeWorkspaceTab = (key: string) => {
+  const index = workspaceTabs.value.findIndex((tab) => tab.key === key);
+  if (index < 0 || workspaceTabs.value[index]?.pinned) return;
+  const wasActive = key === route.fullPath;
+  workspaceTabs.value.splice(index, 1);
+  if (wasActive) {
+    const fallback = workspaceTabs.value[index - 1] || workspaceTabs.value[index] || workspaceTabs.value[0];
+    if (fallback) router.push(fallback.key);
+  }
+};
+
+openWorkspaceTab();
 
 const navigate = (path: string) => {
   router.push(path);
@@ -595,6 +644,15 @@ const handleLogout = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.workspace-route-view {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .drawer-content {

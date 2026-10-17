@@ -4,7 +4,7 @@
     <PageHeaderCompact title="业务总览">
       <template #actions>
         <el-radio-group v-if="authStore.isAdmin()" v-model="viewMode" size="small" @change="loadDashboard" style="margin-right: 16px;">
-          <el-radio-button value="personal">个人数据</el-radio-button>
+          <el-radio-button value="personal">个人大盘</el-radio-button>
           <el-radio-button value="admin">全局大盘</el-radio-button>
         </el-radio-group>
         <el-select v-model="days" size="small" style="width: 100px; margin-right: 16px;" @change="loadDashboard">
@@ -44,6 +44,37 @@
           <span>数据刷新失败，以下为上次加载结果</span>
           <el-button link type="primary" @click="loadDashboard">重试</el-button>
         </section>
+
+        <el-tabs v-model="activeDashboardTab" class="dashboard-tabs" stretch>
+          <el-tab-pane label="总览" name="overview">
+            <section class="dashboard-summary" aria-label="数据大盘摘要">
+              <div class="summary-intro">
+                <div>
+                  <span class="summary-eyebrow">{{ viewScopeLabel }} · 近 {{ days }} 天</span>
+                  <h2>先看需要行动的事</h2>
+                  <p>{{ dashboardContext }}</p>
+                </div>
+                <el-tag size="small" effect="plain" :type="attentionItems[0]?.tone === 'success' ? 'success' : 'warning'">
+                  {{ attentionItems[0]?.tone === 'success' ? '运行平稳' : `${attentionItems.length} 项待关注` }}
+                </el-tag>
+              </div>
+              <div class="summary-metrics">
+                <div v-for="metric in summaryMetrics" :key="metric.label" class="summary-metric">
+                  <span class="summary-metric__label">{{ metric.label }}</span>
+                  <strong>{{ metric.value }}</strong>
+                  <span>{{ metric.hint }}</span>
+                </div>
+              </div>
+              <div class="attention-list">
+                <div v-for="item in attentionItems" :key="item.title" class="attention-item" :class="`attention-item--${item.tone}`">
+                  <span class="attention-dot" aria-hidden="true" />
+                  <div>
+                    <strong>{{ item.title }}</strong>
+                    <p>{{ item.description }}</p>
+                  </div>
+                </div>
+              </div>
+            </section>
 
         <!-- 健康与质量并排 -->
         <section class="health-quality-grid">
@@ -267,7 +298,6 @@
             </div>
           </div>
         </section>
-      </template>
 
       <!-- Recent History -->
       <section class="recent-grid">
@@ -318,12 +348,149 @@
           </div>
         </div>
       </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="知识库健康" name="knowledge">
+            <section class="detail-grid">
+              <div class="dash-card detail-card">
+                <div class="card-header">
+                  <div>
+                    <h3 class="dash-title">入库状态</h3>
+                    <p class="detail-card__hint">从文档进入系统到可检索，优先关注失败和长期卡住的记录。</p>
+                  </div>
+                  <el-button type="primary" plain size="small" @click="go('/workspace/kb/upload')">打开知识库</el-button>
+                </div>
+                <EnhancedEmpty
+                  v-if="!dashboardData?.ingest_health"
+                  class="card-empty"
+                  variant="document"
+                  title="暂无入库数据"
+                  description="当前视图没有可用的入库健康度数据"
+                  :image-size="24"
+                />
+                <template v-else>
+                  <div class="detail-metric-grid">
+                    <div class="detail-metric"><span>总文档</span><strong>{{ dashboardData.ingest_health.summary.total_documents }}</strong></div>
+                    <div class="detail-metric"><span>可检索</span><strong>{{ dashboardData.ingest_health.summary.queryable_documents }}</strong></div>
+                    <div class="detail-metric detail-metric--danger"><span>解析失败</span><strong>{{ dashboardData.ingest_health.summary.failed_documents }}</strong></div>
+                    <div class="detail-metric detail-metric--warning"><span>长期卡住</span><strong>{{ dashboardData.ingest_health.summary.stalled_documents }}</strong></div>
+                  </div>
+                  <div class="distribution-list" v-if="dashboardData.ingest_health.document_status_distribution.length">
+                    <div v-for="item in dashboardData.ingest_health.document_status_distribution" :key="item.key" class="distribution-row">
+                      <span>{{ item.key }}</span>
+                      <div class="distribution-track"><div class="distribution-fill" :style="{ width: distributionPercent(item.count, dashboardData.ingest_health.document_status_distribution) }" /></div>
+                      <strong>{{ item.count }}</strong>
+                    </div>
+                  </div>
+                  <div v-if="dashboardData.ingest_health.upload_to_ready_latency_ms && !dashboardData.ingest_health.upload_to_ready_latency_ms.unsupported" class="latency-callout">
+                    <span>上传到可检索</span>
+                    <strong>P50 {{ Math.round(dashboardData.ingest_health.upload_to_ready_latency_ms.p50_ms) }}ms</strong>
+                    <span>P95 {{ Math.round(dashboardData.ingest_health.upload_to_ready_latency_ms.p95_ms) }}ms</span>
+                  </div>
+                </template>
+              </div>
+              <div class="dash-card detail-card">
+                <div class="card-header">
+                  <div>
+                    <h3 class="dash-title">知识盲区</h3>
+                    <p class="detail-card__hint">把高频无命中问题转成下一批知识补充清单。</p>
+                  </div>
+                  <el-tag size="small" effect="plain" type="warning">{{ dashboardData?.zero_hit?.top_queries?.length || 0 }} 项</el-tag>
+                </div>
+                <ul v-if="dashboardData?.zero_hit?.top_queries?.length" class="zero-hit-list detail-zero-hit-list">
+                  <li v-for="(q, i) in dashboardData.zero_hit.top_queries" :key="i">
+                    <span class="q-text" :title="q.query">{{ q.query }}</span>
+                    <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
+                  </li>
+                </ul>
+                <EnhancedEmpty v-else class="card-empty" variant="search" title="暂无无命中查询" description="当前窗口内的提问都能命中已有文档" :image-size="24" />
+              </div>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="问答质量" name="quality">
+            <section class="detail-grid">
+              <div class="dash-card detail-card">
+                <div class="card-header">
+                  <div>
+                    <h3 class="dash-title">回答质量</h3>
+                    <p class="detail-card__hint">专业视角看依据完整度，普通用户看回答是否值得继续使用。</p>
+                  </div>
+                  <el-tag size="small" effect="plain" :type="(dashboardData?.qa_quality?.low_quality.count || 0) > 0 ? 'warning' : 'success'">
+                    {{ (dashboardData?.qa_quality?.low_quality.count || 0) > 0 ? '需要复盘' : '运行稳定' }}
+                  </el-tag>
+                </div>
+                <EnhancedEmpty v-if="!dashboardData?.qa_quality" class="card-empty" variant="question" title="暂无问答质量数据" description="当前视图没有可用的问答质量数据" :image-size="24" />
+                <template v-else>
+                  <div class="detail-metric-grid">
+                    <div class="detail-metric"><span>有依据回答</span><strong>{{ percent(dashboardData.qa_quality.summary.grounded_answers, dashboardData.qa_quality.summary.assistant_answers) }}</strong></div>
+                    <div class="detail-metric"><span>零命中拦截</span><strong>{{ dashboardData.qa_quality.zero_hit.selected_candidates_zero }}</strong></div>
+                    <div class="detail-metric detail-metric--warning"><span>低质量回答</span><strong>{{ dashboardData.qa_quality.low_quality.count }}</strong></div>
+                    <div class="detail-metric"><span>缺少引用</span><strong>{{ percentByRate(dashboardData.qa_quality.zero_hit.missing_citations_rate) }}</strong></div>
+                  </div>
+                  <div class="distribution-list" v-if="dashboardData.qa_quality.answer_mode_distribution.length">
+                    <div v-for="item in dashboardData.qa_quality.answer_mode_distribution" :key="item.key" class="distribution-row">
+                      <span>{{ item.key }}</span>
+                      <div class="distribution-track"><div class="distribution-fill distribution-fill--blue" :style="{ width: distributionPercent(item.count, dashboardData.qa_quality.answer_mode_distribution) }" /></div>
+                      <strong>{{ item.count }}</strong>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div class="dash-card detail-card">
+                <div class="card-header">
+                  <div>
+                    <h3 class="dash-title">问答热点</h3>
+                    <p class="detail-card__hint">热点词适合普通用户快速了解大家在问什么，也适合运营人员判断内容方向。</p>
+                  </div>
+                </div>
+                <div v-if="dashboardData?.hot_terms?.length" class="word-cloud word-cloud--detail">
+                  <span v-for="(term, i) in dashboardData.hot_terms" :key="i" class="cloud-tag" :style="{ fontSize: `${12 + Math.min(term.count, 20)}px`, opacity: 0.5 + (term.count / 40) }">{{ term.term }}</span>
+                </div>
+                <EnhancedEmpty v-else class="card-empty" variant="default" title="暂无热点词" description="当前窗口内没有可用于统计的提问词" :image-size="24" />
+              </div>
+            </section>
+          </el-tab-pane>
+
+          <el-tab-pane label="使用反馈" name="usage">
+            <section class="detail-grid detail-grid--three">
+              <div class="dash-card detail-card">
+                <h3 class="dash-title">使用量与成本</h3>
+                <div class="detail-metric-grid detail-metric-grid--two">
+                  <div class="detail-metric"><span>对话轮数</span><strong>{{ dashboardData?.usage?.summary?.assistant_turns || 0 }}</strong></div>
+                  <div class="detail-metric"><span>预估成本</span><strong>{{ dashboardData?.usage?.summary?.estimated_cost?.toFixed(2) || '0.00' }} {{ dashboardData?.usage?.currency || 'CNY' }}</strong></div>
+                  <div class="detail-metric"><span>Prompt Token</span><strong>{{ dashboardData?.usage?.summary?.prompt_tokens || 0 }}</strong></div>
+                  <div class="detail-metric"><span>Completion Token</span><strong>{{ dashboardData?.usage?.summary?.completion_tokens || 0 }}</strong></div>
+                </div>
+              </div>
+              <div class="dash-card detail-card">
+                <h3 class="dash-title">用户反馈</h3>
+                <div class="feedback-summary">
+                  <div><strong>{{ feedbackTotals.up }}</strong><span>满意</span></div>
+                  <div><strong>{{ feedbackTotals.down }}</strong><span>不满意</span></div>
+                  <div><strong>{{ feedbackTotals.flag }}</strong><span>需复核</span></div>
+                </div>
+                <p class="detail-card__hint">反馈量少时优先结合低质量回答和无命中问题一起判断。</p>
+              </div>
+              <div class="dash-card detail-card">
+                <h3 class="dash-title">关键转化</h3>
+                <div v-if="dashboardData?.funnel" class="funnel-list">
+                  <div><span>提问会话</span><strong>{{ dashboardData.funnel.chat_sessions_with_questions }}</strong></div>
+                  <div><span>提问次数</span><strong>{{ dashboardData.funnel.questions_asked }}</strong></div>
+                  <div><span>创建知识库</span><strong>{{ dashboardData.funnel.knowledge_bases_created ?? '暂无' }}</strong></div>
+                </div>
+                <p v-else class="detail-card__hint">当前视图暂未提供转化漏斗数据。</p>
+              </div>
+            </section>
+          </el-tab-pane>
+        </el-tabs>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Folder, ChatLineRound, Loading, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
@@ -344,6 +511,7 @@ const loadingHistory = ref(true);
 
 const viewMode = ref<'personal' | 'admin'>('personal');
 const days = ref(14);
+const activeDashboardTab = ref('overview');
 const dashboardData = ref<AnalyticsDashboardResponse | null>(null);
 
 const percent = (part: number, total: number) => {
@@ -353,6 +521,72 @@ const percent = (part: number, total: number) => {
 const percentByRate = (rate: number) => `${Math.round((Number(rate || 0) || 0) * 100)}%`;
 const loadingDashboard = ref(true);
 const loadError = ref(false);
+
+const viewScopeLabel = computed(() => (viewMode.value === 'admin' ? '团队全局范围' : '你的工作范围'));
+const dashboardContext = computed(() => (
+  viewMode.value === 'admin'
+    ? '面向运营与治理：先看异常，再定位到知识库、问答质量和成本。'
+    : '面向日常使用：先看今天是否顺畅，再处理需要你关注的事项。'
+));
+
+const summaryMetrics = computed(() => {
+  const ingest = dashboardData.value?.ingest_health?.summary;
+  const quality = dashboardData.value?.qa_quality;
+  const usage = dashboardData.value?.usage?.summary;
+  const readyRate = ingest?.total_documents ? percent(ingest.ready_documents, ingest.total_documents) : '暂无';
+  const groundedRate = quality?.summary.assistant_answers
+    ? percent(quality.summary.grounded_answers, quality.summary.assistant_answers)
+    : '暂无';
+  return [
+    { label: '回答数', value: String(quality?.summary.assistant_answers ?? usage?.assistant_turns ?? 0), hint: `近 ${days.value} 天` },
+    { label: '有依据率', value: groundedRate, hint: '回答质量' },
+    { label: '文档就绪率', value: readyRate, hint: '知识库健康' },
+    { label: '待处理项', value: String((ingest?.failed_documents ?? 0) + (ingest?.stalled_documents ?? 0) + (quality?.clarification?.pending_runs ?? 0)), hint: '异常与补问' }
+  ];
+});
+
+const attentionItems = computed(() => {
+  const ingest = dashboardData.value?.ingest_health?.summary;
+  const quality = dashboardData.value?.qa_quality;
+  const items: Array<{ tone: 'danger' | 'warning' | 'success'; title: string; description: string }> = [];
+  if ((ingest?.failed_documents ?? 0) > 0 || (ingest?.stalled_documents ?? 0) > 0) {
+    items.push({
+      tone: 'danger',
+      title: '知识库有待处理文档',
+      description: `${(ingest?.failed_documents ?? 0) + (ingest?.stalled_documents ?? 0)} 篇文档未顺利完成入库，建议先处理异常。`
+    });
+  }
+  if ((quality?.zero_hit.selected_candidates_zero ?? 0) > 0) {
+    items.push({
+      tone: 'warning',
+      title: '存在知识盲区',
+      description: `${quality?.zero_hit.selected_candidates_zero} 次提问没有命中有效候选，可从高频问题补充资料。`
+    });
+  }
+  if ((quality?.low_quality.count ?? 0) > 0) {
+    items.push({
+      tone: 'warning',
+      title: '有低质量回答需要复盘',
+      description: `${quality?.low_quality.count} 次回答低于质量阈值，可在问答质量页查看原因分布。`
+    });
+  }
+  if (!items.length) items.push({ tone: 'success', title: '当前没有待处理异常', description: '数据在当前统计窗口内保持稳定，可以继续关注趋势变化。' });
+  return items;
+});
+
+const feedbackTotals = computed(() => (dashboardData.value?.satisfaction.trend || []).reduce(
+  (totals, item) => ({
+    up: totals.up + Number(item.up_count || 0),
+    down: totals.down + Number(item.down_count || 0),
+    flag: totals.flag + Number(item.flag_count || 0)
+  }),
+  { up: 0, down: 0, flag: 0 }
+));
+
+const distributionPercent = (count: number, items: { count: number }[]) => {
+  const total = items.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  return percent(count, total);
+};
 
 const clarificationPanelTooltip = '已完成表示补问后成功恢复并继续完成回答；待处理表示当前仍停留在 interrupted 状态。';
 
@@ -467,6 +701,301 @@ const go = (path: string) => {
   color: var(--el-color-warning);
   font-size: var(--text-caption, 0.75rem);
 }
+
+.dashboard-tabs {
+  min-width: 0;
+}
+
+.dashboard-tabs :deep(.el-tabs__header) {
+  margin: 0 0 18px;
+}
+
+.dashboard-tabs :deep(.el-tabs__nav-wrap::after) {
+  background: var(--border-color);
+}
+
+.dashboard-tabs :deep(.el-tabs__item) {
+  height: 40px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.dashboard-tabs :deep(.el-tabs__item.is-active) {
+  color: var(--blue-700);
+}
+
+.dashboard-tabs :deep(.el-tabs__content) {
+  overflow: visible;
+}
+
+.dashboard-summary {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 24px;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+
+.summary-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.summary-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+
+.summary-intro h2 {
+  font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+  line-height: 1.3;
+}
+
+.summary-intro p {
+  max-width: 720px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.6;
+}
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+}
+
+.summary-metric__label,
+.summary-metric > span:last-child {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+.summary-metric strong {
+  color: var(--text-primary);
+  font-size: var(--text-h2);
+  font-variant-numeric: tabular-nums;
+}
+
+.attention-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-panel-muted);
+}
+
+.attention-item--danger { border-left-color: var(--el-color-danger); }
+.attention-item--warning { border-left-color: var(--el-color-warning); }
+.attention-item--success { border-left-color: var(--el-color-success); }
+
+.attention-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex: 0 0 auto;
+}
+
+.attention-item--danger .attention-dot { background: var(--el-color-danger); }
+.attention-item--warning .attention-dot { background: var(--el-color-warning); }
+.attention-item--success .attention-dot { background: var(--el-color-success); }
+
+.attention-item strong {
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+}
+
+.attention-item p {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.detail-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-card {
+  min-width: 0;
+  min-height: 220px;
+}
+
+.detail-card__hint {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+}
+
+.detail-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.detail-metric-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.detail-metric {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel-muted);
+}
+
+.detail-metric span {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+.detail-metric strong {
+  color: var(--text-primary);
+  font-size: var(--text-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-metric--danger strong { color: var(--el-color-danger); }
+.detail-metric--warning strong { color: var(--el-color-warning); }
+
+.distribution-list {
+  display: grid;
+  gap: 10px;
+}
+
+.distribution-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(100px, 2fr) 42px;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.distribution-row strong {
+  color: var(--text-primary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.distribution-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel-muted);
+}
+
+.distribution-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--el-color-success);
+}
+
+.distribution-fill--blue { background: var(--blue-600); }
+
+.latency-callout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.latency-callout strong { color: var(--text-primary); }
+
+.detail-zero-hit-list { margin-top: 12px; }
+
+.word-cloud--detail {
+  min-height: 150px;
+  justify-content: flex-start;
+  align-content: flex-start;
+}
+
+.feedback-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 20px 0 16px;
+}
+
+.feedback-summary div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  background: var(--bg-panel-muted);
+  text-align: center;
+}
+
+.feedback-summary strong {
+  color: var(--text-primary);
+  font-size: var(--text-h2);
+  font-variant-numeric: tabular-nums;
+}
+
+.feedback-summary span {
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.funnel-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.funnel-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+}
+
+.funnel-list strong { color: var(--text-primary); }
 
 .card-empty {
   padding: 24px 0 !important;
@@ -817,5 +1346,45 @@ const go = (path: string) => {
 
 .clarification-kind-tag {
   cursor: help;
+}
+
+@media (max-width: 900px) {
+  .summary-metrics,
+  .detail-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-grid,
+  .detail-grid--three {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .dashboard-summary,
+  .dash-card {
+    padding: 16px;
+  }
+
+  .summary-intro {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .summary-metrics {
+    gap: 8px;
+  }
+
+  .summary-metric {
+    padding: 10px;
+  }
+
+  .summary-metric strong {
+    font-size: var(--text-h3);
+  }
+
+  .q-label {
+    width: 82px;
+  }
 }
 </style>
