@@ -1,9 +1,7 @@
 <template>
   <div class="page-shell upload-page">
-    <PageHeaderCompact :title="selectedBase?.name || '知识库治理'">
+    <PageHeaderCompact title="知识库治理" :subtitle="selectedBase?.name">
       <template #actions>
-        <el-button type="primary" @click="router.push('/workspace/chat')">问答</el-button>
-        <el-button plain :disabled="!canWrite" @click="pickFiles">上传</el-button>
         <el-button plain :disabled="!canManageBase" @click="openBaseDrawer('create')">新建</el-button>
       </template>
     </PageHeaderCompact>
@@ -61,62 +59,61 @@
             <el-form-item label="标签（逗号分隔）">
               <el-input v-model="uploadForm.tags" placeholder="可选，例如：vue, composition-api" size="small" />
             </el-form-item>
-            <el-divider content-position="left">版本治理（可选）</el-divider>
-            <el-form-item label="版本家族 Key">
-              <el-input
-                v-model="uploadForm.version_family_key"
-                placeholder="例如：expense-policy"
-                size="small"
-              />
-            </el-form-item>
-            <el-form-item label="版本标签">
-              <el-input
-                v-model="uploadForm.version_label"
-                placeholder="例如：2026-Q1 / v2"
-                size="small"
-              />
-            </el-form-item>
-            <el-form-item label="版本号">
-              <el-input-number v-model="uploadForm.version_number" :min="1" :max="100000" style="width: 100%" />
-            </el-form-item>
-            <el-form-item label="版本状态">
-              <el-select v-model="uploadForm.version_status" size="small" style="width: 100%">
-                <el-option label="active" value="active" />
-                <el-option label="draft" value="draft" />
-                <el-option label="superseded" value="superseded" />
-                <el-option label="archived" value="archived" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="设为当前版本">
-              <el-switch v-model="uploadForm.is_current_version" />
-            </el-form-item>
-            <el-form-item label="生效开始">
-              <el-date-picker
-                v-model="uploadForm.effective_from"
-                type="datetime"
-                value-format="YYYY-MM-DDTHH:mm:ss[Z]"
-                placeholder="可选"
-                size="small"
-                style="width: 100%"
-              />
-            </el-form-item>
-            <el-form-item label="生效结束">
-              <el-date-picker
-                v-model="uploadForm.effective_to"
-                type="datetime"
-                value-format="YYYY-MM-DDTHH:mm:ss[Z]"
-                placeholder="可选"
-                size="small"
-                style="width: 100%"
-              />
-            </el-form-item>
-            <el-form-item label="替代旧文档 ID">
-              <el-input
-                v-model="uploadForm.supersedes_document_id"
-                placeholder="可选，导入新版本时填写"
-                size="small"
-              />
-            </el-form-item>
+            <el-collapse v-model="versionCollapse">
+              <el-collapse-item name="version">
+                <template #title>
+                  <span class="collapse-title">版本治理（可选）</span>
+                </template>
+                <el-form-item label="版本家族 Key">
+                  <el-input
+                    v-model="uploadForm.version_family_key"
+                    placeholder="例如：expense-policy"
+                    size="small"
+                  />
+                </el-form-item>
+                <el-form-item label="版本标签">
+                  <el-input
+                    v-model="uploadForm.version_label"
+                    placeholder="例如：2026-Q1 / v2"
+                    size="small"
+                  />
+                </el-form-item>
+                <el-form-item label="版本号">
+                  <el-input-number v-model="uploadForm.version_number" :min="1" :max="100000" style="width: 100%" />
+                </el-form-item>
+                <el-form-item label="版本状态">
+                  <el-select v-model="uploadForm.version_status" size="small" style="width: 100%">
+                    <el-option label="active" value="active" />
+                    <el-option label="draft" value="draft" />
+                    <el-option label="superseded" value="superseded" />
+                    <el-option label="archived" value="archived" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="设为当前版本">
+                  <el-switch v-model="uploadForm.is_current_version" />
+                </el-form-item>
+                <el-form-item label="生效开始">
+                  <el-date-picker
+                    v-model="uploadForm.effective_from"
+                    type="datetime"
+                    value-format="YYYY-MM-DDTHH:mm:ss[Z]"
+                    placeholder="可选"
+                    size="small"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+                <el-form-item label="生效结束">
+                  <el-date-picker
+                    v-model="uploadForm.effective_to"
+                    type="datetime"
+                    value-format="YYYY-MM-DDTHH:mm:ss[Z]"
+                    placeholder="可选"
+                    size="small"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+              </el-collapse-item>
+            </el-collapse>
           </el-form>
 
           <button
@@ -149,11 +146,20 @@
               class="file-row"
             >
               <span class="file-name">{{ file.name }}</span>
-              <el-progress
-                :percentage="Math.round((uploadProgress[fileFingerprint(file)] || 0) * 100)"
-                :status="(uploadProgress[fileFingerprint(file)] || 0) === 1 ? 'success' : ''"
-                style="flex: 1; min-width: 0"
-              />
+              <Transition name="progress-fade">
+                <el-progress
+                  v-if="fileProgressVisible(file)"
+                  :percentage="Math.round((uploadProgress[fileFingerprint(file)] || 0) * 100)"
+                  :status="(uploadProgress[fileFingerprint(file)] || 0) === 1 ? 'success' : ''"
+                  style="flex: 1; min-width: 0"
+                />
+              </Transition>
+              <span
+                class="file-state"
+                :class="{ 'is-uploaded': fileUploadState(file) === 'uploaded', 'is-failed': fileUploadState(file) === 'failed' }"
+              >
+                {{ fileStateLabel(file) }}
+              </span>
             </div>
           </div>
 
@@ -194,12 +200,6 @@
                   {{ statusMeta(doc.status).label }}
                 </el-tag>
               </button>
-              <div v-if="doc.stats_json?.version_assist?.suggested_version_family_key" class="version-assist-card">
-                <strong>版本建议</strong>
-                <span>建议家族：{{ doc.stats_json.version_assist.suggested_version_family_key }}</span>
-                <span v-if="doc.stats_json.version_assist.suggested_version_label">建议标签：{{ doc.stats_json.version_assist.suggested_version_label }}</span>
-                <span v-if="doc.stats_json.version_assist.confidence !== undefined">置信度：{{ (Number(doc.stats_json.version_assist.confidence) * 100).toFixed(0) }}%</span>
-              </div>
               <div class="doc-actions">
                 <el-button text type="primary" size="small" @click.stop="openInChat(doc.id)">提问</el-button>
                 <el-button text type="danger" size="small" :disabled="!canWrite" @click.stop="handleDeleteDocument(doc)">删除</el-button>
@@ -314,6 +314,8 @@ const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 
+type FileUploadState = 'pending' | 'uploading' | 'uploaded' | 'failed';
+
 const bases = ref<any[]>([]);
 const kbTypes = ref<any[]>([]);
 const jobPositions = ref<any[]>([]);
@@ -322,12 +324,14 @@ const selectedFiles = ref<File[]>([]);
 const latestDocuments = ref<any[]>([]);
 const events = ref<any[]>([]);
 const uploadProgress = ref<Record<string, number>>({});
+const uploadState = ref<Record<string, FileUploadState>>({});
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
 const creatingBase = ref(false);
 const uploading = ref(false);
 const baseFormMode = ref<'create' | 'edit'>('create');
 const eventsCollapse = ref<string[]>([]);
+const versionCollapse = ref<string[]>([]);
 const baseDrawerVisible = ref(false);
 let pollTimer: number | null = null;
 
@@ -349,7 +353,6 @@ const uploadForm = reactive({
   is_current_version: true,
   effective_from: '',
   effective_to: '',
-  supersedes_document_id: '',
   content_kind: 'document',
   question_type: '',
   difficulty: '',
@@ -385,6 +388,21 @@ const ensureMetadataDefaults = () => {
 };
 
 const fileFingerprint = (file: File) => `${file.name}:${file.size}:${file.lastModified}`;
+const fileUploadState = (file: File): FileUploadState => uploadState.value[fileFingerprint(file)] || 'pending';
+const fileProgressVisible = (file: File) => {
+  const state = fileUploadState(file);
+  return state === 'pending' || state === 'uploading';
+};
+const fileStateLabel = (file: File) => {
+  const state = fileUploadState(file);
+  if (state === 'uploading') return '上传中';
+  if (state === 'uploaded') return '已上传，待索引';
+  if (state === 'failed') return '上传失败';
+  return '待上传';
+};
+const setFileState = (file: File, state: FileUploadState) => {
+  uploadState.value = { ...uploadState.value, [fileFingerprint(file)]: state };
+};
 const selectedBase = computed(() => bases.value.find((b) => String(b.id) === String(selectedBaseId.value)) || null);
 const canManageBase = computed(() => {
   if (!authStore.hasPermission('kb.write')) return false;
@@ -451,6 +469,9 @@ const addFiles = (files: File[]) => {
     return ['txt', 'md', 'markdown', 'json', 'csv', 'xlsx', 'xls', 'pdf', 'docx', 'png', 'jpg', 'jpeg'].includes(String(ext || ''));
   });
   if (valid.length < files.length) ElMessage.warning('已过滤不支持格式');
+  for (const file of valid) {
+    if (fileUploadState(file) !== 'uploading') setFileState(file, 'pending');
+  }
   selectedFiles.value = [...selectedFiles.value, ...valid];
 };
 
@@ -592,7 +613,6 @@ const uploadSingleFile = async (file: File) => {
             is_current_version: uploadForm.is_current_version,
             effective_from: uploadForm.effective_from || null,
             effective_to: uploadForm.effective_to || null,
-            supersedes_document_id: uploadForm.supersedes_document_id.trim() || null,
             content_kind: uploadForm.content_kind.trim() || 'document',
             question_type: uploadForm.question_type.trim(),
             difficulty: uploadForm.difficulty.trim(),
@@ -620,13 +640,21 @@ const handleUpload = async () => {
   try {
     const completed = [];
     for (const file of selectedFiles.value) {
-      completed.push(await uploadSingleFile(file));
+      setFileState(file, 'uploading');
+      try {
+        completed.push(await uploadSingleFile(file));
+        setFileState(file, 'uploaded');
+      } catch (err) {
+        setFileState(file, 'failed');
+        throw err;
+      }
     }
     await loadDocuments(selectedBaseId.value);
     await refreshEventFocus();
     await pollJobs(completed.map((r: any) => String(r.job_id)));
     selectedFiles.value = [];
     uploadProgress.value = {};
+    uploadState.value = {};
     fileInputRef.value && (fileInputRef.value.value = '');
     ElMessage.success('上传完成，后台正在索引');
   } finally {
@@ -742,7 +770,7 @@ onBeforeUnmount(clearPoller);
   width: 100%;
   color: inherit;
   font: inherit;
-  transition: border-color var(--transition-base), background var(--transition-base);
+  transition: border-color var(--transition-base);
 }
 
 .dropzone:disabled {
@@ -750,17 +778,19 @@ onBeforeUnmount(clearPoller);
   opacity: 0.6;
 }
 
-.dropzone:hover {
-  border-color: var(--blue-600);
-  background: var(--blue-50);
-}
-
 .dropzone .el-icon {
   color: var(--text-muted);
 }
 
-.dropzone:hover .el-icon {
-  color: var(--blue-600);
+@media (hover: hover) and (pointer: fine) {
+  .dropzone:hover {
+    border-color: var(--blue-600);
+    background: var(--blue-50);
+  }
+
+  .dropzone:hover .el-icon {
+    color: var(--blue-600);
+  }
 }
 
 .dropzone-hint {
@@ -792,6 +822,30 @@ onBeforeUnmount(clearPoller);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-body, 0.9375rem);
+}
+
+.file-state {
+  flex-shrink: 0;
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
+}
+
+.file-state.is-uploaded {
+  color: var(--el-color-success);
+}
+
+.file-state.is-failed {
+  color: var(--el-color-danger);
+}
+
+.progress-fade-enter-active,
+.progress-fade-leave-active {
+  transition: opacity var(--transition-base);
+}
+
+.progress-fade-enter-from,
+.progress-fade-leave-to {
+  opacity: 0;
 }
 
 .upload-btn {
@@ -849,12 +903,14 @@ onBeforeUnmount(clearPoller);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-panel-muted);
-  transition: border-color var(--transition-base), background var(--transition-base);
+  transition: border-color var(--transition-base);
 }
 
-.doc-item:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-panel);
+@media (hover: hover) and (pointer: fine) {
+  .doc-item:hover {
+    border-color: var(--border-strong);
+    background: var(--bg-panel);
+  }
 }
 
 .doc-name {
@@ -884,22 +940,6 @@ onBeforeUnmount(clearPoller);
 .doc-actions {
   display: flex;
   gap: 10px;
-}
-
-.version-assist-card {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: #f8fbff;
-  border: 1px solid #dbe7fb;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
-.version-assist-card strong {
-  color: #275dad;
 }
 
 .collapse-title {

@@ -21,10 +21,5 @@
   padding: 12px 0 14px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-panel);
-  @supports (backdrop-filter: blur(8px)) {
-    background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-  }
 }
 </style>

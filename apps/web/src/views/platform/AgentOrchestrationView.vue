@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="Agent 协作编排" subtitle="可视化多 Agent 协作的执行计划、DAG 依赖与结果聚合">
+    <PageHeaderCompact title="Agent 协作编排">
       <template #actions>
         <el-button @click="loadData" :loading="loading">
           <el-icon><Refresh /></el-icon> 刷新
@@ -11,21 +11,21 @@
     <div class="platform-content">
       <!-- 统计 -->
       <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.totalPlans }}</div>
-          <div class="stat-label">编排计划</div>
+        <div class="surface-card">
+          <div class="metric-value">{{ stats.totalPlans }}</div>
+          <div class="metric-label">编排计划</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.successRate }}%</div>
-          <div class="stat-label">执行成功率</div>
+        <div class="surface-card">
+          <div class="metric-value">{{ stats.successRate }}%</div>
+          <div class="metric-label">执行成功率（{{ successRateScope }}）</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.avgWorkers }}</div>
-          <div class="stat-label">平均 Worker 数</div>
+        <div class="surface-card">
+          <div class="metric-value">{{ stats.avgWorkers }}</div>
+          <div class="metric-label">平均 Worker 数</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.avgTimeMs }}ms</div>
-          <div class="stat-label">平均执行时间</div>
+        <div class="surface-card">
+          <div class="metric-value">{{ stats.avgTimeMs }}ms</div>
+          <div class="metric-label">平均执行时间</div>
         </div>
       </div>
 
@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { platformApi } from '@/api/platform'
 import { Refresh } from '@element-plus/icons-vue'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
@@ -117,6 +117,8 @@ const stats = reactive({
   avgWorkers: 0,
   avgTimeMs: 0,
 })
+
+const successRateScope = computed(() => (runs.value.length ? `最近 ${runs.value.length} 次中无失败运行的占比` : '暂无运行记录'))
 
 async function loadData() {
   loading.value = true
@@ -155,16 +157,14 @@ onMounted(loadData)
 
 <style scoped>
 .platform-content { padding: 16px 0; }
-.stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
-.stat-card { flex: 1; text-align: center; padding: 16px; border-radius: 8px; background: var(--el-fill-color-light); }
-.stat-value { font-size: 24px; font-weight: 700; color: var(--el-color-primary); }
-.stat-label { font-size: 13px; color: var(--el-text-color-secondary); margin-top: 4px; }
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; text-align: center; }
+:deep(.el-table__row) { cursor: pointer; }
 .exec-group { margin: 8px 0; }
 .group-tasks { display: inline-flex; flex-wrap: wrap; margin-left: 8px; }
 .worker-result { margin: 8px 0; padding: 8px; border: 1px solid var(--el-border-color-light); border-radius: 6px; }
 .wr-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.wr-id { font-size: 12px; color: var(--el-text-color-secondary); }
-.wr-time { font-size: 12px; color: var(--el-text-color-secondary); margin-left: auto; }
-.wr-error { font-size: 12px; color: var(--el-color-danger); padding: 4px 0; }
-.wr-evidence { font-size: 12px; color: var(--el-text-color-secondary); }
+.wr-id { font-size: var(--text-caption); color: var(--el-text-color-secondary); }
+.wr-time { font-size: var(--text-caption); color: var(--el-text-color-secondary); margin-left: auto; }
+.wr-error { font-size: var(--text-caption); color: var(--el-color-danger); padding: 4px 0; }
+.wr-evidence { font-size: var(--text-caption); color: var(--el-text-color-secondary); }
 </style>

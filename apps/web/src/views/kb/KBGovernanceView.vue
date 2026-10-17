@@ -2,151 +2,31 @@
   <div class="page-shell governance-page">
     <PageHeaderCompact title="知识治理工作台">
       <template #actions>
-        <el-radio-group v-if="authStore.isAdmin()" v-model="viewMode" size="small" @change="loadAllData">
+        <el-radio-group v-if="authStore.isAdmin()" v-model="viewMode" size="small" @change="handleScopeChange">
           <el-radio-button value="personal">个人范围</el-radio-button>
           <el-radio-button value="admin">全局范围</el-radio-button>
         </el-radio-group>
         <el-button plain :loading="loading || batchEventsLoading" @click="loadAllData">刷新</el-button>
-        <el-button plain @click="router.push('/workspace/kb/upload')">知识库管理</el-button>
       </template>
     </PageHeaderCompact>
-
-    <div class="summary-grid">
-      <section v-for="card in summaryCards" :key="card.key" class="summary-card">
-        <span class="summary-label">{{ card.label }}</span>
-        <strong class="summary-value">{{ card.value }}</strong>
-        <span class="summary-hint">{{ card.hint }}</span>
-      </section>
-    </div>
 
     <section class="toolbar-row">
       <div class="toolbar-group">
         <span class="toolbar-label">工作集</span>
-        <el-radio-group v-model="workset" size="small">
-          <el-radio-button label="all">全部</el-radio-button>
-          <el-radio-button label="pending_me">待我处理</el-radio-button>
-          <el-radio-button label="reviewed_by_me">我已处理</el-radio-button>
+        <el-radio-group v-model="workset" size="small" @change="handleWorksetChange">
+          <el-radio-button value="all">全部</el-radio-button>
+          <el-radio-button value="pending_me">待我处理</el-radio-button>
+          <el-radio-button value="reviewed_by_me">我已处理</el-radio-button>
         </el-radio-group>
       </div>
       <div class="toolbar-meta">
         <span>生成时间：{{ formatTime(governance?.generated_at) }}</span>
         <span v-if="hasDegradedSections" class="degraded-text">当前治理数据存在降级字段。</span>
       </div>
-    </section>
-
-    <section class="panel" data-testid="kb-batch-json-panel">
-      <div class="panel-head">
-        <strong>批量知识库 JSON</strong>
-        <div class="actions">
-          <el-button
-            text
-            :disabled="knowledgeBatchDryRunLoading || knowledgeBatchIngestLoading || knowledgeBatchRebuildLoading"
-            data-testid="kb-batch-reset-button"
-            @click="resetKnowledgeBatch"
-          >
-            清空
-          </el-button>
-          <el-button
-            plain
-            :loading="knowledgeBatchDryRunLoading"
-            :disabled="!canRunKnowledgeBatchDryRun"
-            data-testid="kb-batch-dry-run-button"
-            @click="runKnowledgeBatchDryRun"
-          >
-            预览
-          </el-button>
-          <el-button
-            type="primary"
-            plain
-            :loading="knowledgeBatchIngestLoading"
-            :disabled="!canRunKnowledgeBatchIngest"
-            data-testid="kb-batch-ingest-button"
-            @click="runKnowledgeBatchIngest"
-          >
-            批量写入
-          </el-button>
-          <el-button
-            type="warning"
-            plain
-            :loading="knowledgeBatchRebuildLoading"
-            :disabled="!canRunKnowledgeBatchRebuild"
-            data-testid="kb-batch-rebuild-button"
-            @click="runKnowledgeBatchRebuild"
-          >
-            重建写入结果
-          </el-button>
-        </div>
-      </div>
-      <el-input
-        v-model="knowledgeBatchJson"
-        type="textarea"
-        :rows="6"
-        data-testid="kb-batch-json-input"
-        placeholder='{"documents":[{"base_id":"base-1","file_name":"policy.txt","content":"正文"}]}'
-      />
-      <div class="toolbar-meta">
-        <span v-if="canRunKnowledgeBatchIngest">当前 JSON 已通过 dry-run。</span>
-        <span v-else-if="knowledgeBatchPayloadSignature">写入前需先预览当前 JSON。</span>
-        <span v-else>请提供 documents JSON。</span>
-      </div>
-    </section>
-
-    <section v-if="lastKnowledgeBatchDryRunResult" class="panel" data-testid="kb-batch-dry-run-summary">
-      <div class="panel-head">
-        <strong>批量预览结果</strong>
-      </div>
-      <div class="toolbar-meta">
-        <span>文档 {{ lastKnowledgeBatchDryRunResult.document_count }}</span>
-        <span>字符 {{ lastKnowledgeBatchDryRunResult.total_content_chars }}</span>
-        <span>section {{ lastKnowledgeBatchDryRunResult.total_sections }}</span>
-        <span>chunk {{ lastKnowledgeBatchDryRunResult.total_chunks }}</span>
-      </div>
-      <div class="list">
-        <article v-for="item in lastKnowledgeBatchDryRunResult.documents" :key="item.doc_id" class="list-item">
-          <strong>{{ item.file_name }}</strong>
-          <span>字符 {{ item.content_chars }}</span>
-          <span>section {{ item.section_count }}</span>
-          <span>chunk {{ item.chunk_count }}</span>
-        </article>
-      </div>
-    </section>
-
-    <section v-if="lastKnowledgeBatchIngestResult" class="panel" data-testid="kb-batch-ingest-summary">
-      <div class="panel-head">
-        <strong>批量写入结果</strong>
-      </div>
-      <div class="toolbar-meta">
-        <span>任务 {{ lastKnowledgeBatchIngestResult.batch.task_id }}</span>
-        <span>成功 {{ lastKnowledgeBatchIngestResult.succeeded_documents }}</span>
-        <span>失败 {{ lastKnowledgeBatchIngestResult.failed_documents }}</span>
-        <span>chunk {{ lastKnowledgeBatchIngestResult.chunk_count }}</span>
-      </div>
-      <div class="list">
-        <article v-for="item in lastKnowledgeBatchIngestResult.documents" :key="`${item.index}-${item.document_id || item.input_doc_id}`" class="list-item">
-          <strong>{{ item.file_name || item.input_doc_id || item.document_id }}</strong>
-          <span>{{ item.ok ? 'ready' : item.code || 'failed' }}</span>
-          <span v-if="item.document_id">{{ item.document_id }}</span>
-          <span v-if="item.detail">{{ item.detail }}</span>
-        </article>
-      </div>
-    </section>
-
-    <section v-if="lastKnowledgeBatchRebuildResult" class="panel" data-testid="kb-batch-rebuild-summary">
-      <div class="panel-head">
-        <strong>批量重建结果</strong>
-      </div>
-      <div class="toolbar-meta">
-        <span>文档 {{ lastKnowledgeBatchRebuildResult.document_count }}</span>
-        <span>成功 {{ lastKnowledgeBatchRebuildResult.succeeded_documents }}</span>
-        <span>失败 {{ lastKnowledgeBatchRebuildResult.failed_documents }}</span>
-      </div>
-      <div class="list">
-        <article v-for="item in lastKnowledgeBatchRebuildResult.documents" :key="item.doc_id" class="list-item">
-          <strong>{{ item.doc_id }}</strong>
-          <span>{{ item.ok ? '完成' : item.code || 'failed' }}</span>
-          <span v-if="item.result?.chunk_count !== undefined">chunk {{ item.result.chunk_count }}</span>
-          <span v-if="item.detail">{{ item.detail }}</span>
-        </article>
+      <div class="toolbar-group">
+        <span class="toolbar-label">第 {{ currentPage }} 页</span>
+        <el-button size="small" plain :disabled="!canGoPrevPage || loading" @click="goPrevPage">上一页</el-button>
+        <el-button size="small" plain :disabled="!canGoNextPage || loading" @click="goNextPage">下一页</el-button>
       </div>
     </section>
 
@@ -161,39 +41,6 @@
         <el-button :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('review_pending')">批量提交审核</el-button>
         <el-button type="success" plain :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('approved')">批量通过</el-button>
         <el-button type="danger" plain :loading="bulkLoading" :disabled="!canWrite" @click="runBulkAction('rejected')">批量驳回</el-button>
-        <el-button
-          plain
-          :loading="rebuildDryRunLoading"
-          :disabled="!canRunRebuildDryRun"
-          data-testid="kb-rebuild-dry-run-button"
-          @click="runRebuildDryRun"
-        >
-          预览 rebuild
-        </el-button>
-        <el-button
-          type="warning"
-          plain
-          :loading="rebuildLoading"
-          :disabled="!canRunRebuild"
-          data-testid="kb-rebuild-button"
-          @click="runRebuild"
-        >
-          执行 rebuild
-        </el-button>
-      </div>
-      <div class="toolbar-meta">
-        <span v-if="selectedDocumentIds.length !== 1">rebuild 仅支持单文档选择。</span>
-        <span v-else-if="canRunRebuild">当前 payload 已通过 dry-run，可执行 rebuild。</span>
-        <span v-else>执行 rebuild 前需先预览当前 payload。</span>
-      </div>
-    </section>
-
-    <section v-if="lastRebuildResult" class="panel" data-testid="kb-rebuild-summary">
-      <div class="panel-head">
-        <strong>最近一次 rebuild 结果</strong>
-      </div>
-      <div class="toolbar-meta">
-        <span v-for="item in rebuildSummaryItems" :key="item.key">{{ item.label }} {{ item.value }}</span>
       </div>
     </section>
 
@@ -215,7 +62,7 @@
           <span>{{ item.detail || '请求失败' }}</span>
         </article>
       </div>
-      <div v-else class="empty">最近一次批量治理没有失败项。</div>
+      <EnhancedEmpty v-else variant="success" title="最近一次批量治理没有失败项" />
     </section>
 
     <section class="panel">
@@ -223,9 +70,8 @@
         <strong>批量治理审计记录</strong>
         <el-button text size="small" :loading="batchEventsLoading" @click="loadBatchEvents">刷新</el-button>
       </div>
-      <div v-if="batchEventsLoading" class="loading-panel"><el-skeleton :rows="3" animated /></div>
-      <div v-else-if="!batchEvents.length" class="empty">当前范围内暂无批量治理记录。</div>
-      <div v-else class="list">
+      <div v-if="!batchEvents.length && !batchEventsLoading" class="empty">当前范围内暂无批量治理记录。</div>
+      <div v-else-if="batchEvents.length" class="list">
         <article v-for="event in batchEvents" :key="event.id" class="list-item">
           <strong>{{ batchActionLabel(event.details?.patch) }}</strong>
           <span>{{ event.actor_email || event.actor_user_id || '-' }}</span>
@@ -236,9 +82,7 @@
       </div>
     </section>
 
-    <section v-if="loading" class="loading-panel">
-      <el-skeleton :rows="6" animated />
-    </section>
+    <LoadingState v-if="loading && !governance" label="正在加载治理队列…" />
 
     <div v-else class="queue-grid">
       <section v-for="section in filteredDocumentSections" :key="section.key" class="panel">
@@ -248,13 +92,13 @@
             <div class="summary-hint">{{ section.description }}</div>
           </div>
           <div class="actions">
-            <el-tag size="small" effect="plain">{{ section.total }} / {{ section.items.length }}</el-tag>
+            <el-tag size="small" effect="plain" :class="{ 'count-pulse': countsPulse }">总数 {{ section.total }} / 已加载 {{ section.items.length }}</el-tag>
             <el-button v-if="section.items.length" text size="small" :disabled="!canWrite" @click="toggleSectionSelection(section.items)">
               {{ areAllSelected(section.items) ? '取消全选' : '本列全选' }}
             </el-button>
           </div>
         </div>
-        <div v-if="!section.items.length" class="empty">当前筛选下没有待处理项。</div>
+        <div v-if="!section.items.length" class="empty">{{ section.total ? '当前筛选下没有符合条件的条目，队列共 ' + section.total + ' 条。' : '该队列当前为空。' }}</div>
         <div v-else class="list">
           <article v-for="item in section.items" :key="item.document_id" class="list-item">
             <el-checkbox
@@ -294,18 +138,18 @@
                 <div v-else-if="!lowConfidenceRegionsFor(item.document_id).length" class="empty empty--compact">未找到可展开的低置信区域。</div>
                 <article v-for="region in lowConfidenceRegionsFor(item.document_id)" :key="region.region_id" class="low-confidence-region-item">
                   <div class="low-confidence-region-item__meta">
-                    <strong>{{ region.region_label || '鍖哄煙' }}</strong>
+                    <strong>{{ region.region_label || '区域' }}</strong>
                     <span v-if="region.asset_file_name">{{ region.asset_file_name }}</span>
-                    <span v-if="region.asset_page_number || region.page_number">椤电爜 {{ region.asset_page_number || region.page_number }}</span>
+                    <span v-if="region.asset_page_number || region.page_number">页码 {{ region.asset_page_number || region.page_number }}</span>
                     <span v-if="region.layout_hints?.length">{{ region.layout_hints.join(' / ') }}</span>
                     <span v-if="region.confidence !== null && region.confidence !== undefined">
-                      缃俊搴?{{ (Number(region.confidence) * 100).toFixed(1) }}%
+                      置信度 {{ (Number(region.confidence) * 100).toFixed(1) }}%
                     </span>
-                    <span v-if="region.bbox?.length === 4">鍧愭爣 {{ formatBbox(region.bbox) }}</span>
+                    <span v-if="region.bbox?.length === 4">坐标 {{ formatBbox(region.bbox) }}</span>
                   </div>
-                  <span class="summary-hint">{{ region.summary || region.ocr_text || '鏃犳憳瑕?' }}</span>
+                  <span class="summary-hint">{{ region.summary || region.ocr_text || '无摘要' }}</span>
                   <div class="actions">
-                    <el-button text type="warning" size="small" @click="openRegion(item.document_id, region)">瀹氫綅</el-button>
+                    <el-button text type="warning" size="small" @click="openRegion(item.document_id, region)">定位</el-button>
                   </div>
                 </article>
               </div>
@@ -321,10 +165,10 @@
       </section>
     </div>
 
-    <section v-if="!loading" class="panel">
+    <section v-if="governance" class="panel">
       <div class="panel-head">
         <strong>多当前版本冲突</strong>
-        <el-tag size="small" effect="plain">{{ governance?.summary.version_conflicts ?? 0 }} / {{ conflictItems.length }}</el-tag>
+        <el-tag size="small" effect="plain" :class="{ 'count-pulse': countsPulse }">{{ governance?.summary.version_conflicts ?? 0 }} / {{ conflictItems.length }}</el-tag>
       </div>
       <div v-if="!conflictItems.length" class="empty">当前没有多 current 冲突。</div>
       <div v-else class="list">
@@ -367,9 +211,7 @@
     </el-drawer>
 
     <el-drawer v-model="batchEventDrawerVisible" title="批量治理审计详情" size="460px" destroy-on-close @close="closeBatchEventDrawer">
-      <div v-if="batchEventDetailLoading" class="loading-panel">
-        <el-skeleton :rows="6" animated />
-      </div>
+      <LoadingState v-if="batchEventDetailLoading" label="正在加载任务详情…" />
       <div v-else-if="selectedBatchEventDetail" class="detail-stack">
         <div class="toolbar-meta">
           <span>任务 {{ selectedBatchEventTask?.task_id || selectedBatchEventDetail.resource_id }}</span>
@@ -444,7 +286,7 @@
             <el-button v-if="selectedBatchEventTask.timeline.has_more" text size="small" :loading="batchEventDetailLoading" @click="loadMoreBatchEventTimeline">加载更多</el-button>
           </div>
         </div>
-        <pre class="detail-json">{{ JSON.stringify(selectedBatchEventDetail.details || {}, null, 2) }}</pre>
+        <JsonPreview :value="selectedBatchEventDetail.details" empty="该任务没有附加详情" />
       </div>
       <div v-else class="empty">未获取到批量治理详情。</div>
     </el-drawer>
@@ -452,30 +294,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRouter } from 'vue-router';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
+import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
+import JsonPreview from '@/components/JsonPreview.vue';
 import {
   batchUpdateKBDocuments,
-  buildKnowledgeBatchSignature,
-  buildKnowledgeRebuildSignature,
-  dryRunKnowledgeDocuments,
   getKBDocument,
   getKBDocumentVisualAssets,
   getKBGovernance,
   getKBGovernanceBatchEventDetail,
   getKBGovernanceBatchEvents,
   getKBVisualAssetRegions,
-  ingestKnowledgeDocuments,
-  rebuildKnowledgeDocuments,
-  rebuildKnowledgeDocument,
   updateKBDocument,
   type BatchUpdateKBDocumentsPayload,
   type BatchUpdateKBDocumentsResponse,
-  type KnowledgeBatchDocumentsPayload,
-  type KnowledgeBatchDryRunResponse,
-  type KnowledgeBatchIngestResponse,
   type KBGovernanceBatchEventItem,
   type KBGovernanceBatchEventDetailResponse,
   type KBGovernanceBatchEventsResponse,
@@ -483,9 +319,6 @@ import {
   type KBGovernanceResponse,
   type KBGovernanceVersionConflictItem,
   type KBVisualAssetRegion,
-  type RebuildKnowledgeDocumentsResponse,
-  type RebuildKnowledgeDocumentPayload,
-  type RebuildKnowledgeDocumentResponse
 } from '@/api/kb';
 import { useAuthStore } from '@/store/auth';
 
@@ -508,12 +341,8 @@ const LOW_CONFIDENCE_THRESHOLD = 0.8;
 const loading = ref(false);
 const bulkLoading = ref(false);
 const batchEventsLoading = ref(false);
+const countsPulse = ref(false);
 const batchEventDetailLoading = ref(false);
-const knowledgeBatchDryRunLoading = ref(false);
-const knowledgeBatchIngestLoading = ref(false);
-const knowledgeBatchRebuildLoading = ref(false);
-const rebuildDryRunLoading = ref(false);
-const rebuildLoading = ref(false);
 const savingEdit = ref(false);
 const editingDocumentId = ref('');
 const editDrawerVisible = ref(false);
@@ -525,22 +354,15 @@ const selectedBatchEvent = ref<KBGovernanceBatchEventItem | null>(null);
 const selectedBatchEventTask = ref<KBGovernanceBatchEventDetailResponse | null>(null);
 const selectedDocumentIds = ref<string[]>([]);
 const batchReviewerNote = ref('');
-const knowledgeBatchJson = ref('');
-const lastKnowledgeBatchDryRunSignature = ref('');
-const lastKnowledgeBatchDryRunResult = ref<KnowledgeBatchDryRunResponse | null>(null);
-const lastKnowledgeBatchIngestSignature = ref('');
-const lastKnowledgeBatchIngestResult = ref<KnowledgeBatchIngestResponse | null>(null);
-const lastKnowledgeBatchRebuildResult = ref<RebuildKnowledgeDocumentsResponse | null>(null);
 const lastBatchRequest = ref<BatchUpdateKBDocumentsPayload | null>(null);
 const lastBatchResult = ref<BatchUpdateKBDocumentsResponse | null>(null);
-const lastDryRunSignature = ref('');
-const lastRebuildResult = ref<RebuildKnowledgeDocumentResponse | null>(null);
 const batchTimelineFilter = ref<BatchTimelineFilter>('all');
 const lowConfidenceExpandedDocumentIds = ref<string[]>([]);
 const loadingLowConfidenceDocuments = ref<Record<string, boolean>>({});
 const lowConfidenceRegionsByDocument = ref<Record<string, GovernanceLowConfidenceRegion[]>>({});
 const viewMode = ref<'personal' | 'admin'>(authStore.isAdmin() ? 'admin' : 'personal');
-const limit = ref(8);
+const limit = ref(50);
+const offset = ref(0);
 const workset = ref<Workset>('all');
 const versionStatusOptions = ['active', 'draft', 'superseded', 'archived'];
 const reviewStatusOptions = ['review_pending', 'approved', 'rejected'];
@@ -548,38 +370,6 @@ const documentForm = reactive({ owner_user_id: '', version_family_key: '', versi
 
 const canWrite = computed(() => authStore.hasPermission('kb.write'));
 const currentUserId = computed(() => String(authStore.user?.id || ''));
-const parsedKnowledgeBatchPayload = computed<KnowledgeBatchDocumentsPayload | null>(() => {
-  const raw = knowledgeBatchJson.value.trim();
-  if (!raw) return null;
-  try {
-    const payload = JSON.parse(raw) as KnowledgeBatchDocumentsPayload;
-    return Array.isArray(payload?.documents) && payload.documents.length ? payload : null;
-  } catch {
-    return null;
-  }
-});
-const knowledgeBatchPayloadSignature = computed(() => parsedKnowledgeBatchPayload.value ? buildKnowledgeBatchSignature(parsedKnowledgeBatchPayload.value) : '');
-const canRunKnowledgeBatchDryRun = computed(() => canWrite.value && Boolean(parsedKnowledgeBatchPayload.value));
-const canRunKnowledgeBatchIngest = computed(() => canRunKnowledgeBatchDryRun.value && Boolean(lastKnowledgeBatchDryRunSignature.value) && lastKnowledgeBatchDryRunSignature.value === knowledgeBatchPayloadSignature.value);
-const knowledgeBatchRebuildDocumentIds = computed(() => (lastKnowledgeBatchIngestResult.value?.documents ?? [])
-  .filter((item) => item.ok && item.document_id)
-  .map((item) => String(item.document_id)));
-const canRunKnowledgeBatchRebuild = computed(() => canRunKnowledgeBatchIngest.value && lastKnowledgeBatchIngestSignature.value === knowledgeBatchPayloadSignature.value && knowledgeBatchRebuildDocumentIds.value.length > 0);
-const rebuildTarget = computed(() => selectedDocumentIds.value.length === 1 ? { doc_id: String(selectedDocumentIds.value[0] || '') } : null);
-const rebuildPayloadSignature = computed(() => rebuildTarget.value ? buildKnowledgeRebuildSignature(rebuildTarget.value) : '');
-const canRunRebuildDryRun = computed(() => canWrite.value && Boolean(rebuildTarget.value));
-const canRunRebuild = computed(() => canRunRebuildDryRun.value && Boolean(lastDryRunSignature.value) && lastDryRunSignature.value === rebuildPayloadSignature.value);
-const rebuildSummaryItems = computed(() => {
-  const result = lastRebuildResult.value;
-  if (!result) return [];
-  return [
-    { key: 'doc_id', label: 'doc_id', value: result.doc_id },
-    { key: 'version', label: 'version', value: result.version },
-    { key: 'chunk_count', label: 'chunk_count', value: result.chunk_count },
-    { key: 'indexed_chunks', label: 'indexed_chunks', value: result.indexed_chunks },
-    { key: 'deleted_previous', label: 'deleted_previous', value: result.deleted_previous }
-  ].filter((item) => item.value !== undefined && item.value !== null && String(item.value) !== '');
-});
 const hasDegradedSections = computed(() => (governance.value?.data_quality?.degraded_sections?.length ?? 0) > 0);
 const failedBatchItems = computed(() => (lastBatchResult.value?.items ?? []).filter((item) => !item.ok));
 const canRetryFailedBatch = computed(() => !!lastBatchRequest.value && failedBatchItems.value.length > 0 && canWrite.value);
@@ -590,16 +380,6 @@ const selectedBatchEventFailedItems = computed(() => selectedBatchEventDetail.va
 const canRetrySelectedBatchTask = computed(() => {
   const patch = selectedBatchEventDetail.value?.details?.patch;
   return Boolean(canWrite.value && patch && selectedBatchEventFailedItems.value.length > 0);
-});
-const summaryCards = computed(() => {
-  const summary = governance.value?.summary;
-  return [
-    { key: 'pending_review', label: '待审核', value: summary?.pending_review ?? 0, hint: '待审核或草稿版本。', tone: '' },
-    { key: 'approved_ready', label: '已通过待发布', value: summary?.approved_ready ?? 0, hint: '已通过但尚未正式切换生效。', tone: '' },
-    { key: 'rejected_documents', label: '已驳回', value: summary?.rejected_documents ?? 0, hint: '被驳回后仍需补齐信息。', tone: '' },
-    { key: 'visual_attention', label: '截图待处理', value: summary?.visual_attention ?? 0, hint: '视觉增强尚未 ready。', tone: '' },
-    { key: 'version_conflicts', label: '多当前版本冲突', value: summary?.version_conflicts ?? 0, hint: '同一版本家族存在多个 current。', tone: '' }
-  ];
 });
 const documentSections = computed(() => {
   const queues = governance.value?.queues;
@@ -621,7 +401,16 @@ const reviewLabel = (status: string) => status === 'review_pending' ? '待审核
 const reasonLabel = (reason: string) => reason === 'review_pending' ? '待审核' : reason === 'draft_version' ? '草稿未提交' : reason === 'scheduled_publish' ? '待发布' : reason === 'approved_ready' ? '已通过待发布' : reason === 'rejected_review' ? '已驳回' : reason === 'expired_effective_window' ? '已过期' : reason === 'version_metadata_without_family' ? '缺少版本家族' : reason === 'visual_pipeline_low_confidence' ? '低置信截图区域' : reason.startsWith('visual_pipeline_') ? `视觉待处理 ${reason.replace('visual_pipeline_', '')}` : reason || '待处理';
 const batchActionLabel = (patch?: Record<string, unknown> | null) => !patch ? '批量治理' : typeof patch.owner_user_id !== 'undefined' ? '批量指派' : patch.review_status === 'review_pending' ? '批量提交审核' : patch.review_status === 'approved' ? '批量通过' : patch.review_status === 'rejected' ? '批量驳回' : '批量治理';
 const cloneBatchPatch = (patch?: Record<string, unknown> | null): BatchUpdateKBDocumentsPayload['patch'] => ({ ...(patch || {}) }) as BatchUpdateKBDocumentsPayload['patch'];
-const filterItems = (items: KBGovernanceDocumentItem[]) => workset.value === 'all' ? items : workset.value === 'pending_me' ? items.filter((item) => item.owner_user_id === currentUserId.value) : items.filter((item) => item.reviewed_by_user_id === currentUserId.value);
+// pending_me 由服务端 owner_user_id 过滤（口径同为 stats.owner_user_id 回退 created_by），这里不再二次过滤；
+// reviewed_by_me 后端未提供对应过滤参数，仍在当前页内做客户端筛选。
+const filterItems = (items: KBGovernanceDocumentItem[]) => workset.value === 'all' || workset.value === 'pending_me' ? items : items.filter((item) => item.reviewed_by_user_id === currentUserId.value);
+const currentPage = computed(() => Math.floor(offset.value / limit.value) + 1);
+const canGoPrevPage = computed(() => offset.value > 0);
+const canGoNextPage = computed(() => documentSections.value.some((section) => section.items.length >= limit.value));
+const goPrevPage = () => { offset.value = Math.max(0, offset.value - limit.value); void loadGovernance(); };
+const goNextPage = () => { offset.value += limit.value; void loadGovernance(); };
+const handleWorksetChange = () => { offset.value = 0; void loadGovernance(); };
+const handleScopeChange = () => { offset.value = 0; void loadAllData(); };
 const clearSelection = () => { selectedDocumentIds.value = []; };
 const resetLowConfidenceRegions = () => {
   lowConfidenceExpandedDocumentIds.value = [];
@@ -682,129 +471,18 @@ const toggleLowConfidenceRegions = async (item: KBGovernanceDocumentItem) => {
     await loadLowConfidenceRegions(documentId);
   }
 };
-const loadGovernance = async () => { loading.value = true; resetLowConfidenceRegions(); try { const response = await getKBGovernance({ view: viewMode.value, limit: limit.value }); const payload = ((response as any).data ?? response) as KBGovernanceResponse; const visualAttention = Array.isArray(payload.queues?.visual_attention) ? payload.queues.visual_attention : []; const visualLowConfidence = Array.isArray(payload.queues?.visual_low_confidence) ? payload.queues.visual_low_confidence : []; governance.value = { ...payload, summary: { ...payload.summary, visual_attention: Number(payload.summary?.visual_attention ?? 0) + Number(payload.summary?.visual_low_confidence ?? 0) }, queues: { ...payload.queues, visual_attention: [...visualAttention, ...visualLowConfidence] } }; clearSelection(); } catch { governance.value = null; } finally { loading.value = false; } };
+const loadGovernance = async () => { loading.value = true; resetLowConfidenceRegions(); try { const response = await getKBGovernance({ view: viewMode.value, limit: limit.value, offset: offset.value, owner_user_id: workset.value === 'pending_me' ? currentUserId.value : '' }); const payload = ((response as any).data ?? response) as KBGovernanceResponse; const visualAttention = Array.isArray(payload.queues?.visual_attention) ? payload.queues.visual_attention : []; const visualLowConfidence = Array.isArray(payload.queues?.visual_low_confidence) ? payload.queues.visual_low_confidence : []; governance.value = { ...payload, summary: { ...payload.summary, visual_attention: Number(payload.summary?.visual_attention ?? 0) + Number(payload.summary?.visual_low_confidence ?? 0) }, queues: { ...payload.queues, visual_attention: [...visualAttention, ...visualLowConfidence] } }; clearSelection(); } catch { governance.value = null; } finally { loading.value = false; } };
 const loadBatchEvents = async () => { batchEventsLoading.value = true; try { const response = await getKBGovernanceBatchEvents({ view: viewMode.value, limit: 8 }); const payload = ((response as any).data ?? response) as KBGovernanceBatchEventsResponse; batchEvents.value = Array.isArray(payload.items) ? payload.items : []; } catch { batchEvents.value = []; } finally { batchEventsLoading.value = false; } };
 const loadAllData = async () => { await Promise.all([loadGovernance(), loadBatchEvents()]); };
 const findQueueItem = (documentId: string) => [...(governance.value?.queues.pending_review ?? []), ...(governance.value?.queues.approved_ready ?? []), ...(governance.value?.queues.rejected_documents ?? []), ...(governance.value?.queues.expired_documents ?? []), ...(governance.value?.queues.visual_attention ?? []), ...(governance.value?.queues.missing_version_family ?? [])].find((item) => item.document_id === documentId) || null;
-const resetKnowledgeBatch = () => {
-  knowledgeBatchJson.value = '';
-  lastKnowledgeBatchDryRunSignature.value = '';
-  lastKnowledgeBatchDryRunResult.value = null;
-  lastKnowledgeBatchIngestSignature.value = '';
-  lastKnowledgeBatchIngestResult.value = null;
-  lastKnowledgeBatchRebuildResult.value = null;
+let countsPulseTimer: ReturnType<typeof setTimeout> | null = null;
+const pulseCounts = () => {
+  countsPulse.value = true;
+  if (countsPulseTimer) clearTimeout(countsPulseTimer);
+  countsPulseTimer = setTimeout(() => { countsPulse.value = false; countsPulseTimer = null; }, 200);
 };
-const requireKnowledgeBatchPayload = (): KnowledgeBatchDocumentsPayload | null => {
-  const payload = parsedKnowledgeBatchPayload.value;
-  if (!payload) {
-    ElMessage.warning('请填写包含 documents 数组的 JSON。');
-    return null;
-  }
-  return payload;
-};
-const runKnowledgeBatchDryRun = async () => {
-  const payload = requireKnowledgeBatchPayload();
-  if (!payload) return;
-  knowledgeBatchDryRunLoading.value = true;
-  try {
-    const response = await dryRunKnowledgeDocuments(payload);
-    lastKnowledgeBatchDryRunResult.value = ((response as any).data ?? response) as KnowledgeBatchDryRunResponse;
-    lastKnowledgeBatchDryRunSignature.value = knowledgeBatchPayloadSignature.value;
-    lastKnowledgeBatchIngestResult.value = null;
-    lastKnowledgeBatchIngestSignature.value = '';
-    lastKnowledgeBatchRebuildResult.value = null;
-    ElMessage.success('批量 dry-run 已通过。');
-  } finally {
-    knowledgeBatchDryRunLoading.value = false;
-  }
-};
-const runKnowledgeBatchIngest = async () => {
-  const payload = requireKnowledgeBatchPayload();
-  if (!payload) return;
-  if (!canRunKnowledgeBatchIngest.value) {
-    ElMessage.warning('请先对当前批量 JSON 执行 dry-run。');
-    return;
-  }
-  knowledgeBatchIngestLoading.value = true;
-  try {
-    const response = await ingestKnowledgeDocuments(payload);
-    lastKnowledgeBatchIngestResult.value = ((response as any).data ?? response) as KnowledgeBatchIngestResponse;
-    lastKnowledgeBatchIngestSignature.value = knowledgeBatchPayloadSignature.value;
-    lastKnowledgeBatchRebuildResult.value = null;
-    const successCount = Number(lastKnowledgeBatchIngestResult.value.succeeded_documents || 0);
-    const failedCount = Number(lastKnowledgeBatchIngestResult.value.failed_documents || 0);
-    if (successCount > 0) {
-      ElMessage.success(`批量写入完成：成功 ${successCount} 项${failedCount ? `，失败 ${failedCount} 项` : ''}`);
-      await Promise.all([loadGovernance(), loadBatchEvents()]);
-      return;
-    }
-    ElMessage.error('批量写入失败，请查看失败项详情。');
-  } finally {
-    knowledgeBatchIngestLoading.value = false;
-  }
-};
-const runKnowledgeBatchRebuild = async () => {
-  if (!canRunKnowledgeBatchRebuild.value) {
-    ElMessage.warning('请先使用当前 JSON 完成 dry-run 和批量写入。');
-    return;
-  }
-  knowledgeBatchRebuildLoading.value = true;
-  try {
-    lastKnowledgeBatchRebuildResult.value = await rebuildKnowledgeDocuments({
-      document_ids: knowledgeBatchRebuildDocumentIds.value
-    });
-    const result = lastKnowledgeBatchRebuildResult.value;
-    if (result.succeeded_documents > 0) {
-      ElMessage.success(`批量重建完成：成功 ${result.succeeded_documents} 项${result.failed_documents ? `，失败 ${result.failed_documents} 项` : ''}`);
-      await Promise.all([loadGovernance(), loadBatchEvents()]);
-      return;
-    }
-    ElMessage.error('批量重建失败，请查看失败项详情。');
-  } finally {
-    knowledgeBatchRebuildLoading.value = false;
-  }
-};
-const buildRebuildPayload = (dryRun: boolean): RebuildKnowledgeDocumentPayload | null => rebuildTarget.value ? { ...rebuildTarget.value, dry_run: dryRun, signature: rebuildPayloadSignature.value } : null;
-const runRebuildDryRun = async () => {
-  const payload = buildRebuildPayload(true);
-  if (!payload) {
-    ElMessage.warning('请选择一个文档后再预览 rebuild。');
-    return;
-  }
-  rebuildDryRunLoading.value = true;
-  try {
-    const response = await rebuildKnowledgeDocument(payload);
-    const result = ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse;
-    const signature = String(result.signature || rebuildPayloadSignature.value);
-    if (signature !== rebuildPayloadSignature.value) {
-      lastDryRunSignature.value = '';
-      ElMessage.warning('dry-run signature 与当前 payload 不一致，请刷新后重试。');
-      return;
-    }
-    lastDryRunSignature.value = signature;
-    lastRebuildResult.value = null;
-    ElMessage.success('rebuild dry-run 已通过。');
-  } finally {
-    rebuildDryRunLoading.value = false;
-  }
-};
-const runRebuild = async () => {
-  const payload = buildRebuildPayload(false);
-  if (!payload || !canRunRebuild.value) {
-    ElMessage.warning('请先对当前 rebuild payload 执行 dry-run。');
-    return;
-  }
-  rebuildLoading.value = true;
-  try {
-    const response = await rebuildKnowledgeDocument(payload);
-    lastRebuildResult.value = ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse;
-    ElMessage.success('文档 rebuild 已完成。');
-    await Promise.all([loadGovernance(), loadBatchEvents()]);
-  } finally {
-    rebuildLoading.value = false;
-  }
-};
-const executeBatchRequest = async (payload: BatchUpdateKBDocumentsPayload) => { const response = await batchUpdateKBDocuments(payload); const result = ((response as any).data ?? response) as BatchUpdateKBDocumentsResponse; lastBatchRequest.value = payload; lastBatchResult.value = result; const successCount = Number(result.summary?.succeeded ?? 0); const failedCount = Number(result.summary?.failed ?? 0); if (successCount > 0) ElMessage.success(`批量操作完成：成功 ${successCount} 项${failedCount ? `，失败 ${failedCount} 项` : ''}`); else ElMessage.error('批量操作失败，请查看失败项详情后重试。'); clearSelection(); await Promise.all([loadGovernance(), loadBatchEvents()]); };
+onUnmounted(() => { if (countsPulseTimer) clearTimeout(countsPulseTimer); });
+const executeBatchRequest = async (payload: BatchUpdateKBDocumentsPayload) => { const response = await batchUpdateKBDocuments(payload); const result = ((response as any).data ?? response) as BatchUpdateKBDocumentsResponse; lastBatchRequest.value = payload; lastBatchResult.value = result; const successCount = Number(result.summary?.succeeded ?? 0); const failedCount = Number(result.summary?.failed ?? 0); if (successCount > 0) ElMessage.success(`批量操作完成：成功 ${successCount} 项${failedCount ? `，失败 ${failedCount} 项` : ''}`); else ElMessage.error('批量操作失败，请查看失败项详情后重试。'); clearSelection(); await Promise.all([loadGovernance(), loadBatchEvents()]); pulseCounts(); };
 const runBulkAction = async (action: BulkAction) => { if (!selectedDocumentIds.value.length) return; if (action === 'rejected' && !batchReviewerNote.value.trim()) { ElMessage.warning('批量驳回前请填写统一备注。'); return; } bulkLoading.value = true; try { await executeBatchRequest(action === 'assign_to_me' ? { document_ids: selectedDocumentIds.value, patch: { owner_user_id: currentUserId.value || null } } : { document_ids: selectedDocumentIds.value, patch: { review_status: action, reviewer_note: batchReviewerNote.value.trim() } }); batchReviewerNote.value = ''; } finally { bulkLoading.value = false; } };
 const retryFailedBatchItems = async () => { if (!lastBatchRequest.value || !failedBatchItems.value.length) return; bulkLoading.value = true; try { await executeBatchRequest({ document_ids: failedBatchItems.value.map((item) => item.document_id), retry_of_task_id: lastBatchResult.value?.task_id, patch: { ...lastBatchRequest.value.patch } }); } finally { bulkLoading.value = false; } };
 const openGovernanceEditor = async (documentId: string) => { if (!documentId || editingDocumentId.value === documentId) return; editingDocumentId.value = documentId; try { const response = await getKBDocument(documentId); const document = (response as any).data ?? response; editTarget.value = findQueueItem(documentId) || { document_id: String(document.id || ''), base_id: String(document.base_id || ''), base_name: '', file_name: String(document.file_name || ''), status: String(document.status || ''), enhancement_status: String(document.enhancement_status || ''), version_family_key: String(document.version_family_key || ''), version_label: String(document.version_label || ''), version_number: document.version_number == null ? null : Number(document.version_number), version_status: String(document.version_status || ''), is_current_version: Boolean(document.is_current_version), effective_from: document.effective_from || null, effective_to: document.effective_to || null, effective_now: Boolean(document.effective_now), visual_asset_count: Number(document.stats_json?.visual_asset_count || 0), low_confidence_region_count: Number(document.stats_json?.visual_region_low_confidence_count || 0), low_confidence_asset_id: '', low_confidence_region_id: '', low_confidence_region_label: '', low_confidence_region_confidence: null, low_confidence_region_bbox: [], created_at: document.created_at || null, updated_at: document.updated_at || null, owner_user_id: String(document.stats_json?.owner_user_id || document.created_by || ''), review_status: String(document.stats_json?.review_status || ''), reviewer_note: String(document.stats_json?.reviewer_note || ''), reviewed_at: document.stats_json?.reviewed_at || null, reviewed_by_user_id: String(document.stats_json?.reviewed_by_user_id || ''), reviewed_by_email: String(document.stats_json?.reviewed_by_email || ''), reason: '' }; hydrateDocumentForm(document); editDrawerVisible.value = true; } finally { editingDocumentId.value = ''; } };
@@ -911,12 +589,8 @@ onMounted(loadAllData);
 </script>
 
 <style scoped>
-.governance-page { gap: 20px; }
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.summary-card, .panel { padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-panel); }
-.summary-card { display: flex; flex-direction: column; gap: 8px; }
-.summary-label, .summary-hint, .toolbar-meta { font-size: 12px; color: var(--text-secondary); }
-.summary-value { font-size: 28px; color: var(--text-primary); }
+.governance-page { gap: var(--content-gap); }
+.summary-hint, .toolbar-meta { font-size: var(--text-caption); color: var(--text-secondary); }
 .toolbar-row, .panel-head, .actions, .toolbar-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .toolbar-group, .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .degraded-text, .note { color: var(--el-color-warning); }
@@ -927,10 +601,12 @@ onMounted(loadAllData);
 .item-body { flex: 1; min-width: 0; }
 .low-confidence-region-list { display: grid; gap: 8px; padding: 12px; border-radius: var(--radius-sm); background: var(--bg-panel-muted); }
 .low-confidence-region-item { display: grid; gap: 8px; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-panel); }
-.low-confidence-region-item__meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-secondary); }
+.low-confidence-region-item__meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: var(--text-caption); color: var(--text-secondary); }
 .low-confidence-region-item__meta strong { color: var(--text-primary); }
-.loading-panel, .empty { padding: 12px 0; }
+.empty { padding: 12px 0; }
 .empty--compact { padding: 0; }
-.detail-json { margin: 0; padding: 20px; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); }
+.count-pulse { animation: count-pulse var(--transition-fast); }
+@keyframes count-pulse { from { opacity: 0.35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .count-pulse { animation: none; } }
 @media (max-width: 768px) { .toolbar-row, .panel-head, .list-item { flex-direction: column; align-items: stretch; } }
 </style>

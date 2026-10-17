@@ -75,7 +75,7 @@ describe('kbVisualCompare', () => {
     expect(result.changed_pixels).toBe(4);
     expect(result.changed_ratio).toBe(0.25);
     expect(result.bounds).toEqual({ left: 1, top: 1, right: 3, bottom: 3 });
-    expect(result.mask[5 * 4]).toBe(217);
+    expect(result.mask[5 * 4]).toBe(245);
   });
 
   it('normalizes region box to safe coordinates', () => {

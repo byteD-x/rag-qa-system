@@ -1,0 +1,9 @@
+--- original route guard field
+- requiresPermission: 'chat.use'
++++ modified route guard field
++ requiresAnyPermission: ['chat.use', 'kb.manage']
+
+--- original guard behavior
+- check one permission and redirect when it is absent
++++ modified guard behavior
++ allow any listed permission and report all missing alternatives on redirect

@@ -155,7 +155,20 @@ request.interceptors.response.use(
       return Promise.reject(error);
     }
     const isLoginRequest = String(error.config?.url || '').endsWith('/auth/login');
-    notifyRequestError(error.response?.status, error.response?.data, { isLoginRequest });
+    const status = error.response?.status;
+    const responseData = error.response?.data;
+    notifyRequestError(status, responseData, { isLoginRequest });
+    if (error instanceof Error) {
+      // 标记「请求层已提示」，视图层不再对同一次失败重复弹提示（store/chat.ts 已有同样的约定）。
+      const handled = error as HandledRequestError;
+      handled.handledByRequestLayer = true;
+      if (handled.status === undefined) {
+        handled.status = status;
+      }
+      if (handled.code === undefined) {
+        handled.code = getBackendErrorCode(responseData);
+      }
+    }
     return Promise.reject(error);
   }
 );

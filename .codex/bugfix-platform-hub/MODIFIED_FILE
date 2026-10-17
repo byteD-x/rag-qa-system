@@ -1,0 +1,9 @@
+# Verification copy for the platform hub route guard.
+# Changed branch/field: router.beforeEach / requiresAnyPermission.
+# Original route metadata required only chat.use; the modified copy accepts
+# either permission so the sidebar contract matches the route guard.
+
+const platformHubRouteMeta = {
+  requiresAnyPermission: ['chat.use', 'kb.manage'],
+  title: '平台管理',
+};

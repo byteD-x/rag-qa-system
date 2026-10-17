@@ -99,8 +99,14 @@ def _document_governance_queue(
     predicate_sql: str,
     order_sql: str,
     reason_resolver,
+    offset: int = 0,
+    owner_user_id: str = "",
 ) -> tuple[int, list[dict[str, Any]]]:
     clause, params = _scope_clause(user, view, field_name="d.created_by")
+    owner_clause = ""
+    if owner_user_id:
+        owner_clause = "AND COALESCE(NULLIF(d.stats_json->>'owner_user_id', ''), d.created_by::text, '') = %s"
+        params = params + (owner_user_id,)
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -185,32 +191,52 @@ def _document_governance_queue(
                     JOIN kb_bases b ON b.id = d.base_id
                     WHERE {clause}
                       AND {predicate_sql}
+                      {owner_clause}
                 )
                 SELECT *, COUNT(*) OVER() AS total_count
                 FROM matched_docs
                 ORDER BY {order_sql}
                 LIMIT %s
+                OFFSET %s
                 """,
-                params + (
-                    LOW_VISUAL_REGION_CONFIDENCE,
-                    LOW_VISUAL_REGION_CONFIDENCE,
-                    LOW_VISUAL_REGION_CONFIDENCE,
-                    LOW_VISUAL_REGION_CONFIDENCE,
-                    LOW_VISUAL_REGION_CONFIDENCE,
-                    LOW_VISUAL_REGION_CONFIDENCE,
+                (LOW_VISUAL_REGION_CONFIDENCE,) * 6
+                + params
+                + (
                     limit,
+                    offset,
                 ),
             )
             rows = cur.fetchall()
-    total_count = int(rows[0].get("total_count") or 0) if rows else 0
+            # COUNT(*) OVER() 只随返回行一起出现；翻页越界导致空页时它也会消失，
+            # 此时补一次同条件的 COUNT，避免「总数」被误报成 0。
+            if rows:
+                total_count = int(rows[0].get("total_count") or 0)
+            else:
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*) AS total_count
+                    FROM kb_documents d
+                    JOIN kb_bases b ON b.id = d.base_id
+                    WHERE {clause}
+                      AND {predicate_sql}
+                      {owner_clause}
+                    """,
+                    params,
+                )
+                count_rows = cur.fetchall()
+                total_count = int(count_rows[0].get("total_count") or 0) if count_rows else 0
     return total_count, [_serialize_governance_document(row, reason=reason_resolver(row)) for row in rows]
 
 
-def _pending_review_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _pending_review_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="""
             (
                 COALESCE(NULLIF(d.stats_json->>'review_status', ''), '') = 'review_pending'
@@ -243,11 +269,15 @@ def _pending_review_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[
     )
 
 
-def _approved_ready_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _approved_ready_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="""
             COALESCE(NULLIF(d.stats_json->>'review_status', ''), '') = 'approved'
             AND (
@@ -266,33 +296,45 @@ def _approved_ready_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[
     )
 
 
-def _rejected_documents_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _rejected_documents_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="COALESCE(NULLIF(d.stats_json->>'review_status', ''), '') = 'rejected'",
         order_sql="reviewed_at DESC NULLS LAST, updated_at DESC",
         reason_resolver=lambda _row: "rejected_review",
     )
 
 
-def _expired_documents_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _expired_documents_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="d.effective_to IS NOT NULL AND d.effective_to < NOW()",
         order_sql="effective_to DESC, updated_at DESC",
         reason_resolver=lambda _row: "expired_effective_window",
     )
 
 
-def _visual_attention_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _visual_attention_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="""
             COALESCE((d.stats_json->>'visual_asset_count')::int, 0) > 0
             AND COALESCE(NULLIF(d.enhancement_status, ''), 'none') NOT IN ('visual_ready', 'summary_vectors_ready', 'chunk_vectors_ready')
@@ -302,11 +344,15 @@ def _visual_attention_queue(user: CurrentUser, *, view: str, limit: int) -> tupl
     )
 
 
-def _missing_version_family_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _missing_version_family_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql="""
             COALESCE(NULLIF(d.version_family_key, ''), '') = ''
             AND (
@@ -320,11 +366,15 @@ def _missing_version_family_queue(user: CurrentUser, *, view: str, limit: int) -
     )
 
 
-def _visual_low_confidence_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _visual_low_confidence_queue(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> tuple[int, list[dict[str, Any]]]:
     return _document_governance_queue(
         user,
         view=view,
         limit=limit,
+        offset=offset,
+        owner_user_id=owner_user_id,
         predicate_sql=f"""
             EXISTS (
                 SELECT 1
@@ -339,8 +389,9 @@ def _visual_low_confidence_queue(user: CurrentUser, *, view: str, limit: int) ->
     )
 
 
-def _version_conflict_queue(user: CurrentUser, *, view: str, limit: int) -> tuple[int, list[dict[str, Any]]]:
+def _version_conflict_queue(user: CurrentUser, *, view: str, limit: int, offset: int = 0) -> tuple[int, list[dict[str, Any]]]:
     clause, params = _scope_clause(user, view, field_name="d.created_by")
+    count_total = 0
     with db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -371,11 +422,34 @@ def _version_conflict_queue(user: CurrentUser, *, view: str, limit: int) -> tupl
                 FROM conflict_families
                 ORDER BY current_version_count DESC, total_versions DESC, version_family_key ASC
                 LIMIT %s
+                OFFSET %s
                 """,
-                params + (limit,),
+                params + (limit, offset),
             )
             rows = cur.fetchall()
-    total_count = int(rows[0].get("total_count") or 0) if rows else 0
+            # 同 _document_governance_queue：OFFSET 越界时空页不带 COUNT(*) OVER()。
+            if not rows:
+                cur.execute(
+                    f"""
+                    WITH scoped_docs AS (
+                        SELECT d.*
+                        FROM kb_documents d
+                        WHERE {clause}
+                          AND COALESCE(NULLIF(d.version_family_key, ''), '') <> ''
+                    )
+                    SELECT COUNT(*) AS total_count
+                    FROM (
+                        SELECT d.version_family_key
+                        FROM scoped_docs d
+                        GROUP BY d.base_id, d.version_family_key
+                        HAVING COUNT(*) FILTER (WHERE d.is_current_version = TRUE) > 1
+                    ) AS conflict_families
+                    """,
+                    params,
+                )
+                count_rows = cur.fetchall()
+                count_total = int(count_rows[0].get("total_count") or 0) if count_rows else 0
+    total_count = int(rows[0].get("total_count") or 0) if rows else count_total
     items = [
         {
             "base_id": str(row.get("base_id") or ""),
@@ -393,18 +467,23 @@ def _version_conflict_queue(user: CurrentUser, *, view: str, limit: int) -> tupl
     return total_count, items
 
 
-def _governance_payload(user: CurrentUser, *, view: str, limit: int) -> dict[str, Any]:
-    pending_count, pending_items = _pending_review_queue(user, view=view, limit=limit)
-    approved_count, approved_items = _approved_ready_queue(user, view=view, limit=limit)
-    rejected_count, rejected_items = _rejected_documents_queue(user, view=view, limit=limit)
-    expired_count, expired_items = _expired_documents_queue(user, view=view, limit=limit)
-    visual_count, visual_items = _visual_attention_queue(user, view=view, limit=limit)
-    visual_low_confidence_count, visual_low_confidence_items = _visual_low_confidence_queue(user, view=view, limit=limit)
-    missing_count, missing_items = _missing_version_family_queue(user, view=view, limit=limit)
-    conflict_count, conflict_items = _version_conflict_queue(user, view=view, limit=limit)
+def _governance_payload(
+    user: CurrentUser, *, view: str, limit: int, offset: int = 0, owner_user_id: str = ""
+) -> dict[str, Any]:
+    paging = {"view": view, "limit": limit, "offset": offset, "owner_user_id": owner_user_id}
+    pending_count, pending_items = _pending_review_queue(user, **paging)
+    approved_count, approved_items = _approved_ready_queue(user, **paging)
+    rejected_count, rejected_items = _rejected_documents_queue(user, **paging)
+    expired_count, expired_items = _expired_documents_queue(user, **paging)
+    visual_count, visual_items = _visual_attention_queue(user, **paging)
+    visual_low_confidence_count, visual_low_confidence_items = _visual_low_confidence_queue(user, **paging)
+    missing_count, missing_items = _missing_version_family_queue(user, **paging)
+    conflict_count, conflict_items = _version_conflict_queue(user, view=view, limit=limit, offset=offset)
     return {
         "view": view,
         "limit": limit,
+        "offset": offset,
+        "owner_user_id": owner_user_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
             "pending_review": pending_count,
@@ -1214,12 +1293,21 @@ def get_kb_governance(
     user: CurrentUser,
     view: str = Query(default="personal", max_length=16, description="personal 仅统计当前用户资源；admin 统计管理范围内全部资源。"),
     limit: int = Query(default=8, ge=1, le=50, description="每个治理队列返回的样本数量上限。"),
+    offset: int = Query(default=0, ge=0, description="每个治理队列的分页偏移量。"),
+    owner_user_id: str = Query(default="", max_length=128, description="按负责人过滤 document 类队列；留空表示不过滤。"),
 ) -> dict[str, Any]:
     require_kb_permission(request, user, KB_MANAGE_PERMISSION, action="kb.analytics.governance.get", resource_type="kb_analytics_governance")
     normalized_view = view.strip().lower() or "personal"
     if normalized_view not in {"personal", "admin"}:
         raise HTTPException(status_code=400, detail={"detail": "unsupported governance view", "code": "analytics_view_invalid"})
-    payload = _governance_payload(user, view=normalized_view, limit=limit)
+    normalized_owner = owner_user_id.strip()
+    payload = _governance_payload(
+        user,
+        view=normalized_view,
+        limit=limit,
+        offset=offset,
+        owner_user_id=normalized_owner,
+    )
     audit_event(
         action="kb.analytics.governance.get",
         outcome="success",
@@ -1227,7 +1315,7 @@ def get_kb_governance(
         user=user,
         resource_type="kb_analytics_governance",
         scope="admin" if normalized_view == "admin" else "owner",
-        details={"view": normalized_view, "limit": limit},
+        details={"view": normalized_view, "limit": limit, "offset": offset, "owner_user_id": normalized_owner},
     )
     return payload
 

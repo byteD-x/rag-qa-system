@@ -93,11 +93,7 @@
         </header>
 
         <main id="workspace-main-content" class="workspace-content">
-          <router-view v-slot="{ Component }">
-            <transition name="page" mode="out-in">
-              <component :is="Component" />
-            </transition>
-          </router-view>
+          <router-view />
         </main>
       </div>
     </div>
@@ -191,7 +187,8 @@ import {
   Link,
   Aim,
   User as Robot,
-  EditPen
+  EditPen,
+  Setting
 } from '@element-plus/icons-vue';
 import ThemeToggle from '@/components/ThemeToggle.vue';
 
@@ -232,6 +229,11 @@ const navItemsPrimary = [
     icon: Platform
   },
   {
+    path: '/workspace/platform',
+    label: '平台管理',
+    icon: Setting
+  },
+  {
     path: '/workspace/kb/upload',
     label: '知识库治理',
     icon: Files
@@ -269,6 +271,9 @@ const navItemsPrimaryFiltered = computed(() =>
     ) {
       return authStore.hasPermission('chat.use');
     }
+    if (item.path === '/workspace/platform') {
+      return authStore.hasPermission('chat.use') || authStore.hasPermission('kb.manage');
+    }
     if (item.path === '/workspace/kb/upload') return authStore.hasPermission('kb.read');
     if (
       item.path === '/workspace/kb/governance' ||
@@ -295,8 +300,12 @@ const navItemsFiltered = computed(() => {
 });
 
 const activeNavPath = computed(() => {
-  const current = navItemsFiltered.value.find((item) => route.path.startsWith(item.path));
-  return current?.path || '/workspace/entry';
+  const declared = String((route.meta as { navPath?: unknown }).navPath || '');
+  if (declared) return declared;
+  const matches = navItemsFiltered.value.filter(
+    (item) => route.path === item.path || route.path.startsWith(`${item.path}/`)
+  );
+  return matches.sort((a, b) => b.path.length - a.path.length)[0]?.path || '';
 });
 
 const routeTitle = computed(() => String(route.meta.title || 'RAG-QA 工作台'));
@@ -379,7 +388,7 @@ const handleLogout = () => {
   height: 40px;
   border-radius: var(--radius-sm);
   background: var(--blue-600);
-  color: #fff;
+  color: var(--el-color-white);
   flex-shrink: 0;
 }
 
@@ -425,7 +434,7 @@ const handleLogout = () => {
   border-radius: var(--radius-sm);
   background: transparent;
   text-align: left;
-  transition: background var(--transition-base), color var(--transition-base);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
   color: var(--text-primary);
   position: relative;
 }
@@ -489,7 +498,7 @@ const handleLogout = () => {
 
 .nav-copy strong {
   color: inherit;
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 500;
 }
 
@@ -618,7 +627,7 @@ const handleLogout = () => {
 
 .profile-avatar {
   background: var(--blue-600);
-  color: #fff;
+  color: var(--el-color-white);
   font-weight: 500;
 }
 
@@ -639,7 +648,7 @@ const handleLogout = () => {
 .profile-copy span {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-caption);
 }
 
 .logout-button {

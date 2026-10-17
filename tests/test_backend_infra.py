@@ -6514,3 +6514,38 @@ def test_request_service_json_wraps_upstream_5xx_as_502() -> None:
         raise AssertionError("expected upstream 503 to be wrapped as 502")
 
 
+def test_serialize_chat_session_surfaces_execution_mode_from_scope_json() -> None:
+    gateway_sessions = _load_gateway_module("app.gateway_sessions")
+
+    def _default_scope():
+        return {"mode": "all", "agent_profile_id": "", "prompt_template_id": "", "execution_mode": "grounded"}
+
+    payload = gateway_sessions.serialize_chat_session(
+        {
+            "id": "session-1",
+            "user_id": "user-1",
+            "title": "季度复盘",
+            "scope_json": {"mode": "multi", "corpus_ids": ["c1"], "execution_mode": "agent"},
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-02T00:00:00Z",
+        },
+        default_scope_fn=_default_scope,
+    )
+
+    assert payload["execution_mode"] == "agent"
+    assert payload["scope_json"]["execution_mode"] == "agent"
+    assert payload["title"] == "季度复盘"
+    # 整行 DB 字段不应透出
+    assert "user_id" not in payload
+
+
+def test_serialize_chat_session_defaults_execution_mode_when_scope_missing() -> None:
+    gateway_sessions = _load_gateway_module("app.gateway_sessions")
+
+    payload = gateway_sessions.serialize_chat_session(
+        {"id": "session-2", "title": ""},
+        default_scope_fn=lambda: {"mode": "all", "corpus_ids": [], "document_ids": [], "execution_mode": "grounded"},
+    )
+
+    assert payload["execution_mode"] == "grounded"
+    assert payload["scope_json"]["mode"] == "all"

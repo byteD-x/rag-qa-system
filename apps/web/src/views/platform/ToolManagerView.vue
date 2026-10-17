@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="工具注册中心" subtitle="管理Agent工具注册、启停、MCP服务接入与执行统计">
+    <PageHeaderCompact title="工具管理">
       <template #actions>
         <el-button @click="loadData" :loading="loading">
           <el-icon><Refresh /></el-icon>
@@ -10,36 +10,13 @@
     </PageHeaderCompact>
 
     <div class="platform-content">
-      <!-- 统计概览 -->
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ summary?.registered_tools || 0 }}</div>
-          <div class="stat-label">已注册工具</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ summary?.categories || 0 }}</div>
-          <div class="stat-label">工具类别</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ summary?.mcp_servers || 0 }}</div>
-          <div class="stat-label">MCP服务</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ summary?.cache_entries || 0 }}</div>
-          <div class="stat-label">缓存条目</div>
-        </div>
-      </div>
-
       <!-- 分类 Tab -->
       <el-tabs v-model="activeCategory" @tab-change="handleCategoryChange">
         <el-tab-pane label="全部" name="" />
         <el-tab-pane v-for="cat in categories" :key="cat" :label="cat" :name="cat" />
       </el-tabs>
 
-      <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载工具列表...</span>
-      </div>
+      <LoadingState v-if="loading && !tools.length" label="加载工具列表..." />
 
       <EnhancedEmpty
         v-else-if="!tools.length"
@@ -48,19 +25,14 @@
         description="Agent工具将在首次使用时自动注册"
       />
 
-      <div v-else class="tool-grid">
+      <div v-else class="tool-grid" v-loading="loading">
         <div v-for="tool in tools" :key="tool.name" class="tool-card">
           <div class="tool-header">
             <div class="tool-icon" :style="{ background: categoryColor(tool.category) }">
               {{ toolIcon(tool.category) }}
             </div>
             <div class="tool-info">
-              <div class="tool-name-row">
-                <h3>{{ tool.name }}</h3>
-                <el-tag :type="tool.enabled ? 'success' : 'danger'" size="small" effect="dark">
-                  {{ tool.enabled ? '已启用' : '已停用' }}
-                </el-tag>
-              </div>
+              <h3>{{ tool.name }}</h3>
               <span class="tool-cat">{{ tool.category }}</span>
             </div>
             <el-switch
@@ -98,10 +70,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { ElMessage } from 'element-plus';
-import { Loading, Refresh } from '@element-plus/icons-vue';
+import { Refresh } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
-import { getToolRegistrySummary, listAgentTools, toggleAgentTool, type ToolRegistrySummary } from '@/api/platform';
+import LoadingState from '@/components/LoadingState.vue';
+import { getToolRegistrySummary, listAgentTools, toggleAgentTool } from '@/api/platform';
 
 interface ToolItem {
   name: string;
@@ -115,7 +88,6 @@ interface ToolItem {
 }
 
 const tools = ref<ToolItem[]>([]);
-const summary = ref<ToolRegistrySummary | null>(null);
 const loading = ref(false);
 const activeCategory = ref('');
 const categories = ref<string[]>([]);
@@ -127,7 +99,6 @@ const loadData = async () => {
       getToolRegistrySummary(),
       listAgentTools(activeCategory.value ? { category: activeCategory.value } : undefined),
     ]);
-    summary.value = summaryRes;
     tools.value = (toolsRes.items || []).map((t: any) => ({ ...t, _toggling: false }));
     categories.value = Object.keys(summaryRes?.tools
       ? [...new Set(Object.values(summaryRes.tools).map((t: any) => t.category))]
@@ -155,8 +126,8 @@ const toggleTool = async (tool: ToolItem) => {
 
 const categoryColor = (cat: string) => {
   const colors: Record<string, string> = {
-    search: '#e6f4ff', compute: '#f0f5ff', external: '#fff7e6',
-    system: '#f6ffed', general: '#f5f5f5',
+    search: 'var(--blue-50)', compute: 'var(--blue-50)', external: 'var(--el-color-warning-light-9)',
+    system: 'var(--el-color-success-light-9)', general: 'var(--bg-panel-muted)',
   };
   return colors[cat] || colors.general;
 };
@@ -188,43 +159,6 @@ onMounted(() => {
   background: var(--bg-panel-muted);
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.stat-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--blue-600);
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
-}
-
 .tool-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -240,11 +174,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  transition: border-color var(--transition-base);
-}
-
-.tool-card:hover {
-  border-color: var(--blue-500);
 }
 
 .tool-header {
@@ -256,11 +185,11 @@ onMounted(() => {
 .tool-icon {
   width: 44px;
   height: 44px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--text-h2);
   flex-shrink: 0;
 }
 
@@ -269,15 +198,9 @@ onMounted(() => {
   min-width: 0;
 }
 
-.tool-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.tool-name-row h3 {
+.tool-info h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-body);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -285,7 +208,7 @@ onMounted(() => {
 }
 
 .tool-cat {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
@@ -294,7 +217,7 @@ onMounted(() => {
 }
 
 .tool-desc {
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   margin: 0;
   display: -webkit-box;
@@ -321,13 +244,13 @@ onMounted(() => {
 }
 
 .stat-num {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .stat-lbl {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 </style>

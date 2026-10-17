@@ -53,8 +53,8 @@ import { Platform } from '@element-plus/icons-vue';
   align-items: center;
   justify-content: center;
   padding: 56px 48px;
-  background: #111827;
-  color: #fff;
+  background: var(--bg-panel-muted);
+  color: var(--text-primary);
 }
 
 .showcase-content {
@@ -75,14 +75,14 @@ import { Platform } from '@element-plus/icons-vue';
   height: 56px;
   flex-shrink: 0;
   border-radius: var(--radius-md);
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  color: #93c5fd;
+  background: var(--blue-50);
+  border: 1px solid var(--border-color);
+  color: var(--blue-600);
 }
 
 .brand-copy h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--text-h1);
   font-weight: 700;
   letter-spacing: -0.03em;
 }
@@ -90,7 +90,7 @@ import { Platform } from '@element-plus/icons-vue';
 .brand-copy p {
   margin-top: 10px;
   font-size: var(--text-body, 0.9375rem);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
   line-height: 1.55;
 }
 
@@ -106,7 +106,7 @@ import { Platform } from '@element-plus/icons-vue';
   align-items: center;
   gap: 14px;
   font-size: var(--text-body, 0.9375rem);
-  color: rgba(255, 255, 255, 0.88);
+  color: var(--text-regular);
   font-weight: 500;
 }
 
@@ -114,7 +114,7 @@ import { Platform } from '@element-plus/icons-vue';
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgba(59, 130, 246, 0.9);
+  background: var(--blue-500);
   flex-shrink: 0;
 }
 
@@ -130,16 +130,6 @@ import { Platform } from '@element-plus/icons-vue';
   width: 100%;
   max-width: 420px;
   padding: 36px 32px;
-  border-radius: var(--radius-lg);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-md);
-  transition: box-shadow var(--transition-base), border-color var(--transition-base);
-}
-
-.auth-panel-card:hover {
-  box-shadow: var(--shadow-lg);
-  border-color: var(--border-strong);
 }
 
 @media (max-width: 900px) {

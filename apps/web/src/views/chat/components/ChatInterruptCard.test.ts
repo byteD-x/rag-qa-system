@@ -18,8 +18,8 @@ const globalStubs = {
     template: '<div><slot /></div>'
   },
   'el-radio': {
-    props: ['label'],
-    template: '<label :data-label="label"><slot /></label>'
+    props: ['value'],
+    template: '<label :data-value="value"><slot /></label>'
   },
   'el-input': {
     props: ['placeholder'],

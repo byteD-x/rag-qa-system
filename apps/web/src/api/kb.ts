@@ -292,6 +292,8 @@ export interface KBGovernanceVersionConflictItem {
 export interface KBGovernanceResponse {
   view: 'personal' | 'admin';
   limit: number;
+  offset?: number;
+  owner_user_id?: string;
   generated_at: string;
   summary: {
     pending_review: number;
@@ -319,7 +321,12 @@ export interface KBGovernanceResponse {
   };
 }
 
-export function getKBGovernance(params: { view: 'personal' | 'admin'; limit?: number }) {
+export function getKBGovernance(params: {
+  view: 'personal' | 'admin';
+  limit?: number;
+  offset?: number;
+  owner_user_id?: string;
+}) {
   return request.get<KBGovernanceResponse>('/kb/analytics/governance', { params });
 }
 

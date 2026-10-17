@@ -76,34 +76,21 @@
         </el-table>
       </div>
 
-      <el-collapse class="trace-collapse">
-        <el-collapse-item title="LLM Trace" name="1" v-if="workflowRunDetail.llm_trace">
-          <pre class="json-viewer">{{ JSON.stringify(workflowRunDetail.llm_trace, null, 2) }}</pre>
-        </el-collapse-item>
-        <el-collapse-item title="Tool Calls" name="2" v-if="workflowRunDetail.tool_calls?.length">
-          <pre class="json-viewer">{{ JSON.stringify(workflowRunDetail.tool_calls, null, 2) }}</pre>
-        </el-collapse-item>
-        <el-collapse-item title="State" name="3">
-          <pre class="json-viewer">{{ JSON.stringify(workflowRunDetail.workflow_state, null, 2) }}</pre>
-        </el-collapse-item>
-      </el-collapse>
-
       <div class="trace-actions" v-if="workflowRunDetail.status === 'failed'">
         <el-button type="primary" style="width: 100%" :loading="retrying" @click="handleRetry">
           重新执行
         </el-button>
       </div>
     </div>
-    <div v-else class="trace-loading">
-      <el-icon class="is-loading"><Loading /></el-icon> 加载中...
-    </div>
+    <LoadingState v-else label="加载执行轨迹…" />
   </el-drawer>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { Loading } from '@element-plus/icons-vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { getWorkflowRun, retryWorkflowRun } from '@/api/chat';
+import { isHandledRequestError } from '@/api/request';
 import { ElMessage } from 'element-plus';
 import { useChatStore } from '@/store/chat';
 
@@ -154,7 +141,7 @@ async function show(workflowInfo: any) {
     const res: any = await getWorkflowRun(workflowInfo.id);
     workflowRunDetail.value = res;
   } catch (e) {
-    ElMessage.error('获取执行轨迹失败');
+    if (!isHandledRequestError(e)) ElMessage.error('获取执行轨迹失败');
     visible.value = false;
   } finally {
     loadingWorkflow.value = false;
@@ -172,7 +159,7 @@ async function handleRetry() {
       await chatStore.selectSession({ id: chatStore.activeSessionId });
     }
   } catch (e) {
-    ElMessage.error('重试失败');
+    if (!isHandledRequestError(e)) ElMessage.error('重试失败');
   } finally {
     retrying.value = false;
   }
@@ -199,23 +186,20 @@ defineExpose({ show });
 <style scoped>
 .trace-panel { padding: 0 16px 16px; }
 .trace-status-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.trace-id { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
-.trace-section { margin-bottom: 20px; background: #f9f9fb; padding: 12px; border-radius: 8px; }
-.trace-section-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
-.trace-kv { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.trace-id { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--text-muted); }
+.trace-section { margin-bottom: 20px; background: var(--bg-panel-muted); padding: 12px; border-radius: var(--radius-sm); }
+.trace-section-title { font-weight: 600; font-size: var(--text-caption); margin-bottom: 8px; }
+.trace-kv { display: flex; justify-content: space-between; font-size: var(--text-caption); margin-bottom: 4px; }
 .trace-kv span { color: var(--text-muted); }
-.trace-empty { font-size: 12px; color: var(--text-muted); }
+.trace-empty { font-size: var(--text-caption); color: var(--text-muted); }
 .trace-timeline { margin-top: 8px; }
 .timeline-item { display: flex; flex-direction: column; gap: 4px; }
-.timeline-item__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
-.timeline-item__meta { color: var(--text-muted); font-size: 12px; }
-.timeline-item__error { color: var(--el-color-danger); font-size: 12px; }
+.timeline-item__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: var(--text-caption); }
+.timeline-item__meta { color: var(--text-muted); font-size: var(--text-caption); }
+.timeline-item__error { color: var(--el-color-danger); font-size: var(--text-caption); }
 .trace-summary-grid { display: flex; flex-direction: column; gap: 8px; }
-.trace-summary-card { background: #fff; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px; }
-.trace-summary-label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
-.trace-summary-card p, .trace-summary-card ul { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); padding-left: 16px; }
-.trace-collapse { border: none; }
-.json-viewer { background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; max-height: 400px; overflow: auto; }
+.trace-summary-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: 10px 12px; }
+.trace-summary-label { display: block; font-size: var(--text-caption); color: var(--text-muted); margin-bottom: 4px; }
+.trace-summary-card p, .trace-summary-card ul { margin: 4px 0 0; font-size: var(--text-caption); color: var(--text-secondary); padding-left: 16px; }
 .trace-actions { margin-top: 24px; }
-.trace-loading { display: flex; align-items: center; justify-content: center; gap: 8px; height: 100px; color: var(--text-muted); }
 </style>

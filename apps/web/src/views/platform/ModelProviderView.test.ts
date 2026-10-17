@@ -165,8 +165,8 @@ describe('ModelProviderView', () => {
       ['api_' + 'key']: relayCredential,
     });
 
-    const modelSelect = wrapper.findAll('select').find((select) => (select.element as HTMLSelectElement).value === 'gpt-4.1-mini');
-    expect(modelSelect).toBeTruthy();
+    const modelRow = wrapper.findAll('tr').find((row) => row.text().includes('gpt-4.1-mini'));
+    expect(modelRow).toBeTruthy();
 
     const snippet = wrapper.get('pre').text();
     expect(snippet).toContain('LLM_PROVIDER=newapi');

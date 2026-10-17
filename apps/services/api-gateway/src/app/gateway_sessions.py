@@ -51,6 +51,20 @@ def load_session_for_user(session_id: str, user: CurrentUser, *, default_scope_f
     return row
 
 
+def serialize_chat_session(row: dict[str, Any], *, default_scope_fn: Any) -> dict[str, Any]:
+    """会话对外表示。execution_mode 实际存在 scope_json 内（chat_sessions 表无该列），
+    这里提到顶层，与 gateway_chat_graph_routes._thread_payload 保持同一口径。"""
+    scope_json = dict(row.get("scope_json") or default_scope_fn())
+    return {
+        "id": str(row.get("id") or ""),
+        "title": str(row.get("title") or ""),
+        "scope_json": scope_json,
+        "execution_mode": str(scope_json.get("execution_mode") or "grounded"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
 def serialize_chat_message(row: dict[str, Any], *, feedback: dict[str, Any] | None = None) -> dict[str, Any]:
     role = str(row.get("role") or "")
     content = str(row.get("question") or "") if role == "user" else str(row.get("answer") or "")

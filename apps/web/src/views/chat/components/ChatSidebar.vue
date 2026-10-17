@@ -104,7 +104,6 @@ function selectSession(session: any) {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.3s ease;
 }
 
 .sidebar-header {
@@ -120,14 +119,14 @@ function selectSession(session: any) {
   justify-content: center;
   gap: 8px;
   padding: 12px;
-  background: #fff;
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--text-body);
   cursor: pointer;
-  transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .sidebar-close-btn {
@@ -142,10 +141,12 @@ function selectSession(session: any) {
   color: var(--text-secondary);
 }
 
-.new-chat-btn:hover {
-  border-color: var(--blue-500);
-  color: var(--blue-600);
-  background: var(--blue-50);
+@media (hover: hover) and (pointer: fine) {
+  .new-chat-btn:hover {
+    border-color: var(--blue-500);
+    color: var(--blue-600);
+    background: var(--blue-50);
+  }
 }
 
 .sidebar-content {
@@ -157,12 +158,12 @@ function selectSession(session: any) {
 .session-empty {
   text-align: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-caption);
   margin-top: 40px;
 }
 
 .session-group-title {
-  font-size: 12px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text-muted);
   margin: 12px 0 8px 4px;
@@ -185,13 +186,15 @@ function selectSession(session: any) {
   background: transparent;
   border-radius: var(--radius-sm);
   color: var(--text-regular);
-  font-size: 14px;
+  font-size: var(--text-body);
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.session-item:hover {
-  background: var(--bg-panel-muted);
+@media (hover: hover) and (pointer: fine) {
+  .session-item:hover {
+    background: var(--bg-panel-muted);
+  }
 }
 
 .session-item.active {
@@ -201,7 +204,7 @@ function selectSession(session: any) {
 }
 
 .session-icon {
-  font-size: 16px;
+  font-size: var(--text-body);
   opacity: 0.6;
 }
 
@@ -216,7 +219,7 @@ function selectSession(session: any) {
 .session-date {
   flex-shrink: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 
 .sidebar-footer {
@@ -234,14 +237,16 @@ function selectSession(session: any) {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--text-caption);
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
-.session-more-btn:hover {
-  background: var(--bg-panel-muted);
-  color: var(--text-primary);
+@media (hover: hover) and (pointer: fine) {
+  .session-more-btn:hover {
+    background: var(--bg-panel-muted);
+    color: var(--text-primary);
+  }
 }
 
 @media (max-width: 768px) {
@@ -250,13 +255,14 @@ function selectSession(session: any) {
     z-index: 100;
     height: 100%;
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
+    transition: transform var(--transition-fast);
   }
   .sidebar-close-btn {
     display: inline-flex;
   }
   .chat-workspace.show-sidebar .session-sidebar {
     transform: translateX(0);
+    transition: transform 200ms var(--ease-enter);
   }
 }
 </style>

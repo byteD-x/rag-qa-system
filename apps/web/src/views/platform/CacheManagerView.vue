@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="缓存管理" subtitle="管理语义缓存、精确缓存与Prompt Cache策略">
+    <PageHeaderCompact title="缓存管理">
       <template #actions>
         <el-button @click="loadData" :loading="loading">
           <el-icon><Refresh /></el-icon>
@@ -12,32 +12,13 @@
     <div class="platform-content">
       <!-- 统计概览 -->
       <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ cacheStats?.total_entries || 0 }}</div>
-          <div class="stat-label">缓存条目</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ cacheStats?.total_hits || 0 }}</div>
-          <div class="stat-label">累计命中</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ ((cacheStats?.hit_rate_estimate || 0) * 100).toFixed(1) }}%</div>
-          <div class="stat-label">预估命中率</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ ((cacheStats?.memory_usage_estimate || 0) / 1024).toFixed(0) }}KB</div>
-          <div class="stat-label">内存占用</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ (cacheStats?.avg_age_seconds || 0).toFixed(0) }}s</div>
-          <div class="stat-label">平均缓存年龄</div>
+        <div v-for="item in statCards" :key="item.label" class="stat-card surface-card">
+          <div class="metric-value">{{ item.value }}</div>
+          <div class="metric-label">{{ item.label }}</div>
         </div>
       </div>
 
-      <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载缓存数据...</span>
-      </div>
+      <LoadingState v-if="loading" label="加载缓存数据..." />
 
       <template v-else>
         <!-- 缓存配置 -->
@@ -45,7 +26,7 @@
           <h3>缓存配置</h3>
           <el-button size="small" type="primary" @click="saveConfig" :loading="saving">保存配置</el-button>
         </div>
-        <div class="config-panel">
+        <div class="config-panel surface-card">
           <div class="config-row">
             <div class="config-item">
               <label>语义相似度阈值</label>
@@ -78,23 +59,25 @@
         <div class="section-header" style="margin-top: 28px;">
           <h3>缓存失效</h3>
         </div>
-        <div class="invalidate-panel">
+        <div class="invalidate-panel surface-card">
           <div class="invalidate-row">
             <div class="invalidate-item">
               <label>按知识库失效</label>
               <el-input v-model="invalidateForm.corpus_id" placeholder="输入 corpus_id（如 kb:xxx）" clearable />
-              <el-button type="warning" @click="doInvalidate('corpus')" :loading="invalidating">
+              <el-button type="warning" :disabled="!corpusKey" @click="doInvalidate('corpus')" :loading="invalidating">
                 失效该知识库缓存
               </el-button>
+              <span v-if="!corpusKey" class="invalidate-hint">未填写 corpus_id 时不可用：留空会被后端当作「清空全部缓存」</span>
             </div>
           </div>
           <div class="invalidate-row">
             <div class="invalidate-item">
               <label>按问题失效</label>
               <el-input v-model="invalidateForm.question" placeholder="输入完整问题文本" clearable />
-              <el-button type="warning" @click="doInvalidate('question')" :loading="invalidating">
+              <el-button type="warning" :disabled="!questionKey" @click="doInvalidate('question')" :loading="invalidating">
                 失效该问题缓存
               </el-button>
+              <span v-if="!questionKey" class="invalidate-hint">未填写问题文本时不可用：留空会被后端当作「清空全部缓存」</span>
             </div>
           </div>
           <div class="invalidate-row danger">
@@ -111,7 +94,7 @@
           <h3>三层缓存架构</h3>
         </div>
         <div class="cache-layers">
-          <div class="layer-card">
+          <div class="layer-card surface-card">
             <div class="layer-icon">🎯</div>
             <div class="layer-info">
               <strong>L1 精确缓存</strong>
@@ -119,7 +102,7 @@
               <el-tag size="small" type="success">命中率最高</el-tag>
             </div>
           </div>
-          <div class="layer-card">
+          <div class="layer-card surface-card">
             <div class="layer-icon">🔍</div>
             <div class="layer-info">
               <strong>L2 语义缓存</strong>
@@ -127,7 +110,7 @@
               <el-tag size="small" type="warning">命中率中等</el-tag>
             </div>
           </div>
-          <div class="layer-card">
+          <div class="layer-card surface-card">
             <div class="layer-icon">⚡</div>
             <div class="layer-info">
               <strong>L3 Prompt Cache</strong>
@@ -142,11 +125,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Loading, Refresh, Delete } from '@element-plus/icons-vue';
+import { Refresh, Delete } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { getCacheStats, invalidateCache, getCacheConfig, updateCacheConfig, type CacheStats } from '@/api/platform';
+import { isHandledRequestError } from '@/api/request';
 
 const loading = ref(false);
 const saving = ref(false);
@@ -163,6 +148,24 @@ const configForm = reactive({
 const invalidateForm = reactive({
   corpus_id: '',
   question: '',
+});
+
+const corpusKey = computed(() => invalidateForm.corpus_id.trim());
+const questionKey = computed(() => invalidateForm.question.trim());
+
+const statLabels = ['缓存条目', '累计命中', '预估命中率', '内存占用', '平均缓存年龄'];
+
+// 未拿到数据前数值位保持占位，不把 null 兜底成看起来有效的 0
+const statCards = computed(() => {
+  const s = cacheStats.value;
+  const values = !s ? [] : [
+    String(s.total_entries ?? 0),
+    String(s.total_hits ?? 0),
+    `${((s.hit_rate_estimate ?? 0) * 100).toFixed(1)}%`,
+    `${Math.round((s.memory_usage_estimate ?? 0) / 1024)}KB`,
+    `${Math.round(s.avg_age_seconds ?? 0)}s`,
+  ];
+  return statLabels.map((label, index) => ({ label, value: values[index] ?? '—' }));
 });
 
 const loadData = async () => {
@@ -190,14 +193,18 @@ const saveConfig = async () => {
       max_entries: configForm.max_entries,
     });
     ElMessage.success('缓存配置已保存');
-  } catch {
-    ElMessage.error('保存失败');
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('保存失败');
   } finally {
     saving.value = false;
   }
 };
 
-const doInvalidate = async (scope: string) => {
+const doInvalidate = async (scope: 'corpus' | 'question' | 'all') => {
+  const target = scope === 'corpus' ? corpusKey.value : scope === 'question' ? questionKey.value : '';
+  // 空参数会被后端归一成 clear_all，这里直接挡住
+  if (scope !== 'all' && !target) return;
+
   if (scope === 'all') {
     try {
       await ElMessageBox.confirm('确定要清空全部缓存吗？所有后续请求将重新调用 LLM。', '高危操作确认', {
@@ -217,13 +224,13 @@ const doInvalidate = async (scope: string) => {
   setLoading(true);
   try {
     const params: any = {};
-    if (scope === 'corpus' && invalidateForm.corpus_id) params.corpus_id = invalidateForm.corpus_id;
-    if (scope === 'question' && invalidateForm.question) params.question = invalidateForm.question;
+    if (scope === 'corpus') params.corpus_id = target;
+    if (scope === 'question') params.question = target;
     const res: any = await invalidateCache(params);
     ElMessage.success(`已失效 ${res?.invalidated_count || 'N'} 条缓存`);
     loadData();
-  } catch {
-    ElMessage.error('操作失败');
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('操作失败');
   } finally {
     setLoading(false);
   }
@@ -237,37 +244,32 @@ onMounted(() => { loadData(); });
 .platform-content { flex: 1; overflow-y: auto; padding: 20px; background: var(--bg-panel-muted); }
 
 .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 24px; }
-.stat-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; text-align: center; }
-.stat-value { font-size: 22px; font-weight: 700; color: var(--blue-600); }
-.stat-label { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
-
-.loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px; color: var(--text-muted); }
+.stat-card { text-align: center; }
 
 .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.section-header h3 { margin: 0; font-size: 15px; color: var(--text-primary); }
+.section-header h3 { margin: 0; font-size: var(--text-body); color: var(--text-primary); }
 
 /* 配置面板 */
-.config-panel { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; }
 .config-row { display: flex; gap: 24px; margin-bottom: 16px; }
 .config-item { flex: 1; }
-.config-item label { font-size: 13px; color: var(--text-primary); display: block; margin-bottom: 8px; font-weight: 500; }
-.config-hint { font-size: 11px; color: var(--text-muted); display: block; margin-top: 4px; }
+.config-item label { font-size: var(--text-caption); color: var(--text-primary); display: block; margin-bottom: 8px; font-weight: 500; }
+.config-hint { font-size: var(--text-caption); color: var(--text-muted); display: block; margin-top: 4px; }
 .config-item :deep(.el-slider) { margin-top: 8px; }
 
 /* 失效面板 */
-.invalidate-panel { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 20px; }
 .invalidate-row { margin-bottom: 14px; }
 .invalidate-row.danger { padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
-.invalidate-item { display: flex; align-items: center; gap: 12px; }
-.invalidate-item label { font-size: 13px; color: var(--text-primary); white-space: nowrap; flex-shrink: 0; width: 100px; }
+.invalidate-item { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.invalidate-item label { font-size: var(--text-caption); color: var(--text-primary); white-space: nowrap; flex-shrink: 0; width: 100px; }
 .invalidate-item .el-input { flex: 1; max-width: 300px; }
-.danger-hint { font-size: 12px; color: var(--el-color-danger); }
+.invalidate-hint { font-size: var(--text-caption); color: var(--text-muted); }
+.danger-hint { font-size: var(--text-caption); color: var(--el-color-danger); }
 
 /* 缓存层级说明 */
 .cache-layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.layer-card { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 16px; display: flex; gap: 14px; }
-.layer-icon { font-size: 28px; flex-shrink: 0; }
+.layer-card { display: flex; gap: 14px; }
+.layer-icon { font-size: var(--text-h1); flex-shrink: 0; }
 .layer-info { flex: 1; }
-.layer-info strong { font-size: 14px; color: var(--text-primary); display: block; margin-bottom: 6px; }
-.layer-info p { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px 0; line-height: 1.5; }
+.layer-info strong { font-size: var(--text-body); color: var(--text-primary); display: block; margin-bottom: 6px; }
+.layer-info p { font-size: var(--text-caption); color: var(--text-secondary); margin: 0 0 8px 0; line-height: 1.5; }
 </style>

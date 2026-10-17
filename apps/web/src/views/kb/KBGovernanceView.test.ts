@@ -1,26 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  buildKnowledgeBatchSignature,
-  dryRunKnowledgeDocuments,
-  getKBGovernance,
-  getKBGovernanceBatchEvents,
-  ingestKnowledgeDocuments,
-  rebuildKnowledgeDocuments,
-  rebuildKnowledgeDocument,
-  messageSuccess,
-  messageWarning,
-} = vi.hoisted(() => ({
-  buildKnowledgeBatchSignature: vi.fn((payload: any) => `batch:${JSON.stringify(payload)}`),
-  dryRunKnowledgeDocuments: vi.fn(),
+const { getKBGovernance, getKBGovernanceBatchEvents } = vi.hoisted(() => ({
   getKBGovernance: vi.fn(),
   getKBGovernanceBatchEvents: vi.fn(),
-  ingestKnowledgeDocuments: vi.fn(),
-  rebuildKnowledgeDocuments: vi.fn(),
-  rebuildKnowledgeDocument: vi.fn(),
-  messageSuccess: vi.fn(),
-  messageWarning: vi.fn(),
 }));
 
 vi.mock('vue-router', () => ({
@@ -31,8 +14,8 @@ vi.mock('vue-router', () => ({
 
 vi.mock('element-plus', () => ({
   ElMessage: {
-    success: messageSuccess,
-    warning: messageWarning,
+    success: vi.fn(),
+    warning: vi.fn(),
     error: vi.fn(),
   },
 }));
@@ -47,18 +30,12 @@ vi.mock('@/store/auth', () => ({
 
 vi.mock('@/api/kb', () => ({
   batchUpdateKBDocuments: vi.fn(),
-  buildKnowledgeBatchSignature,
-  buildKnowledgeRebuildSignature: ({ doc_id }: { doc_id: string }) => `sig:${String(doc_id || '').trim()}`,
-  dryRunKnowledgeDocuments,
   getKBDocument: vi.fn(),
   getKBDocumentVisualAssets: vi.fn(),
   getKBGovernance,
   getKBGovernanceBatchEventDetail: vi.fn(),
   getKBGovernanceBatchEvents,
   getKBVisualAssetRegions: vi.fn(),
-  ingestKnowledgeDocuments,
-  rebuildKnowledgeDocuments,
-  rebuildKnowledgeDocument,
   updateKBDocument: vi.fn(),
 }));
 
@@ -164,204 +141,75 @@ const stubs = {
   ElSwitch: { template: '<input type="checkbox" />' },
 };
 
-describe('KBGovernanceView rebuild action', () => {
+// 满页 payload：让「下一页」按钮可用（canGoNextPage 依赖某区段已加载条数达到 limit）
+const fullPagePayload = (() => {
+  const items = Array.from({ length: 50 }, (_, index) => documentItem(`doc-${index + 1}`, `ops-policy-${index + 1}.pdf`));
+  return {
+    ...governancePayload,
+    summary: { ...governancePayload.summary, pending_review: 120 },
+    queues: { ...governancePayload.queues, pending_review: items },
+  };
+})();
+
+const findButton = (wrapper: any, label: string) =>
+  wrapper.findAll('button').find((node: any) => node.text().trim() === label);
+
+describe('KBGovernanceView governance queues', () => {
   beforeEach(() => {
-    buildKnowledgeBatchSignature.mockClear();
-    dryRunKnowledgeDocuments.mockReset();
     getKBGovernance.mockReset();
     getKBGovernanceBatchEvents.mockReset();
-    ingestKnowledgeDocuments.mockReset();
-    rebuildKnowledgeDocuments.mockReset();
-    rebuildKnowledgeDocument.mockReset();
-    messageSuccess.mockReset();
-    messageWarning.mockReset();
     getKBGovernance.mockResolvedValue(governancePayload);
     getKBGovernanceBatchEvents.mockResolvedValue({ items: [] });
-    rebuildKnowledgeDocument.mockImplementation((payload: any) => {
-      if (payload.dry_run) {
-        return Promise.resolve({ dry_run: true, signature: payload.signature });
-      }
-      return Promise.resolve({
-        doc_id: payload.doc_id,
-        version: 'v3',
-        chunk_count: 12,
-        indexed_chunks: 12,
-        deleted_previous: 8,
-      });
-    });
-    dryRunKnowledgeDocuments.mockResolvedValue({
-      dry_run: true,
-      document_count: 1,
-      total_content_chars: 14,
-      total_sections: 1,
-      total_chunks: 1,
-      documents: [
-        {
-          doc_id: 'input-1',
-          file_name: 'policy.txt',
-          content_chars: 14,
-          section_count: 1,
-          chunk_count: 1,
-        },
-      ],
-    });
-    ingestKnowledgeDocuments.mockResolvedValue({
-      success: true,
-      batch: { task_id: 'batch-1', status: 'completed' },
-      document_count: 1,
-      succeeded_documents: 1,
-      failed_documents: 0,
-      section_count: 1,
-      chunk_count: 1,
-      indexed_sections: 1,
-      indexed_chunks: 1,
-      skipped_chunks: 0,
-      documents: [
-        {
-          index: 0,
-          ok: true,
-          input_doc_id: 'input-1',
-          document_id: 'generated-doc-1',
-          base_id: 'base-1',
-          file_name: 'policy.txt',
-          section_count: 1,
-          chunk_count: 1,
-          indexed_sections: 1,
-          indexed_chunks: 1,
-          skipped_chunks: 0,
-          status: 'ready',
-        },
-      ],
-    });
-    rebuildKnowledgeDocuments.mockResolvedValue({
-      document_count: 1,
-      succeeded_documents: 1,
-      failed_documents: 0,
-      documents: [{ doc_id: 'generated-doc-1', ok: true, result: { chunk_count: 1 } }],
-    });
   });
 
-  it('requires matching dry-run signature before rebuild and renders summary', async () => {
+  it('renders governance queues without any write affordance', async () => {
     const wrapper = mount(KBGovernanceView, { global: { stubs } });
 
     await flushPromises();
 
-    const rebuildButton = () => wrapper.get('[data-testid="kb-rebuild-button"]');
-    const dryRunButton = () => wrapper.get('[data-testid="kb-rebuild-dry-run-button"]');
-
-    await wrapper.get('[data-testid="select-document-doc-1"]').setValue(true);
-    await flushPromises();
-
-    expect(rebuildButton().attributes('disabled')).toBeDefined();
-
-    await dryRunButton().trigger('click');
-    await flushPromises();
-
-    expect(rebuildKnowledgeDocument).toHaveBeenCalledWith({
-      doc_id: 'doc-1',
-      dry_run: true,
-      signature: 'sig:doc-1',
-    });
-    expect(rebuildButton().attributes('disabled')).toBeUndefined();
-
-    await wrapper.get('[data-testid="select-document-doc-1"]').setValue(false);
-    await wrapper.get('[data-testid="select-document-doc-2"]').setValue(true);
-    await flushPromises();
-
-    expect(rebuildButton().attributes('disabled')).toBeDefined();
-    expect(rebuildKnowledgeDocument).toHaveBeenCalledTimes(1);
-
-    await dryRunButton().trigger('click');
-    await flushPromises();
-    await rebuildButton().trigger('click');
-    await flushPromises();
-
-    expect(rebuildKnowledgeDocument).toHaveBeenLastCalledWith({
-      doc_id: 'doc-2',
-      dry_run: false,
-      signature: 'sig:doc-2',
-    });
-    expect(wrapper.get('[data-testid="kb-rebuild-summary"]').text()).toContain('doc_id doc-2');
-    expect(wrapper.get('[data-testid="kb-rebuild-summary"]').text()).toContain('version v3');
-    expect(wrapper.get('[data-testid="kb-rebuild-summary"]').text()).toContain('chunk_count 12');
-    expect(wrapper.get('[data-testid="kb-rebuild-summary"]').text()).toContain('indexed_chunks 12');
-    expect(wrapper.get('[data-testid="kb-rebuild-summary"]').text()).toContain('deleted_previous 8');
+    expect(getKBGovernance).toHaveBeenCalled();
+    expect(wrapper.text()).toContain('ops-policy-v1.pdf');
+    expect(wrapper.text()).toContain('ops-policy-v2.pdf');
+    expect(wrapper.html()).not.toContain('kb-batch-');
+    expect(wrapper.html()).not.toContain('kb-rebuild-');
   });
 
-  it('gates batch ingest and rebuild behind the current JSON dry-run signature', async () => {
+  it('requests the first page with no owner filter by default', async () => {
+    mount(KBGovernanceView, { global: { stubs } });
+
+    await flushPromises();
+
+    expect(getKBGovernance).toHaveBeenCalledWith({
+      view: 'admin',
+      limit: 50,
+      offset: 0,
+      owner_user_id: '',
+    });
+  });
+
+  it('advances and rewinds the offset through the pager', async () => {
+    getKBGovernance.mockResolvedValue(fullPagePayload);
     const wrapper = mount(KBGovernanceView, { global: { stubs } });
 
     await flushPromises();
 
-    const payload = {
-      documents: [
-        {
-          base_id: 'base-1',
-          doc_id: 'input-1',
-          file_name: 'policy.txt',
-          content: 'Policy content',
-        },
-      ],
-    };
-    const changedPayload = {
-      documents: [
-        {
-          base_id: 'base-1',
-          doc_id: 'input-1',
-          file_name: 'policy.txt',
-          content: 'Changed content',
-        },
-      ],
-    };
+    const next = findButton(wrapper, '下一页');
+    expect(next).toBeTruthy();
+    expect(next!.attributes('disabled')).toBeUndefined();
 
-    const input = wrapper.get('[data-testid="kb-batch-json-input"]');
-    const dryRunButton = () => wrapper.get('[data-testid="kb-batch-dry-run-button"]');
-    const ingestButton = () => wrapper.get('[data-testid="kb-batch-ingest-button"]');
-    const rebuildButton = () => wrapper.get('[data-testid="kb-batch-rebuild-button"]');
-
-    expect(ingestButton().attributes('disabled')).toBeDefined();
-    expect(rebuildButton().attributes('disabled')).toBeDefined();
-
-    await input.setValue(JSON.stringify(payload));
+    await next!.trigger('click');
     await flushPromises();
 
-    expect(dryRunButton().attributes('disabled')).toBeUndefined();
-    expect(ingestButton().attributes('disabled')).toBeDefined();
+    expect(getKBGovernance).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 50 }));
+    expect(wrapper.text()).toContain('第 2 页');
 
-    await dryRunButton().trigger('click');
+    const prev = findButton(wrapper, '上一页');
+    expect(prev!.attributes('disabled')).toBeUndefined();
+
+    await prev!.trigger('click');
     await flushPromises();
 
-    expect(dryRunKnowledgeDocuments).toHaveBeenCalledWith(payload);
-    expect(ingestButton().attributes('disabled')).toBeUndefined();
-    expect(wrapper.get('[data-testid="kb-batch-dry-run-summary"]').text()).toContain('policy.txt');
-
-    await input.setValue(JSON.stringify(changedPayload));
-    await flushPromises();
-
-    expect(ingestButton().attributes('disabled')).toBeDefined();
-    expect(ingestKnowledgeDocuments).not.toHaveBeenCalled();
-
-    await dryRunButton().trigger('click');
-    await flushPromises();
-    await ingestButton().trigger('click');
-    await flushPromises();
-
-    expect(ingestKnowledgeDocuments).toHaveBeenCalledWith(changedPayload);
-    expect(wrapper.get('[data-testid="kb-batch-ingest-summary"]').text()).toContain('generated-doc-1');
-    expect(rebuildButton().attributes('disabled')).toBeUndefined();
-
-    await input.setValue(JSON.stringify(payload));
-    await flushPromises();
-
-    expect(rebuildButton().attributes('disabled')).toBeDefined();
-    expect(rebuildKnowledgeDocuments).not.toHaveBeenCalled();
-
-    await input.setValue(JSON.stringify(changedPayload));
-    await flushPromises();
-    await rebuildButton().trigger('click');
-    await flushPromises();
-
-    expect(rebuildKnowledgeDocuments).toHaveBeenCalledWith({ document_ids: ['generated-doc-1'] });
-    expect(wrapper.get('[data-testid="kb-batch-rebuild-summary"]').text()).toContain('generated-doc-1');
+    expect(getKBGovernance).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }));
+    expect(wrapper.text()).toContain('第 1 页');
   });
 });

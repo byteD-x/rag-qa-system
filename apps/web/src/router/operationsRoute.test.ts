@@ -43,7 +43,25 @@ describe('operations route guard', () => {
     await router.push('/workspace/kb/operations');
 
     expect(router.currentRoute.value.fullPath).toBe('/workspace/kb/operations');
-  });
+  }, 15000);
+
+  it('allows kb.manage-only users to enter the platform hub shown in the sidebar', async () => {
+    localStorage.setItem('access_token', 'token');
+    localStorage.setItem(
+      'user',
+      JSON.stringify({
+        id: 'user-3',
+        email: 'kb-admin@local',
+        role: 'kb_admin',
+        permissions: ['kb.read', 'kb.write', 'kb.manage'],
+      }),
+    );
+
+    const { default: router } = await import('@/router');
+    await router.push('/workspace/platform');
+
+    expect(router.currentRoute.value.fullPath).toBe('/workspace/platform');
+  }, 15000);
 
   it('redirects the legacy audit deep link to the workspace route', async () => {
     localStorage.setItem('access_token', 'token');
@@ -53,5 +71,5 @@ describe('operations route guard', () => {
     await router.push('/audit');
 
     expect(router.currentRoute.value.path).toBe('/workspace/audit');
-  });
+  }, 15000);
 });

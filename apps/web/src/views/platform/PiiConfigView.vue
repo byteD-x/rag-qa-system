@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="PII 脱敏配置" subtitle="管理个人身份信息的检测规则与脱敏策略">
+    <PageHeaderCompact title="PII 脱敏配置">
       <template #actions>
         <el-button type="primary" @click="saveConfig">
           <el-icon><Check /></el-icon> 保存配置
@@ -48,7 +48,10 @@
           :rows="3"
           placeholder="输入包含敏感信息的测试文本..."
         />
-        <el-button @click="runTest" type="primary" style="margin-top: 12px" :loading="testing">测试脱敏</el-button>
+        <div class="test-bar">
+          <el-button @click="runTest" type="primary" :loading="testing">测试脱敏</el-button>
+          <span class="test-hint" :class="{ 'test-hint-warn': dirty }">{{ testHint }}</span>
+        </div>
         <div v-if="testResult" class="test-result">
           <div class="result-row">
             <span class="result-label">检测到 {{ testResult.pii_count }} 处敏感信息</span>
@@ -69,10 +72,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
+import { isHandledRequestError } from '@/api/request'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
 const config = reactive({
@@ -95,20 +99,39 @@ const testInput = ref('')
 const testResult = ref<any>(null)
 const testing = ref(false)
 
+function currentState() {
+  return {
+    strategy: config.strategy,
+    mask_char: config.mask_char,
+    enabled_types: piiTypes.filter(t => t.enabled).map(t => t.key),
+  }
+}
+
+const savedState = ref<any>(null)
+const dirty = computed(() => {
+  if (!savedState.value) return false
+  const cur = currentState()
+  const saved = savedState.value
+  return cur.strategy !== saved.strategy
+    || cur.mask_char !== saved.mask_char
+    || cur.enabled_types.join() !== (saved.enabled_types || []).join()
+})
+
+const testHint = computed(() => dirty.value
+  ? '有未保存的改动，测试仍按已保存的配置执行'
+  : '测试使用已保存的配置（检测类型与遮盖字符）')
+
 async function saveConfig() {
   if (!config.mask_char || [...config.mask_char].length !== 1) {
     ElMessage.error('遮盖字符必须填写一个字符')
     return
   }
   try {
-    await platformApi.savePiiConfig({
-      strategy: config.strategy,
-      mask_char: config.mask_char,
-      enabled_types: piiTypes.filter(t => t.enabled).map(t => t.key),
-    })
+    const res = await platformApi.savePiiConfig(currentState())
+    savedState.value = res.data || currentState()
     ElMessage.success('配置已保存')
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('保存失败')
   }
 }
 
@@ -121,8 +144,8 @@ async function runTest() {
   try {
     const res = await platformApi.testPiiDetection({ text: testInput.value, strategy: config.strategy })
     testResult.value = res.data
-  } catch {
-    ElMessage.error('检测失败')
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('检测失败')
   } finally {
     testing.value = false
   }
@@ -135,9 +158,10 @@ onMounted(async () => {
       Object.assign(config, res.data)
       const enabled = new Set(res.data.enabled_types || [])
       piiTypes.forEach(type => { type.enabled = enabled.has(type.key) })
+      savedState.value = currentState()
     }
-  } catch {
-    ElMessage.error('加载 PII 配置失败，请重试')
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('加载 PII 配置失败，请重试')
   }
 })
 </script>
@@ -149,10 +173,13 @@ onMounted(async () => {
 .pii-type-row { display: flex; align-items: center; justify-content: space-between; }
 .pii-type-info { display: flex; align-items: center; gap: 10px; }
 .pii-label { font-weight: 500; min-width: 80px; }
-.pii-type-desc { font-size: 12px; color: var(--el-text-color-secondary); }
-.test-result { margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: 8px; }
+.pii-type-desc { font-size: var(--text-caption); color: var(--el-text-color-secondary); }
+.test-bar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.test-hint { font-size: var(--text-caption); color: var(--text-secondary); }
+.test-hint-warn { color: var(--el-color-warning); }
+.test-result { margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: var(--radius-sm); }
 .result-row { margin-bottom: 8px; }
 .result-label { font-weight: 600; }
-.output-label { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
-.output-text { font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
+.output-label { font-size: var(--text-caption); color: var(--el-text-color-secondary); margin-bottom: 4px; }
+.output-text { font-family: monospace; font-size: var(--text-caption); white-space: pre-wrap; word-break: break-all; }
 </style>

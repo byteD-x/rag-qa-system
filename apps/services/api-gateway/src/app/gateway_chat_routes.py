@@ -29,7 +29,7 @@ from .gateway_runtime import CHAT_PERMISSION, GATEWAY_BACKPRESSURE_TOTAL, GATEWA
 from .gateway_handoff import local_handoff_queue
 from .gateway_schemas import ClaimHandoffSessionRequest, CreateSessionRequest, MessageFeedbackRequest, RetryWorkflowRunRequest, SendMessageRequest, UpdateSessionRequest
 from .gateway_scope import default_scope, fetch_corpora, fetch_corpus_documents, normalize_execution_mode, resolve_scope_snapshot
-from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages, upsert_chat_message_feedback
+from .gateway_sessions import list_session_messages, load_session_for_user, persist_chat_turn, recent_history_messages, serialize_chat_session, upsert_chat_message_feedback
 from .gateway_workflows import create_workflow_run, list_session_workflow_runs, load_workflow_run_for_user, update_workflow_run
 
 
@@ -171,7 +171,7 @@ async def create_chat_session(payload: CreateSessionRequest, request: Request, u
             cur.execute("INSERT INTO chat_sessions (id, user_id, title, scope_json) VALUES (%s, %s, %s, %s::jsonb)", (session_id, user.user_id, payload.title.strip(), to_json(scope_snapshot)))
         conn.commit()
     write_gateway_audit_event(action="chat.session.create", outcome="success", request=request, user=user, resource_type="chat_session", resource_id=session_id, scope="owner", details={"mode": scope_snapshot.get("mode", "all")})
-    return {"session_id": session_id, "session": load_session_for_user(session_id, user, default_scope_fn=default_scope)}
+    return {"session_id": session_id, "session": serialize_chat_session(load_session_for_user(session_id, user, default_scope_fn=default_scope), default_scope_fn=default_scope)}
 
 
 @router.get("/api/v1/chat/sessions")
@@ -181,7 +181,7 @@ async def list_chat_sessions(request: Request, user: CurrentUser) -> dict[str, A
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM chat_sessions WHERE user_id = %s ORDER BY updated_at DESC", (user.user_id,))
             rows = cur.fetchall()
-    return {"items": rows}
+    return {"items": [serialize_chat_session(row, default_scope_fn=default_scope) for row in rows]}
 
 
 @router.post("/api/v1/chat/handoff/claim-next")
@@ -218,7 +218,7 @@ async def claim_next_handoff_session(payload: ClaimHandoffSessionRequest, reques
 @router.get("/api/v1/chat/sessions/{session_id}")
 async def get_chat_session(session_id: str, request: Request, user: CurrentUser) -> dict[str, Any]:
     require_permission(request, user, CHAT_PERMISSION, action="chat.session.get", resource_type="chat_session", resource_id=session_id)
-    return load_session_for_user(session_id, user, default_scope_fn=default_scope)
+    return serialize_chat_session(load_session_for_user(session_id, user, default_scope_fn=default_scope), default_scope_fn=default_scope)
 
 
 @router.patch("/api/v1/chat/sessions/{session_id}")
@@ -238,7 +238,7 @@ async def update_chat_session(session_id: str, payload: UpdateSessionRequest, re
             cur.execute("UPDATE chat_sessions SET title = %s, scope_json = %s::jsonb, updated_at = NOW() WHERE id = %s AND user_id = %s", (next_title, to_json(next_scope), session_id, user.user_id))
         conn.commit()
     write_gateway_audit_event(action="chat.session.update", outcome="success", request=request, user=user, resource_type="chat_session", resource_id=session_id, scope="owner", details={"mode": next_scope.get("mode", "all")})
-    return {"session": load_session_for_user(session_id, user, default_scope_fn=default_scope)}
+    return {"session": serialize_chat_session(load_session_for_user(session_id, user, default_scope_fn=default_scope), default_scope_fn=default_scope)}
 
 
 @router.delete("/api/v1/chat/sessions/{session_id}")

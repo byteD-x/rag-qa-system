@@ -21,18 +21,38 @@
           <el-option label="拒绝" value="denied" />
           <el-option label="失败" value="failed" />
         </el-select>
+        <el-button
+          text
+          type="primary"
+          size="default"
+          :aria-expanded="showAdvancedFilters"
+          @click="showAdvancedFilters = !showAdvancedFilters"
+        >
+          {{ advancedToggleLabel }}
+        </el-button>
+        <el-button type="primary" :loading="loading" size="default" @click="loadAuditEvents">查询</el-button>
+        <el-button plain size="default" @click="resetFilters">重置</el-button>
+      </div>
+      <div v-if="showAdvancedFilters" class="filter-row">
         <el-input v-model="filters.actor_user_id" placeholder="用户 ID" clearable size="default" style="width: 140px" />
         <el-input v-model="filters.action" placeholder="动作" clearable size="default" style="width: 160px" />
         <el-input v-model="filters.resource_type" placeholder="资源类型" clearable size="default" style="width: 120px" />
         <el-input v-model="filters.resource_id" placeholder="资源 ID" clearable size="default" style="width: 140px" />
-        <el-button type="primary" :loading="loading" size="default" @click="loadAuditEvents">查询</el-button>
-        <el-button plain size="default" @click="resetFilters">重置</el-button>
       </div>
     </FilterBarSticky>
 
+    <p v-if="rangeHint" class="audit-range-hint">{{ rangeHint }}</p>
+
     <div class="table-wrapper">
       <EnhancedEmpty
-        v-if="!events.length && !loading"
+        v-if="loadError"
+        variant="question"
+        title="审计日志加载失败"
+        description="后端暂时不可用，请点「查询」重试"
+        class="audit-empty"
+      />
+      <EnhancedEmpty
+        v-else-if="!events.length && !loading"
         variant="search"
         title="暂无审计事件"
         description="符合条件的审计记录将在此展示"
@@ -70,7 +90,7 @@
       size="420px"
       destroy-on-close
     >
-      <pre v-if="selectedEvent" class="detail-json">{{ JSON.stringify(selectedEvent.details || {}, null, 2) }}</pre>
+      <JsonPreview v-if="selectedEvent" :value="selectedEvent.details" empty="该事件没有附加详情" />
     </el-drawer>
   </div>
 </template>
@@ -81,9 +101,15 @@ import { listAuditEvents } from '@/api/audit';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import FilterBarSticky from '@/components/FilterBarSticky.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import JsonPreview from '@/components/JsonPreview.vue';
+
+const PAGE_LIMIT = 50;
 
 const loading = ref(false);
+const loadError = ref(false);
+const rangeHint = ref('');
 const events = ref<any[]>([]);
+const showAdvancedFilters = ref(false);
 const detailDrawerVisible = ref(false);
 const selectedEvent = ref<any | null>(null);
 
@@ -96,18 +122,40 @@ const filters = reactive({
   outcome: ''
 });
 
+const advancedFilterCount = computed(() => [
+  filters.actor_user_id,
+  filters.action,
+  filters.resource_type,
+  filters.resource_id
+].filter(Boolean).length);
+
+const advancedToggleLabel = computed(() => {
+  if (showAdvancedFilters.value) return '收起高级筛选';
+  return advancedFilterCount.value ? `高级筛选 (${advancedFilterCount.value})` : '高级筛选';
+});
+
 const deniedCount = computed(() => events.value.filter((e) => e.outcome === 'denied').length);
 const failureCount = computed(() => events.value.filter((e) => e.outcome === 'failed').length);
 
 const loadAuditEvents = async () => {
   loading.value = true;
+  loadError.value = false;
   try {
     const result: any = await listAuditEvents({
       ...filters,
-      limit: 50,
+      limit: PAGE_LIMIT,
       offset: 0
     });
-    events.value = Array.isArray(result.items) ? result.items : [];
+    const items = Array.isArray(result.items) ? result.items : [];
+    const limit = Number(result.pagination?.limit) || PAGE_LIMIT;
+    events.value = items;
+    rangeHint.value = items.length >= limit
+      ? `已加载 ${items.length} 条（单次上限 ${limit} 条），可能还有更多记录，请用筛选条件缩小范围`
+      : '';
+  } catch {
+    events.value = [];
+    rangeHint.value = '';
+    loadError.value = true;
   } finally {
     loading.value = false;
   }
@@ -169,6 +217,16 @@ onMounted(() => void loadAuditEvents());
   align-items: center;
 }
 
+.filter-row + .filter-row {
+  margin-top: 12px;
+}
+
+.audit-range-hint {
+  margin: 0;
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-secondary);
+}
+
 .table-wrapper {
   flex: 1;
   min-height: 0;
@@ -184,17 +242,6 @@ onMounted(() => void loadAuditEvents());
 
 .audit-table {
   border-radius: var(--radius-sm);
-}
-
-.detail-json {
-  margin: 0;
-  padding: 20px;
-  font-size: var(--text-caption, 0.75rem);
-  line-height: 1.65;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--font-mono);
 }
 
 @media (max-width: 640px) {

@@ -1,23 +1,34 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="Agent 智能体市场" subtitle="管理您的智能体角色、能力插件及知识库挂载">
+    <PageHeaderCompact title="Agent 工作台">
       <template #actions>
         <el-button type="primary" @click="openCreateDialog">创建智能体</el-button>
       </template>
     </PageHeaderCompact>
 
     <div class="platform-content">
-      <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载智能体中...</span>
-      </div>
+      <LoadingState v-if="loading" label="加载智能体中..." />
+
+      <EnhancedEmpty
+        v-else-if="loadError"
+        variant="question"
+        title="加载失败"
+        description="智能体列表加载失败，请稍后重试"
+      >
+        <template #actions>
+          <el-button type="primary" @click="loadData()">重试</el-button>
+        </template>
+      </EnhancedEmpty>
 
       <EnhancedEmpty
         v-else-if="!profiles.length"
         variant="document"
         title="暂无智能体"
-        description="点击右上角创建您的第一个专属智能体"
-      />
+      >
+        <template #actions>
+          <el-button type="primary" @click="openCreateDialog">创建智能体</el-button>
+        </template>
+      </EnhancedEmpty>
 
       <div v-else class="agent-grid">
         <div v-for="agent in profiles" :key="agent.id" class="agent-card">
@@ -31,20 +42,14 @@
             </div>
             <div class="agent-actions">
               <el-button plain size="small" @click="openEditDialog(agent)">编辑</el-button>
-              <el-button plain size="small" type="danger" @click="deleteAgent(agent)">删除</el-button>
+              <el-button plain size="small" type="danger" :loading="deletingId === agent.id" @click="deleteAgent(agent)">删除</el-button>
             </div>
           </div>
-          <div class="agent-body">
+          <div class="agent-body" v-if="hasFacts(agent)">
             <div class="agent-tag-row">
-              <el-tag size="small" effect="plain" v-if="agent.prompt_template_id">已绑定 Prompt</el-tag>
-              <el-tag size="small" type="success" effect="plain" v-if="agent.default_corpus_ids?.length">已挂载知识库</el-tag>
-            </div>
-            <div class="agent-tools">
-              <strong>启用插件:</strong>
-              <div class="tool-list">
-                <el-tag v-for="tool in agent.enabled_tools" :key="tool" size="small" type="info">{{ tool }}</el-tag>
-                <span v-if="!agent.enabled_tools?.length" class="empty-text">未启用任何插件</span>
-              </div>
+              <el-tag v-for="tool in agent.enabled_tools" :key="tool" size="small" type="info">{{ toolLabel(tool) }}</el-tag>
+              <el-tag v-for="corpusId in agent.default_corpus_ids" :key="corpusId" size="small" type="success" effect="plain">{{ kbLabel(corpusId) }}</el-tag>
+              <el-tag v-if="promptLabel(agent)" size="small" effect="plain">{{ promptLabel(agent) }}</el-tag>
             </div>
           </div>
         </div>
@@ -68,10 +73,7 @@
 
         <el-form-item label="插件列表 (Tools)">
           <el-select v-model="form.enabled_tools" multiple placeholder="选择启用的插件" style="width: 100%;">
-            <el-option label="搜索作用域 (search_scope)" value="search_scope" />
-            <el-option label="搜索语料库 (search_corpus)" value="search_corpus" />
-            <el-option label="计算器 (calculator)" value="calculator" />
-            <el-option label="列出文档 (list_scope_documents)" value="list_scope_documents" />
+            <el-option v-for="tool in TOOL_OPTIONS" :key="tool.value" :label="`${tool.label} (${tool.value})`" :value="tool.value" />
           </el-select>
         </el-form-item>
         
@@ -98,9 +100,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Loading } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { listAgentProfiles, createAgentProfile, updateAgentProfile, deleteAgentProfile, listPromptTemplates } from '@/api/platform';
 import { listKnowledgeBases } from '@/api/kb';
 
@@ -108,10 +110,30 @@ const profiles = ref<any[]>([]);
 const bases = ref<any[]>([]);
 const templates = ref<any[]>([]);
 const loading = ref(false);
+const loadError = ref(false);
 
 const dialogVisible = ref(false);
 const saving = ref(false);
+const deletingId = ref('');
 const editingAgent = ref<any>(null);
+
+const TOOL_OPTIONS = [
+  { value: 'search_scope', label: '搜索作用域' },
+  { value: 'search_corpus', label: '搜索语料库' },
+  { value: 'calculator', label: '计算器' },
+  { value: 'list_scope_documents', label: '列出文档' }
+];
+
+const toolLabel = (tool: string) => TOOL_OPTIONS.find((item) => item.value === tool)?.label || tool;
+
+const kbLabel = (corpusId: string) =>
+  bases.value.find((base: any) => base.id === corpusId || `kb:${base.id}` === corpusId)?.name || corpusId;
+
+const promptLabel = (agent: any) =>
+  agent.prompt_template?.name || templates.value.find((tpl: any) => tpl.id === agent.prompt_template_id)?.name || '';
+
+const hasFacts = (agent: any) =>
+  Boolean(agent.enabled_tools?.length || agent.default_corpus_ids?.length || promptLabel(agent));
 
 const form = ref({
   name: '',
@@ -122,8 +144,11 @@ const form = ref({
   prompt_template_id: ''
 });
 
-const loadData = async () => {
-  loading.value = true;
+const loadData = async (silent = false) => {
+  if (!silent) {
+    loading.value = true;
+    loadError.value = false;
+  }
   try {
     const [profRes, basesRes, tempRes]: any = await Promise.all([
       listAgentProfiles(),
@@ -133,8 +158,10 @@ const loadData = async () => {
     profiles.value = profRes.items || [];
     bases.value = basesRes.items || [];
     templates.value = tempRes.items || [];
+  } catch {
+    if (!silent) loadError.value = true;
   } finally {
-    loading.value = false;
+    if (!silent) loading.value = false;
   }
 };
 
@@ -179,7 +206,7 @@ const saveAgent = async () => {
       ElMessage.success('创建成功');
     }
     dialogVisible.value = false;
-    loadData();
+    loadData(true);
   } finally {
     saving.value = false;
   }
@@ -191,9 +218,14 @@ const deleteAgent = async (agent: any) => {
   } catch {
     return;
   }
-  await deleteAgentProfile(agent.id);
-  ElMessage.success('已删除');
-  loadData();
+  deletingId.value = agent.id;
+  try {
+    await deleteAgentProfile(agent.id);
+    ElMessage.success('已删除');
+    await loadData(true);
+  } finally {
+    deletingId.value = '';
+  }
 };
 
 onMounted(() => {
@@ -216,16 +248,6 @@ onMounted(() => {
   background: var(--bg-panel-muted);
 }
 
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
-}
-
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -240,12 +262,6 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  transition: box-shadow var(--transition-base), border-color var(--transition-base);
-}
-
-.agent-card:hover {
-  border-color: var(--blue-500);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
 }
 
 .agent-header {
@@ -257,13 +273,13 @@ onMounted(() => {
 .agent-avatar {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--blue-50);
   color: var(--blue-600);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: var(--text-h2);
   font-weight: bold;
 }
 
@@ -274,7 +290,7 @@ onMounted(() => {
 
 .agent-title-col h3 {
   margin: 0 0 4px 0;
-  font-size: 16px;
+  font-size: var(--text-body);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -282,7 +298,7 @@ onMounted(() => {
 }
 
 .agent-desc {
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -297,33 +313,14 @@ onMounted(() => {
 }
 
 .agent-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   border-top: 1px solid var(--border-color);
   padding-top: 12px;
 }
 
 .agent-tag-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.agent-tools strong {
-  font-size: 13px;
-  color: var(--text-secondary);
-  display: block;
-  margin-bottom: 8px;
-}
-
-.tool-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.empty-text {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 </style>

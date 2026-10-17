@@ -13,54 +13,36 @@
           <el-option label="近 30 天" :value="30" />
         </el-select>
         <el-button type="primary" @click="go('/workspace/chat')">统一问答</el-button>
+        <span v-if="loadingDashboard && dashboardData" class="header-loading" role="status" aria-live="polite">
+          <el-icon class="is-loading" :size="14"><Loading /></el-icon>
+          更新中
+        </span>
       </template>
     </PageHeaderCompact>
 
     <div class="entry-content">
-      <!-- Dashboard Section -->
-      <section v-if="loadingDashboard" class="dashboard-loading" role="status" aria-live="polite">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载数据大盘…</span>
+      <!-- Dashboard Section：仅首次加载（页面尚无任何数据）时整段 loading -->
+      <LoadingState v-if="loadingDashboard && !dashboardData" label="加载数据大盘…" />
+
+      <!-- 加载失败且没有可用数据：与「真的没有数据」区分开，并给出重试 -->
+      <section v-else-if="loadError && !dashboardData" role="alert">
+        <EnhancedEmpty
+          variant="default"
+          title="数据大盘加载失败"
+          description="可能是服务暂时不可用或网络异常，请重试。"
+        >
+          <template #actions>
+            <el-button type="primary" @click="loadDashboard">重试</el-button>
+          </template>
+        </EnhancedEmpty>
       </section>
 
       <template v-else>
-        <!-- 主链路漏斗 -->
-        <section v-if="dashboardData?.funnel" class="dashboard-section">
-          <div class="section-header">
-            <h3 class="section-label" style="margin:0;">核心转化漏斗</h3>
-            <span class="degraded-hint" v-if="hasDegradedSections">部分数据暂时降级，以下为可用指标</span>
-          </div>
-          <div class="funnel-container">
-            <div class="funnel-step">
-              <div class="f-label">新建知识库</div>
-              <div class="f-value">{{ dashboardData.funnel.knowledge_bases_created ?? '-' }}</div>
-            </div>
-            <el-icon class="f-arrow"><Right /></el-icon>
-            <div class="funnel-step">
-              <div class="f-label">上传文档</div>
-              <div class="f-value">{{ dashboardData.funnel.documents_uploaded ?? '-' }}</div>
-            </div>
-            <el-icon class="f-arrow"><Right /></el-icon>
-            <div class="funnel-step">
-              <div class="f-label">就绪可问</div>
-              <div class="f-value">{{ dashboardData.funnel.documents_ready ?? '-' }}</div>
-            </div>
-            <el-icon class="f-arrow"><Right /></el-icon>
-            <div class="funnel-step">
-              <div class="f-label">发起提问</div>
-              <div class="f-value">{{ dashboardData.funnel.questions_asked ?? 0 }}</div>
-            </div>
-            <el-icon class="f-arrow"><Right /></el-icon>
-            <div class="funnel-step" :class="{'success-text': (dashboardData.funnel.answer_outcomes?.grounded || 0) > 0}">
-              <div class="f-label">有据回答</div>
-              <div class="f-value">{{ dashboardData.funnel.answer_outcomes?.grounded ?? 0 }}</div>
-            </div>
-            <el-icon class="f-arrow"><Right /></el-icon>
-            <div class="funnel-step">
-              <div class="f-label">接收反馈</div>
-              <div class="f-value">{{ (dashboardData.funnel.feedback?.up || 0) + (dashboardData.funnel.feedback?.down || 0) }}</div>
-            </div>
-          </div>
+        <!-- 刷新失败但保留旧数据：不整段卸载，只提示失败并提供重试 -->
+        <section v-if="loadError" class="dashboard-failure-bar" role="alert">
+          <el-icon><Warning /></el-icon>
+          <span>数据刷新失败，以下为上次加载结果</span>
+          <el-button link type="primary" @click="loadDashboard">重试</el-button>
         </section>
 
         <!-- 健康与质量并排 -->
@@ -71,9 +53,14 @@
               <h3 class="dash-title">入库健康度</h3>
               <el-button link type="primary" @click="go('/workspace/kb/upload')">去处理异常</el-button>
             </div>
-            <div v-if="!dashboardData?.ingest_health" class="empty-state">
-              <span>暂不支持入库指标或服务降级</span>
-            </div>
+            <EnhancedEmpty
+              v-if="!dashboardData?.ingest_health"
+              class="card-empty"
+              variant="document"
+              title="暂不支持入库指标或服务降级"
+              description="当前视图没有可用的入库健康度数据"
+              :image-size="24"
+            />
             <div v-else class="health-content">
               <div class="metric-row">
                 <div class="metric-box">
@@ -109,11 +96,15 @@
           <div class="dash-card">
             <div class="card-header">
               <h3 class="dash-title">问答质量洞察</h3>
-              <el-button link type="primary" @click="go('/workspace/chat')">去检索调试</el-button>
             </div>
-            <div v-if="!dashboardData?.qa_quality" class="empty-state">
-              <span>暂无问答质量数据</span>
-            </div>
+            <EnhancedEmpty
+              v-if="!dashboardData?.qa_quality"
+              class="card-empty"
+              variant="question"
+              title="暂无问答质量数据"
+              description="当前视图没有可用的问答质量数据"
+              :image-size="24"
+            />
             <div v-else class="qa-content">
               <div class="metric-row">
                 <div class="metric-box">
@@ -185,7 +176,7 @@
                 </div>
                 <div class="clarification-kind-list">
                   <span class="kind-list__label">补问类型分布</span>
-                  <div class="kind-list__tags">
+                  <div v-if="dashboardData.qa_quality.clarification.kind_distribution.length" class="kind-list__tags">
                     <el-tooltip
                       v-for="item in dashboardData.qa_quality.clarification.kind_distribution"
                       :key="item.key"
@@ -201,8 +192,15 @@
                         {{ clarificationKindLabel(item.key) }} {{ item.count }}
                       </el-tag>
                     </el-tooltip>
-                    <span v-if="!dashboardData.qa_quality.clarification.kind_distribution.length" class="empty-text">暂无补问数据</span>
                   </div>
+                  <EnhancedEmpty
+                    v-else
+                    class="card-empty"
+                    variant="question"
+                    title="暂无补问数据"
+                    description="当前时间窗口内没有触发补问"
+                    :image-size="24"
+                  />
                 </div>
               </div>
             </div>
@@ -214,42 +212,40 @@
           <!-- 知识盲区 -->
           <div class="dash-card">
             <h3 class="dash-title">知识盲区 (高频无命中)</h3>
-            <ul class="zero-hit-list">
+            <ul v-if="dashboardData?.zero_hit?.top_queries?.length" class="zero-hit-list">
               <li v-for="(q, i) in dashboardData?.zero_hit?.top_queries" :key="i">
                 <span class="q-text" :title="q.query">{{ q.query }}</span>
                 <el-tag size="small" type="danger">{{ q.count }} 次</el-tag>
               </li>
-              <li v-if="!dashboardData?.zero_hit?.top_queries?.length" class="empty-text">当前时间窗口暂无无命中查询</li>
             </ul>
+            <EnhancedEmpty
+              v-else
+              class="card-empty"
+              variant="search"
+              title="暂无无命中查询"
+              description="当前时间窗口内的提问都能命中已有文档"
+              :image-size="24"
+            />
           </div>
 
           <!-- 热点词云 -->
           <div class="dash-card">
             <h3 class="dash-title">问答热点词</h3>
-            <div class="word-cloud">
+            <div v-if="dashboardData?.hot_terms?.length" class="word-cloud">
               <span v-for="(term, i) in dashboardData?.hot_terms" :key="i"
                     class="cloud-tag"
                     :style="{ fontSize: `${12 + Math.min(term.count, 20)}px`, opacity: 0.5 + (term.count / 40) }">
                 {{ term.term }}
               </span>
-              <span v-if="!dashboardData?.hot_terms?.length" class="empty-text">暂无热点数据</span>
             </div>
-          </div>
-
-          <!-- 用户满意度 -->
-          <div class="dash-card">
-            <h3 class="dash-title">用户满意度趋势</h3>
-            <div class="satisfaction-bars">
-              <div v-for="(trend, i) in dashboardData?.satisfaction?.trend" :key="i" class="sat-bar-wrap" :title="trend.date">
-                <div class="sat-bar up" :style="{ flex: trend.up_count || 0.1 }"></div>
-                <div class="sat-bar down" :style="{ flex: trend.down_count || 0.1 }"></div>
-              </div>
-              <span v-if="!dashboardData?.satisfaction?.trend?.length" class="empty-text">暂无趋势数据</span>
-            </div>
-            <div class="sat-legend" v-if="dashboardData?.satisfaction?.trend?.length">
-              <span class="leg-up">■ 赞</span>
-              <span class="leg-down">■ 踩</span>
-            </div>
+            <EnhancedEmpty
+              v-else
+              class="card-empty"
+              variant="default"
+              title="暂无热点词"
+              description="当前时间窗口内没有可用于统计的提问词"
+              :image-size="24"
+            />
           </div>
 
           <!-- 成本与Token消耗 -->
@@ -277,9 +273,7 @@
       <section class="recent-grid">
         <div class="recent-col">
           <h3 class="section-label">最近知识库</h3>
-          <div v-if="loadingHistory" class="recent-skeleton">
-            <div v-for="i in 4" :key="i" class="skeleton-item" />
-          </div>
+          <LoadingState v-if="loadingHistory" label="加载最近知识库…" />
           <EnhancedEmpty
             v-else-if="!recentKnowledgeBases.length"
             variant="folder"
@@ -297,15 +291,12 @@
             >
               <el-icon :size="16"><Folder /></el-icon>
               <span class="recent-name">{{ kb.name }}</span>
-              <span class="recent-meta">{{ kb.docCount }} 篇</span>
             </button>
           </div>
         </div>
         <div class="recent-col">
           <h3 class="section-label">最近会话</h3>
-          <div v-if="loadingHistory" class="recent-skeleton">
-            <div v-for="i in 4" :key="i" class="skeleton-item" />
-          </div>
+          <LoadingState v-if="loadingHistory" label="加载最近会话…" />
           <EnhancedEmpty
             v-else-if="!recentSessions.length"
             variant="chat"
@@ -323,7 +314,6 @@
             >
               <el-icon :size="16"><ChatLineRound /></el-icon>
               <span class="recent-name">{{ session.title }}</span>
-              <span class="recent-meta">{{ session.questionCount > 0 ? session.questionCount + ' 问' : '继续' }}</span>
             </button>
           </div>
         </div>
@@ -335,27 +325,26 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { Folder, ChatLineRound, Loading, Right, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
+import { Folder, ChatLineRound, Loading, Warning, CircleCheckFilled, InfoFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { listKnowledgeBases } from '@/api/kb';
 import { listChatSessions } from '@/api/chat';
 import { getAnalyticsDashboard } from '@/api/analytics';
 import type { AnalyticsDashboardResponse } from '@/api/analytics';
-import { computed } from 'vue';
 import { useAuthStore } from '@/store/auth';
 
 const router = useRouter();
 const authStore = useAuthStore();
 
-const recentKnowledgeBases = ref<{ id: string; name: string; docCount: number }[]>([]);
-const recentSessions = ref<{ id: string; title: string; questionCount: number }[]>([]);
+const recentKnowledgeBases = ref<{ id: string; name: string }[]>([]);
+const recentSessions = ref<{ id: string; title: string }[]>([]);
 const loadingHistory = ref(true);
 
 const viewMode = ref<'personal' | 'admin'>('personal');
 const days = ref(14);
 const dashboardData = ref<AnalyticsDashboardResponse | null>(null);
-const hasDegradedSections = computed(() => (dashboardData.value?.data_quality?.degraded_sections?.length ?? 0) > 0);
 
 const percent = (part: number, total: number) => {
   if (!total) return '0%';
@@ -363,6 +352,7 @@ const percent = (part: number, total: number) => {
 };
 const percentByRate = (rate: number) => `${Math.round((Number(rate || 0) || 0) * 100)}%`;
 const loadingDashboard = ref(true);
+const loadError = ref(false);
 
 const clarificationPanelTooltip = '已完成表示补问后成功恢复并继续完成回答；待处理表示当前仍停留在 interrupted 状态。';
 
@@ -386,11 +376,12 @@ const clarificationKindDescription = (value: string) => {
 
 const loadDashboard = async () => {
   loadingDashboard.value = true;
+  loadError.value = false;
   try {
     const res = await getAnalyticsDashboard({ view: viewMode.value, days: days.value });
     dashboardData.value = (res as any).data ?? res;
   } catch (e) {
-    dashboardData.value = null;
+    loadError.value = true;
   } finally {
     loadingDashboard.value = false;
   }
@@ -414,13 +405,11 @@ onMounted(async () => {
     const sessionItems = (sessionRes as any).items || [];
     recentKnowledgeBases.value = kbItems.slice(0, 6).map((b: any) => ({
       id: String(b.id || ''),
-      name: String(b.name || '未命名'),
-      docCount: Number(b.document_count ?? 0)
+      name: String(b.name || '未命名')
     }));
     recentSessions.value = sessionItems.slice(0, 6).map((s: any) => ({
       id: String(s.id || ''),
-      title: String(s.title || '未命名会话').trim() || '未命名会话',
-      questionCount: Number(s.message_count ?? s.question_count ?? 0)
+      title: String(s.title || '未命名会话').trim() || '未命名会话'
     }));
   } finally {
     loadingHistory.value = false;
@@ -459,12 +448,45 @@ const go = (path: string) => {
   gap: var(--section-gap, 24px);
 }
 
-.dashboard-loading {
+.header-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  font-size: var(--text-caption, 0.75rem);
+  color: var(--text-muted);
+}
+
+.dashboard-failure-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  color: var(--text-muted);
-  padding: 20px 0;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(230, 162, 60, 0.1);
+  color: var(--el-color-warning);
+  font-size: var(--text-caption, 0.75rem);
+}
+
+.card-empty {
+  padding: 24px 0 !important;
+}
+
+.card-empty :deep(.default-illustration) {
+  width: 48px;
+  height: 48px;
+}
+
+.card-empty :deep(.empty-illustration) {
+  margin-bottom: 12px;
+}
+
+.card-empty :deep(.empty-title) {
+  font-size: var(--text-body, 0.9375rem);
+}
+
+.card-empty :deep(.empty-description) {
+  font-size: var(--text-caption, 0.75rem);
 }
 
 .dash-card {
@@ -478,14 +500,9 @@ const go = (path: string) => {
 
 .dash-title {
   margin: 0 0 16px;
-  font-size: 15px;
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--text-primary);
-}
-
-.empty-text {
-  font-size: 13px;
-  color: var(--text-muted);
 }
 
 .word-cloud {
@@ -514,64 +531,24 @@ const go = (path: string) => {
 }
 
 .usage-val {
-  font-size: 24px;
+  font-size: var(--text-h1);
   font-weight: bold;
   color: var(--text-primary);
 }
 
 .usage-label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
 .usage-details {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   line-height: 1.5;
   margin-top: auto;
   padding-top: 12px;
   border-top: 1px dashed var(--border-color);
 }
-
-.satisfaction-bars {
-  display: flex;
-  gap: 4px;
-  height: 100px;
-  align-items: flex-end;
-  flex: 1;
-}
-
-.sat-bar-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
-.sat-bar {
-  width: 100%;
-  border-radius: 2px;
-}
-
-.sat-bar.up {
-  background: var(--el-color-success);
-}
-
-.sat-bar.down {
-  background: var(--el-color-danger);
-}
-
-.sat-legend {
-  margin-top: 12px;
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-}
-
-.leg-up { color: var(--el-color-success); }
-.leg-down { color: var(--el-color-danger); }
 
 .zero-hit-list {
   list-style: none;
@@ -586,7 +563,7 @@ const go = (path: string) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--text-caption);
 }
 
 .q-text {
@@ -629,12 +606,13 @@ const go = (path: string) => {
   background: var(--bg-panel-muted);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--transition-base), background var(--transition-base);
+  transition: border-color var(--transition-base);
 }
 
-.recent-item:hover {
-  border-color: var(--border-color);
-  background: var(--bg-panel);
+@media (hover: hover) and (pointer: fine) {
+  .recent-item:hover {
+    border-color: var(--border-color);
+  }
 }
 
 .recent-name {
@@ -646,89 +624,11 @@ const go = (path: string) => {
   white-space: nowrap;
 }
 
-.recent-meta {
-  font-size: var(--text-caption, 0.75rem);
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
 .recent-empty-inline {
   padding: 32px 16px !important;
 }
 
-.recent-skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.skeleton-item {
-  height: 48px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, var(--bg-panel-muted) 25%, var(--border-color) 50%, var(--bg-panel-muted) 75%);
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.2s ease-in-out infinite;
-}
-
-@keyframes skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
 /* Dashboard Specific Styles */
-.dashboard-section {
-  margin-bottom: var(--section-gap, 24px);
-}
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.degraded-hint {
-  font-size: 12px;
-  color: var(--el-color-warning);
-  background: var(--el-color-warning-light-9);
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-/* Funnel */
-.funnel-container {
-  display: flex;
-  align-items: center;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 20px 24px;
-  overflow-x: auto;
-}
-.funnel-step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  min-width: 80px;
-}
-.f-label {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.f-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.f-arrow {
-  font-size: 20px;
-  color: var(--border-color);
-  margin: 0 16px;
-  flex-shrink: 0;
-}
-.success-text .f-value {
-  color: var(--el-color-success);
-}
-
 /* Health & Quality Grid */
 .health-quality-grid {
   display: grid;
@@ -747,39 +647,33 @@ const go = (path: string) => {
 }
 .metric-row {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   margin-bottom: 16px;
 }
 .metric-box {
   flex: 1;
-  background: var(--bg-panel-muted);
-  border-radius: var(--radius-sm);
-  padding: 12px;
+  padding: 8px;
   text-align: center;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid transparent;
 }
 .metric-box.success-bg {
   background: rgba(103, 194, 58, 0.1);
-  border-color: rgba(103, 194, 58, 0.2);
 }
 .metric-box.warning-bg {
   background: rgba(230, 162, 60, 0.1);
-  border-color: rgba(230, 162, 60, 0.2);
 }
 .metric-box.danger-bg {
   background: rgba(245, 108, 108, 0.1);
-  border-color: rgba(245, 108, 108, 0.2);
 }
 .m-val {
-  font-size: 20px;
+  font-size: var(--text-h2);
   font-weight: 600;
   color: var(--text-primary);
 }
 .m-label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 .health-alert {
@@ -788,7 +682,7 @@ const go = (path: string) => {
   gap: 8px;
   padding: 10px 14px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: var(--text-caption);
 }
 .health-alert.danger {
   background: rgba(245, 108, 108, 0.1);
@@ -820,7 +714,7 @@ const go = (path: string) => {
 }
 .q-label {
   width: 120px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   text-align: right;
   flex-shrink: 0;
@@ -829,12 +723,12 @@ const go = (path: string) => {
   flex: 1;
   height: 8px;
   background: var(--bg-panel-muted);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 .q-fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .q-fill.success { background: var(--el-color-success); }
 .q-fill.warning { background: var(--el-color-warning); }
@@ -842,7 +736,7 @@ const go = (path: string) => {
 .q-fill.info { background: var(--blue-600); }
 .q-percent {
   width: 40px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-primary);
   font-weight: 500;
   text-align: right;
@@ -869,7 +763,7 @@ const go = (path: string) => {
 }
 
 .clarification-panel__title {
-  font-size: 13px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -880,7 +774,7 @@ const go = (path: string) => {
 }
 
 .clarification-panel__hint {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   line-height: 1.5;
 }
@@ -889,7 +783,7 @@ const go = (path: string) => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -901,7 +795,7 @@ const go = (path: string) => {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -911,7 +805,7 @@ const go = (path: string) => {
 }
 
 .kind-list__label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 

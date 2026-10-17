@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/auth';
 const routes = [
   {
     path: '/',
-    redirect: '/workspace/chat'
+    redirect: '/workspace/entry'
   },
   {
     path: '/entry',
@@ -166,6 +166,7 @@ const routes = [
           requiresPermission: 'kb.read',
           title: '文档详情',
           subtitle: '',
+          navPath: '/workspace/kb/upload',
           breadcrumb: ['工作台', '知识库治理', '文档详情']
         }
       },
@@ -177,7 +178,19 @@ const routes = [
           requiresPermission: 'kb.write',
           title: '切片管理',
           subtitle: '',
+          navPath: '/workspace/kb/upload',
           breadcrumb: ['工作台', '知识库治理', '文档详情', '切片管理']
+        }
+      },
+      {
+        path: 'platform',
+        name: 'PlatformHubView',
+        component: () => import('@/views/platform/PlatformHubView.vue'),
+        meta: {
+          requiresAnyPermission: ['chat.use', 'kb.manage'],
+          title: '平台管理',
+          subtitle: '',
+          breadcrumb: ['工作台', '平台管理']
         }
       },
       {
@@ -309,7 +322,7 @@ const routes = [
           requiresPermission: 'kb.manage',
           title: 'PII 脱敏配置',
           subtitle: '',
-          breadcrumb: ['工作台', 'PII 脱敏']
+          breadcrumb: ['工作台', 'PII 脱敏配置']
         }
       },
       {
@@ -320,7 +333,7 @@ const routes = [
           requiresPermission: 'chat.use',
           title: '指令模板市场',
           subtitle: '',
-          breadcrumb: ['工作台', '指令市场']
+          breadcrumb: ['工作台', '指令模板市场']
         }
       },
       {
@@ -342,7 +355,7 @@ const routes = [
           requiresPermission: 'chat.use',
           title: 'Agent 协作编排',
           subtitle: '',
-          breadcrumb: ['工作台', 'Agent 编排']
+          breadcrumb: ['工作台', 'Agent 协作编排']
         }
       },
       {
@@ -396,6 +409,16 @@ router.beforeEach((to) => {
     return {
       path: '/workspace/forbidden',
       query: { permission: requiredPermission, from: to.fullPath }
+    };
+  }
+
+  const requiredAnyPermissions = Array.isArray(to.meta.requiresAnyPermission)
+    ? to.meta.requiresAnyPermission.map((permission) => String(permission)).filter(Boolean)
+    : [];
+  if (requiredAnyPermissions.length && !requiredAnyPermissions.some((permission) => authStore.hasPermission(permission))) {
+    return {
+      path: '/workspace/forbidden',
+      query: { permission: requiredAnyPermissions.join(' 或 '), from: to.fullPath }
     };
   }
 });

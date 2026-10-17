@@ -20,6 +20,12 @@ export interface KBPixelDiffResult {
   bounds: KBPixelDiffBounds | null;
 }
 
+/** 「变化」概念的唯一强调色，与 CSS token `--el-color-danger` 对应；canvas 掩膜需要数值形式。 */
+export const KB_VISUAL_CHANGE_RGB: readonly [number, number, number] = [245, 108, 108];
+
+/** 同上色的字符串形式，供 canvas 描边使用。 */
+export const KB_VISUAL_CHANGE_COLOR = `rgb(${KB_VISUAL_CHANGE_RGB[0]}, ${KB_VISUAL_CHANGE_RGB[1]}, ${KB_VISUAL_CHANGE_RGB[2]})`;
+
 function normalizeText(value: unknown): string {
   return String(value || '')
     .toLowerCase()
@@ -179,9 +185,9 @@ export function computePixelDiffMask(
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);
       maxY = Math.max(maxY, y);
-      mask[offset] = 217;
-      mask[offset + 1] = 45;
-      mask[offset + 2] = 32;
+      mask[offset] = KB_VISUAL_CHANGE_RGB[0];
+      mask[offset + 1] = KB_VISUAL_CHANGE_RGB[1];
+      mask[offset + 2] = KB_VISUAL_CHANGE_RGB[2];
       mask[offset + 3] = Math.max(96, Math.min(220, Math.round(averageDelta * 3 + alphaDelta)));
     } else {
       const grayscale = Math.round(((leftPixels[offset] || 0) * 0.299 + (leftPixels[offset + 1] || 0) * 0.587 + (leftPixels[offset + 2] || 0) * 0.114) * 0.18);

@@ -706,6 +706,8 @@ class KBGovernanceSummary(BaseModel):
 class KBAnalyticsGovernanceResponse(BaseModel):
     view: str = Field(description="Governance scope. personal only includes the caller's KB resources; admin includes all visible resources.")
     limit: int = Field(description="Maximum number of records returned per governance queue.", ge=1, le=50)
+    offset: int = Field(default=0, description="Pagination offset applied to every governance queue.", ge=0)
+    owner_user_id: str = Field(default="", description="Owner filter applied to document-backed queues; empty means no owner filter.")
     generated_at: datetime = Field(description="Payload generation timestamp in UTC.")
     summary: KBGovernanceSummary = Field(description="Top-level governance queue counts for the full result set, not only returned items.")
     queues: KBGovernanceQueues = Field(description="Governance queue samples for operator triage.")

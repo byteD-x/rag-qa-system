@@ -1295,8 +1295,20 @@ curl -X GET "http://localhost:8300/api/v1/kb/analytics/operations?view=admin&day
 - `GET /api/v1/kb/analytics/governance/batch-events`
 - `GET /api/v1/kb/analytics/governance/batch-events/{task_id}`
 
+查询参数：
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `view` | string | `personal` | `personal` 只统计当前用户资源；`admin` 统计管理范围内全部资源（需 `kb.manage`）。 |
+| `limit` | int | `8` | 每个治理队列返回条数，取值 `1..50`。 |
+| `offset` | int | `0` | 每个治理队列的分页偏移，取值 `>=0`。 |
+| `owner_user_id` | string | `""` | 按负责人过滤 document 类队列；留空表示不过滤。口径与队列里的 `owner_user_id` 一致（`stats.owner_user_id` 回退 `created_by`）。对 `version_conflicts` 队列无效。 |
+
 说明：
 
+- `summary` 始终是该队列的**全量**计数（不是当前页条数）；`limit`/`offset`/`owner_user_id` 会原样回显在响应里，便于前端标注「总数 X / 已加载 Y」。
+- 当 `offset` 越过队列末尾时返回空页，此时 `summary` 仍为真实总数（服务端会补一次同条件 `COUNT`）。
+- `owner_user_id` 只作用于 `kb_documents` 支撑的队列；`version_conflicts` 按版本家族聚合，无单一负责人，故不受该参数影响。
 - 批处理事件详情包含重试时间线、过滤条件和分页结果。
 - 低置信视觉区域仍复用 `visual-assets/{asset_id}/regions`，不新增独立批量区域接口。
 

@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="Webhook 管理" subtitle="注册回调地址，在事件发生时自动通知外部系统">
+    <PageHeaderCompact title="Webhook 管理">
       <template #actions>
         <el-button type="primary" @click="showRegister = true">
           <el-icon><Plus /></el-icon> 注册 Webhook
@@ -23,9 +23,6 @@
               {{ row.is_active ? '活跃' : '已停用' }}
             </el-tag>
           </template>
-        </el-table-column>
-        <el-table-column label="重试" width="70">
-          <template #default="{ row }">{{ row.retry_count }}次</template>
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
@@ -50,10 +47,10 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="http_status" label="HTTP" width="60" />
-          <el-table-column prop="duration_ms" label="耗时" width="80">
-            <template #default="{ row }">{{ row.duration_ms }}ms</template>
+          <el-table-column label="结果" width="170">
+            <template #default="{ row }">{{ formatResult(row) }}</template>
           </el-table-column>
+          <el-table-column prop="error" label="失败原因" min-width="180" show-overflow-tooltip />
           <el-table-column prop="created_at" label="时间" width="160">
             <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
           </el-table-column>
@@ -91,9 +88,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
+import { isHandledRequestError } from '@/api/request'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
 const loading = ref(false)
@@ -112,7 +110,7 @@ async function loadData() {
     ])
     hooks.value = hRes.data || []
     deliveries.value = dRes.data || []
-  } catch { ElMessage.error('加载 Webhook 数据失败，请重试') }
+  } catch (error) { if (!isHandledRequestError(error)) ElMessage.error('加载 Webhook 数据失败，请重试') }
   finally { loading.value = false }
 }
 
@@ -123,14 +121,20 @@ async function register() {
     showRegister.value = false
     form.value = { url: '', events: ['chat.completed'], secret: '', description: '' }
     loadData()
-  } catch { ElMessage.error('注册失败') }
+  } catch (error) { if (!isHandledRequestError(error)) ElMessage.error('注册失败') }
 }
 
 async function testHook(row: any) {
   try {
-    await platformApi.testWebhook(row.id)
-    ElMessage.success('测试请求已发送')
-  } catch { ElMessage.error('测试失败') }
+    const res = await platformApi.testWebhook(row.id)
+    const delivery = res.data?.delivery
+    if (delivery) {
+      ElMessage.success(`测试已发送：${delivery.http_status ? `HTTP ${delivery.http_status}` : '连接异常'} / ${Math.round(delivery.duration_ms || 0)}ms`)
+    } else {
+      ElMessage.success('测试请求已发送')
+    }
+    loadData()
+  } catch { /* 失败提示已由请求层统一给出 */ }
 }
 
 async function toggleHook(row: any) {
@@ -140,9 +144,17 @@ async function toggleHook(row: any) {
 }
 
 async function deleteHook(row: any) {
-  await platformApi.deleteWebhook(row.id)
-  ElMessage.success('已删除')
-  loadData()
+  try {
+    await ElMessageBox.confirm('删除后该 Webhook 及其投递记录将一并清除，不可恢复。确定删除？', '确认删除', { type: 'warning' })
+    await platformApi.deleteWebhook(row.id)
+    ElMessage.success('已删除')
+    loadData()
+  } catch { /* 取消或失败：失败提示已由请求层统一给出 */ }
+}
+
+function formatResult(row: any) {
+  if (!row.http_status) return '未返回响应'
+  return `HTTP ${row.http_status} / ${Math.round(row.duration_ms || 0)}ms`
 }
 
 function formatDate(ts: number) {

@@ -121,18 +121,17 @@
   padding: 20px !important;
 }
 
-/* 页面过渡 */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-.page-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
-.page-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
+/* Element Plus 过渡统一映射到本仓动效 token：各视图不要再单独覆写 */
+:root {
+  --el-transition-duration: 150ms;
+  --el-transition-duration-fast: 100ms;
+  --el-transition-function-ease-in-out-bezier: var(--ease-enter);
+  --el-transition-function-fast-bezier: var(--ease-enter);
+  --el-transition-all: all var(--el-transition-duration) var(--ease-enter);
+  --el-transition-fade: opacity var(--el-transition-duration) var(--ease-enter);
+  --el-transition-fade-linear: opacity var(--el-transition-duration-fast) linear;
+  --el-transition-md-fade: transform var(--el-transition-duration) var(--ease-enter), opacity var(--el-transition-duration) var(--ease-enter);
+  --el-transition-border: border-color var(--el-transition-duration-fast) var(--el-transition-function-fast-bezier);
+  --el-transition-box-shadow: box-shadow var(--el-transition-duration-fast) var(--el-transition-function-fast-bezier);
+  --el-transition-color: color var(--el-transition-duration-fast) var(--el-transition-function-fast-bezier);
 }

@@ -14,7 +14,7 @@
         class="interrupt-option"
         :class="{ 'interrupt-option--recommended': option.id === interrupt.recommended_option_id }"
       >
-        <el-radio :label="option.id">
+        <el-radio :value="option.id">
           <span class="interrupt-option__label">{{ option.label }}</span>
         </el-radio>
         <div v-if="option.badges?.length" class="interrupt-option__badges">
@@ -90,9 +90,9 @@ async function handleSubmit() {
 <style scoped>
 .interrupt-card {
   padding: 16px;
-  border: 1px solid #dbe3f4;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  border: 1px solid var(--blue-50);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
 }
 
 .interrupt-card__head {
@@ -107,22 +107,22 @@ async function handleSubmit() {
   align-items: center;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #e0ecff;
-  color: #275dad;
-  font-size: 12px;
+  background: var(--blue-50);
+  color: var(--text-info-strong);
+  font-size: var(--text-caption);
 }
 
 .interrupt-card__detail {
   margin: 0 0 14px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-caption);
   line-height: 1.6;
 }
 
 .interrupt-card__subject {
   margin-bottom: 8px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .interrupt-card__options {
@@ -137,14 +137,13 @@ async function handleSubmit() {
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border: 1px solid #dfe7f3;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--blue-50);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
 }
 
 .interrupt-option--recommended {
-  border-color: #8bb6ff;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.08);
+  border-color: var(--border-info);
 }
 
 .interrupt-option__label {
@@ -162,15 +161,15 @@ async function handleSubmit() {
 .interrupt-option__badge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: #eef4ff;
-  color: #275dad;
-  font-size: 11px;
+  background: var(--blue-50);
+  color: var(--text-info-strong);
+  font-size: var(--text-caption);
 }
 
 .interrupt-option__desc {
   padding-left: 24px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.5;
 }
 

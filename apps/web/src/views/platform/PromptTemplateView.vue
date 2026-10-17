@@ -1,16 +1,13 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="Prompt 模板库" subtitle="管理公共提示词及个人收藏夹">
+    <PageHeaderCompact title="Prompt 库">
       <template #actions>
         <el-button type="primary" @click="openCreateDialog">新建模板</el-button>
       </template>
     </PageHeaderCompact>
 
     <div class="platform-content">
-      <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载模板中...</span>
-      </div>
+      <LoadingState v-if="loading" label="加载模板中..." />
 
       <EnhancedEmpty
         v-else-if="!templates.length"
@@ -41,7 +38,7 @@
               <el-tag v-for="tag in tpl.tags" :key="tag" size="small" type="info">{{ tag }}</el-tag>
             </div>
             <div class="tpl-fav">
-              <el-icon :color="tpl.favorite ? '#e6a23c' : '#c0c4cc'" @click="toggleFav(tpl)" style="cursor: pointer; font-size: 18px;">
+              <el-icon :color="tpl.favorite ? 'var(--el-color-warning)' : 'var(--el-text-color-placeholder)'" @click="toggleFav(tpl)" style="cursor: pointer; font-size: var(--text-h2);">
                 <StarFilled v-if="tpl.favorite" />
                 <Star v-else />
               </el-icon>
@@ -88,10 +85,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Loading, Star, StarFilled } from '@element-plus/icons-vue';
+import { Star, StarFilled } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { listPromptTemplates, createPromptTemplate, updatePromptTemplate, deletePromptTemplate } from '@/api/platform';
+import { isHandledRequestError } from '@/api/request';
 
 const templates = ref<any[]>([]);
 const loading = ref(false);
@@ -165,7 +164,7 @@ const toggleFav = async (tpl: any) => {
     await updatePromptTemplate(tpl.id, { favorite: !tpl.favorite });
     tpl.favorite = !tpl.favorite;
   } catch (e) {
-    ElMessage.error('操作失败');
+    if (!isHandledRequestError(e)) ElMessage.error('操作失败');
   }
 };
 
@@ -200,16 +199,6 @@ onMounted(() => {
   background: var(--bg-panel-muted);
 }
 
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
-}
-
 .template-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
@@ -241,7 +230,7 @@ onMounted(() => {
 
 .tpl-title h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-body);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -254,11 +243,8 @@ onMounted(() => {
 
 .tpl-body {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
-  background: var(--bg-page);
-  border-radius: var(--radius-sm);
-  padding: 12px;
   white-space: pre-wrap;
   display: -webkit-box;
   -webkit-line-clamp: 4;

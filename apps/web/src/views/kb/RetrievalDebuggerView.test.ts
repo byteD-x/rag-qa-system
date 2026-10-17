@@ -133,8 +133,8 @@ describe('RetrievalDebuggerView', () => {
     expect(wrapper.text()).toContain('unit-approval');
     expect(wrapper.text()).toContain('Department owner and finance reviewer signatures are required.');
     expect(wrapper.text()).toContain('Render raw_text when quote is empty.');
-    expect(wrapper.text()).toContain('structure 1.2000');
-    expect(wrapper.text()).toContain('fts 0.8000');
+    expect(wrapper.text()).toContain('结构 1.2000');
+    expect(wrapper.text()).toContain('全文 0.8000');
     expect(wrapper.text()).toContain('FTS #1');
     expect(wrapper.text()).toContain('Vector #2');
     expect(wrapper.text()).toContain('12.3456 ms');

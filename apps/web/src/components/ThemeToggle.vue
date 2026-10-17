@@ -1,11 +1,9 @@
 <template>
   <el-dropdown trigger="click" @command="handleCommand">
-    <el-button circle :title="currentLabel" class="theme-toggle">
-      <transition name="icon-spin" mode="out-in">
-        <el-icon :size="20" :key="currentMode" class="theme-icon">
-          <component :is="iconComponent" />
-        </el-icon>
-      </transition>
+    <el-button circle :title="currentLabel" :aria-label="'主题：' + currentLabel" class="theme-toggle">
+      <el-icon :size="20" class="theme-icon">
+        <component :is="iconComponent" />
+      </el-icon>
     </el-button>
     
     <template #dropdown>
@@ -14,10 +12,9 @@
           v-for="option in options"
           :key="option.value"
           :command="option.value"
-          :disabled="currentMode === option.value"
           class="theme-menu-item"
         >
-          <el-icon :size="18" :color="getIconColor(option.value)">
+          <el-icon :size="18" color="var(--text-muted)">
             <component :is="option.icon" />
           </el-icon>
           <span>{{ option.label }}</span>
@@ -70,13 +67,6 @@ const currentLabel = computed(() => {
   return option?.label || '切换主题';
 });
 
-const getIconColor = (mode: string) => {
-  if (mode === currentMode.value) {
-    return 'var(--blue-600)';
-  }
-  return 'var(--text-muted)';
-};
-
 const handleCommand = (command: ThemeMode) => {
   setTheme(command);
   currentMode.value = command;
@@ -93,14 +83,16 @@ watch(currentMode, (newMode) => {
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
   color: var(--text-primary);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.theme-toggle:hover {
-  border-color: rgba(59, 130, 246, 0.4);
-  background: var(--blue-50);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
+@media (hover: hover) and (pointer: fine) {
+  .theme-toggle:hover {
+    border-color: color-mix(in srgb, var(--blue-500) 40%, transparent);
+    background: var(--blue-50);
+    box-shadow: var(--shadow-sm);
+    transform: translateY(-2px);
+  }
 }
 
 .theme-toggle:active {
@@ -113,29 +105,13 @@ watch(currentMode, (newMode) => {
   justify-content: center;
 }
 
-/* Icon Spin Transition */
-.icon-spin-enter-active,
-.icon-spin-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.icon-spin-enter-from {
-  opacity: 0;
-  transform: rotate(-180deg) scale(0.5);
-}
-
-.icon-spin-leave-to {
-  opacity: 0;
-  transform: rotate(180deg) scale(0.5);
-}
-
 .theme-menu-item {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  transition: background 0.2s ease;
-  border-radius: 8px;
+  transition: background-color var(--transition-fast);
+  border-radius: var(--radius-sm);
   margin: 0 4px;
 }
 
@@ -145,7 +121,7 @@ watch(currentMode, (newMode) => {
 
 :deep(.el-dropdown-menu.glass-panel) {
   padding: 8px 0;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
 }

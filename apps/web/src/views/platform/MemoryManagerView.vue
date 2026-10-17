@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="记忆管理" subtitle="浏览和管理Agent从对话中提取的长期记忆与用户偏好">
+    <PageHeaderCompact title="记忆管理">
       <template #actions>
         <el-button @click="loadData" :loading="loading">
           <el-icon><Refresh /></el-icon>
@@ -12,17 +12,17 @@
     <div class="platform-content">
       <!-- 统计概览 -->
       <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ memoryStats?.total_entries || 0 }}</div>
-          <div class="stat-label">总记忆条目</div>
+        <div class="stat-card surface-card">
+          <div class="stat-value metric-value">{{ memoryStats?.total_entries || 0 }}</div>
+          <div class="stat-label metric-label">总记忆条目</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ memoryStats?.active_entries || 0 }}</div>
-          <div class="stat-label">活跃记忆</div>
+        <div class="stat-card surface-card">
+          <div class="stat-value metric-value">{{ memoryStats?.active_entries || 0 }}</div>
+          <div class="stat-label metric-label">活跃记忆</div>
         </div>
-        <div class="stat-card" v-for="(count, type) in memoryStats?.by_type || {}" :key="type">
-          <div class="stat-value">{{ count }}</div>
-          <div class="stat-label">{{ typeLabel(type) }}</div>
+        <div class="stat-card surface-card" v-for="(count, type) in memoryStats?.by_type || {}" :key="type">
+          <div class="stat-value metric-value">{{ count }}</div>
+          <div class="stat-label metric-label">{{ typeLabel(type) }}</div>
         </div>
       </div>
 
@@ -52,10 +52,7 @@
         </el-button>
       </div>
 
-      <div v-if="loading" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载记忆...</span>
-      </div>
+      <LoadingState v-if="loading && !memories.length" label="加载记忆..." />
 
       <EnhancedEmpty
         v-else-if="!memories.length"
@@ -65,7 +62,7 @@
       />
 
       <div v-else class="memory-table-wrapper">
-        <el-table :data="memories" size="small" style="width: 100%" stripe>
+        <el-table :data="memories" v-loading="loading" size="small" style="width: 100%" stripe>
           <el-table-column prop="memory_type" label="类型" width="85">
             <template #default="{ row }">
               <el-tag :type="typeTag(row.memory_type)" size="small" effect="plain">
@@ -82,18 +79,17 @@
           </el-table-column>
           <el-table-column prop="confidence" label="置信度" width="90" align="center">
             <template #default="{ row }">
-              <el-progress
-                :percentage="Math.round(row.confidence * 100)"
-                :color="row.confidence >= 0.8 ? '#67c23a' : row.confidence >= 0.5 ? '#e6a23c' : '#f56c6c'"
-                :stroke-width="6"
-                :show-text="false"
-              />
-              <span style="font-size: 11px; color: var(--text-muted);">{{ (row.confidence * 100).toFixed(0) }}%</span>
+              <span class="confidence-text">{{ (row.confidence * 100).toFixed(0) }}%</span>
             </template>
           </el-table-column>
           <el-table-column prop="is_active" label="状态" width="75" align="center">
             <template #default="{ row }">
-              <el-tag :type="row.is_active ? 'success' : 'info'" size="small" effect="dark">
+              <el-tag
+                :type="row.is_active ? 'success' : 'info'"
+                :class="{ 'state-flash': flashId === row.id }"
+                size="small"
+                effect="dark"
+              >
                 {{ row.is_active ? '活跃' : '停用' }}
               </el-tag>
             </template>
@@ -114,12 +110,12 @@
               >
                 停用
               </el-button>
-              <span v-else class="inactive-text" style="font-size:12px;">已停用</span>
             </template>
           </el-table-column>
         </el-table>
 
-        <div class="pagination-row">
+        <!-- 搜索结果上限 50 条且 total 为返回行数，搜索态翻页会落到未过滤数据，故隐藏 -->
+        <div v-if="!searchActive" class="pagination-row">
           <el-pagination
             v-model:current-page="currentPage"
             :page-size="pageSize"
@@ -130,28 +126,19 @@
           />
         </div>
       </div>
-
-      <!-- 高频主体 -->
-      <div v-if="memoryStats?.top_subjects?.length" class="section-header" style="margin-top: 28px;">
-        <h3>高频记忆主体</h3>
-      </div>
-      <div v-if="memoryStats?.top_subjects?.length" class="top-subjects">
-        <div v-for="subj in memoryStats.top_subjects.slice(0, 10)" :key="subj.subject" class="subject-chip">
-          <span class="subject-name">{{ subj.subject }}</span>
-          <span class="subject-count">{{ subj.count }}</span>
-        </div>
-      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { Loading, Refresh, Search } from '@element-plus/icons-vue';
+import { Refresh, Search } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { listMemoryEntries, searchMemoryEntries, deactivateMemory, getMemoryStats, type MemoryStats } from '@/api/platform';
+import { isHandledRequestError } from '@/api/request';
 
 interface MemoryRow {
   id: string;
@@ -176,6 +163,9 @@ const typeFilter = ref('');
 const currentPage = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
+const searchActive = ref(false);
+const flashId = ref('');
+let flashTimer: number | undefined;
 
 const typeLabel = (type: string) => {
   const map: Record<string, string> = { preference: '偏好', fact: '事实', knowledge: '知识' };
@@ -198,6 +188,7 @@ const loadData = async () => {
 
 const loadMemories = async () => {
   loading.value = true;
+  searchActive.value = false;
   try {
     const params: any = {
       limit: pageSize.value,
@@ -231,6 +222,7 @@ const doSearch = async () => {
     const res: any = await searchMemoryEntries(params);
     memories.value = res.items || [];
     total.value = res.total || 0;
+    searchActive.value = true;
   } finally {
     searching.value = false;
   }
@@ -245,14 +237,21 @@ const deactivate = async (memory: MemoryRow) => {
   try {
     await deactivateMemory(memory.id);
     memory.is_active = false;
+    flashId.value = memory.id;
+    window.clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(() => { flashId.value = ''; }, 200);
     ElMessage.success('已停用');
-  } catch {
-    ElMessage.error('停用失败');
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('停用失败');
   }
 };
 
 onMounted(() => {
   loadData();
+});
+
+onUnmounted(() => {
+  window.clearTimeout(flashTimer);
 });
 </script>
 
@@ -278,23 +277,18 @@ onMounted(() => {
   margin-bottom: 20px;
 }
 
+/* 容器/数字/标签统一走 style.css 的 .surface-card / .metric-value / .metric-label，
+   这里只保留本页差异项：居中、紧凑内边距、数字主色、标签上间距。 */
 .stat-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   padding: 14px;
   text-align: center;
 }
 
 .stat-value {
-  font-size: 22px;
-  font-weight: 700;
   color: var(--blue-600);
 }
 
 .stat-label {
-  font-size: 11px;
-  color: var(--text-secondary);
   margin-top: 2px;
 }
 
@@ -302,16 +296,6 @@ onMounted(() => {
   display: flex;
   gap: 10px;
   margin-bottom: 18px;
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
 }
 
 .memory-table-wrapper {
@@ -326,49 +310,20 @@ onMounted(() => {
   font-style: italic;
 }
 
+.confidence-text {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+/* 停用成功后就地强调该行状态一次（可被下一次操作打断） */
+.state-flash {
+  opacity: 0.45;
+  transition: opacity var(--transition-fast);
+}
+
 .pagination-row {
   display: flex;
   justify-content: center;
   padding: 16px;
-}
-
-.section-header {
-  margin-bottom: 12px;
-}
-
-.section-header h3 {
-  margin: 0;
-  font-size: 15px;
-  color: var(--text-primary);
-}
-
-.top-subjects {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.subject-chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  padding: 6px 14px;
-  font-size: 13px;
-}
-
-.subject-name {
-  color: var(--text-primary);
-}
-
-.subject-count {
-  background: var(--blue-50);
-  color: var(--blue-600);
-  border-radius: 10px;
-  padding: 1px 8px;
-  font-size: 11px;
-  font-weight: 600;
 }
 </style>

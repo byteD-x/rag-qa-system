@@ -15,6 +15,7 @@ vi.mock('@/store/chat', () => ({
     sessions: [],
     activeSessionId: '',
     loadCorpora: vi.fn(),
+    loadScopeOptions: vi.fn(),
     loadSessions: vi.fn(),
     startDraftSession: vi.fn(),
     applyScope: vi.fn(),

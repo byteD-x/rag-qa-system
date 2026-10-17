@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="Agent 执行监控" subtitle="实时观测Agent任务拆解、工具调用链路与反思决策">
+    <PageHeaderCompact title="Agent 监控">
       <template #actions>
         <el-button @click="loadRuns" :loading="loadingRuns">
           <el-icon><Refresh /></el-icon>
@@ -10,30 +10,6 @@
     </PageHeaderCompact>
 
     <div class="platform-content">
-      <!-- 统计概览 -->
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.total_runs }}</div>
-          <div class="stat-label">总执行次数</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.avg_complexity }}</div>
-          <div class="stat-label">平均复杂度</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.decomposition_rate }}%</div>
-          <div class="stat-label">任务拆解率</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.avg_latency_ms }}ms</div>
-          <div class="stat-label">平均延迟</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.reflection_pass_rate }}%</div>
-          <div class="stat-label">自检通过率</div>
-        </div>
-      </div>
-
       <!-- 运行列表 -->
       <div class="section-header">
         <h3>Agent 运行记录</h3>
@@ -45,10 +21,14 @@
         </el-select>
       </div>
 
-      <div v-if="loadingRuns" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载运行记录...</span>
-      </div>
+      <LoadingState v-if="loadingRuns" label="加载运行记录..." />
+
+      <EnhancedEmpty
+        v-else-if="loadError"
+        variant="question"
+        title="运行记录加载失败"
+        description="后端暂时不可用，请点右上角「刷新」重试"
+      />
 
       <EnhancedEmpty
         v-else-if="!runs.length"
@@ -93,10 +73,14 @@
       size="720px"
       direction="rtl"
     >
-      <div v-if="loadingDetail" class="loading-state">
-        <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <span>加载详情...</span>
-      </div>
+      <LoadingState v-if="loadingDetail" label="加载详情..." />
+
+      <EnhancedEmpty
+        v-else-if="detailError"
+        variant="question"
+        title="执行详情加载失败"
+        description="请关闭抽屉后重新选择该运行"
+      />
 
       <div v-else-if="runDetail" class="detail-content">
         <!-- 任务拆解可视化 -->
@@ -233,10 +217,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { Loading, Refresh } from '@element-plus/icons-vue';
+import { ref, onMounted } from 'vue';
+import { Refresh } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import { listAgentRuns, getAgentRunDetail, type AgentRunSummary, type AgentRunDetail, type AgentTaskNode } from '@/api/platform';
 
 const runs = ref<AgentRunSummary[]>([]);
@@ -246,19 +231,8 @@ const loadingRuns = ref(false);
 const loadingDetail = ref(false);
 const detailVisible = ref(false);
 const statusFilter = ref('');
-
-const stats = computed(() => {
-  const completed = runs.value.filter(r => r.status === 'completed');
-  const decomposed = runs.value.filter(r => 'complexity_score' in r);
-  const reflected = completed.filter(r => (r as any).reflection_passed !== undefined);
-  return {
-    total_runs: runs.value.length,
-    avg_complexity: runs.value.length ? (runs.value.reduce((s, r) => s + ((r as any).complexity_score || 1), 0) / runs.value.length).toFixed(1) : '0',
-    decomposition_rate: runs.value.length ? Math.round((decomposed.length / runs.value.length) * 100) : 0,
-    avg_latency_ms: completed.length ? Math.round(completed.reduce((s, r) => s + r.total_latency_ms, 0) / completed.length) : 0,
-    reflection_pass_rate: reflected.length ? Math.round((reflected.filter(r => (r as any).reflection_passed).length / reflected.length) * 100) : 0,
-  };
-});
+const loadError = ref(false);
+const detailError = ref(false);
 
 const statusTagType = (status: string) => {
   const map: Record<string, string> = { completed: 'success', interrupted: 'warning', failed: 'danger', running: 'primary' };
@@ -280,9 +254,9 @@ const formatArgs = (args: Record<string, any>) => {
 };
 
 const scoreColor = (score: number) => {
-  if (score >= 0.8) return '#67c23a';
-  if (score >= 0.6) return '#e6a23c';
-  return '#f56c6c';
+  if (score >= 0.8) return 'var(--el-color-success)';
+  if (score >= 0.6) return 'var(--el-color-warning)';
+  return 'var(--el-color-danger)';
 };
 
 const eventTypeColor = (type: string) => {
@@ -317,11 +291,15 @@ const taskStatusTag = (taskId: string) => {
 
 const loadRuns = async () => {
   loadingRuns.value = true;
+  loadError.value = false;
   try {
     const params: any = { limit: 50 };
     if (statusFilter.value) params.status = statusFilter.value;
     const res: any = await listAgentRuns(params);
     runs.value = res.items || [];
+  } catch {
+    loadError.value = true;
+    runs.value = [];
   } finally {
     loadingRuns.value = false;
   }
@@ -331,9 +309,13 @@ const selectRun = async (run: AgentRunSummary) => {
   selectedRun.value = run;
   detailVisible.value = true;
   loadingDetail.value = true;
+  detailError.value = false;
+  runDetail.value = null;
   try {
     const detail: any = await getAgentRunDetail(run.id);
     runDetail.value = detail;
+  } catch {
+    detailError.value = true;
   } finally {
     loadingDetail.value = false;
   }
@@ -359,33 +341,6 @@ onMounted(() => {
   background: var(--bg-panel-muted);
 }
 
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--blue-600);
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-top: 4px;
-}
-
 .section-header {
   display: flex;
   align-items: center;
@@ -395,18 +350,8 @@ onMounted(() => {
 
 .section-header h3 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-body);
   color: var(--text-primary);
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
 }
 
 .run-list {
@@ -421,16 +366,17 @@ onMounted(() => {
   border-radius: var(--radius-md);
   padding: 14px 18px;
   cursor: pointer;
-  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  transition: border-color var(--transition-base);
 }
 
-.run-card:hover {
-  border-color: var(--blue-500);
+@media (hover: hover) and (pointer: fine) {
+  .run-card:hover {
+    border-color: var(--blue-500);
+  }
 }
 
 .run-card.selected {
   border-color: var(--blue-500);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
 }
 
 .run-header {
@@ -446,12 +392,12 @@ onMounted(() => {
 }
 
 .run-time {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
 .run-question {
-  font-size: 14px;
+  font-size: var(--text-body);
   color: var(--text-primary);
   margin-bottom: 8px;
   display: -webkit-box;
@@ -463,7 +409,7 @@ onMounted(() => {
 .run-meta {
   display: flex;
   gap: 16px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -478,7 +424,7 @@ onMounted(() => {
 
 .detail-section h4 {
   margin: 0 0 14px 0;
-  font-size: 15px;
+  font-size: var(--text-body);
   color: var(--text-primary);
 }
 
@@ -496,7 +442,7 @@ onMounted(() => {
 }
 
 .dag-group-label {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -529,19 +475,19 @@ onMounted(() => {
 }
 
 .node-id {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text-muted);
 }
 
 .node-desc {
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-primary);
   margin-bottom: 4px;
 }
 
 .node-meta {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   display: flex;
   gap: 10px;
@@ -549,20 +495,20 @@ onMounted(() => {
 
 .dag-arrow {
   text-align: center;
-  font-size: 18px;
+  font-size: var(--text-h2);
   color: var(--text-muted);
   padding: 2px 0;
 }
 
 .event-preview {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   margin-top: 4px;
   font-style: italic;
 }
 
 .event-args {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   margin-top: 2px;
   word-break: break-all;
@@ -593,7 +539,7 @@ onMounted(() => {
 }
 
 .score-label {
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   width: 80px;
   flex-shrink: 0;
@@ -603,13 +549,16 @@ onMounted(() => {
   flex: 1;
 }
 
+/* Element Plus 默认给进度条宽度 600ms 的过渡（且动的是 width），这里改为瞬时 */
+:deep(.el-progress-bar__inner) { transition: none; }
+
 .reflection-issues,
 .reflection-suggestions {
   margin-top: 10px;
 }
 
-.reflection-issues strong { color: var(--el-color-danger); font-size: 13px; }
-.reflection-suggestions strong { color: var(--blue-500); font-size: 13px; }
+.reflection-issues strong { color: var(--el-color-danger); font-size: var(--text-caption); }
+.reflection-suggestions strong { color: var(--blue-500); font-size: var(--text-caption); }
 
 .reflection-issues ul,
 .reflection-suggestions ul {
@@ -617,8 +566,8 @@ onMounted(() => {
   padding: 0;
 }
 
-.reflection-issues li { color: var(--el-color-danger); font-size: 12px; }
-.reflection-suggestions li { color: var(--blue-600); font-size: 12px; }
+.reflection-issues li { color: var(--el-color-danger); font-size: var(--text-caption); }
+.reflection-suggestions li { color: var(--blue-600); font-size: var(--text-caption); }
 
 /* 性能指标 */
 .perf-metrics {
@@ -636,14 +585,14 @@ onMounted(() => {
 }
 
 .perf-label {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   display: block;
   margin-bottom: 4px;
 }
 
 .perf-value {
-  font-size: 18px;
+  font-size: var(--text-h2);
   font-weight: 600;
   color: var(--text-primary);
 }

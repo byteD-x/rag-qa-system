@@ -16,7 +16,11 @@
   .el-button,
   .el-menu-item,
   .el-select,
-  .el-input__wrapper {
+  .el-input__wrapper,
+  .action-chip,
+  .text-action-btn,
+  .smart-ask-preset,
+  .link-button {
     min-height: 44px !important;
   }
   
@@ -50,10 +54,6 @@
   
   
   
-  /* 优化聊天界面 */
-  .chat-workspace {
-    grid-template-columns: 1fr !important;
-  }
   
   
   
@@ -61,7 +61,6 @@
   /* 优化消息气泡 */
   .message-bubble {
     max-width: 90% !important;
-    padding: 14px 16px !important;
   }
   
   
@@ -77,12 +76,12 @@
   
   /* 优化时间线 */
   .el-timeline-item__content {
-    font-size: 0.9rem;
+    font-size: var(--text-body);
   }
   
   /* 优化表格 */
   .el-table {
-    font-size: 0.85rem;
+    font-size: var(--text-body);
   }
   
   .el-table th,
@@ -111,9 +110,6 @@
 
 /* 平板优化 */
 @media (min-width: 769px) and (max-width: 1280px) {
-  .chat-workspace {
-    grid-template-columns: 280px minmax(0, 1fr) 320px !important;
-  }
   
   
 }
@@ -129,9 +125,6 @@
     max-width: 1800px !important;
   }
   
-  .chat-workspace {
-    grid-template-columns: 360px minmax(0, 1fr) 420px !important;
-  }
 }
 
 /* 打印样式 */
@@ -156,8 +149,6 @@
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
@@ -226,19 +217,19 @@
 
 /* 优化表单元素 */
 .el-form-item--large .el-form-item__label {
-  font-size: 0.95rem;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
 .el-form-item__error {
-  font-size: 0.85rem;
+  font-size: var(--text-body);
   padding-top: 6px;
 }
 
 /* 优化标签页 */
 .el-tabs__item {
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .el-tabs__item:hover {
@@ -252,7 +243,7 @@
 
 /* 优化通知 */
 .el-notification {
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
 
@@ -262,15 +253,10 @@
   padding: 14px 18px;
 }
 
-/* 优化加载条 */
-.el-progress-bar__inner {
-  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 /* 优化折叠面板 */
 .el-collapse-item__header {
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .el-collapse-item__header:hover {
@@ -288,7 +274,7 @@
 /* 优化面包屑 */
 .el-breadcrumb__inner {
   font-weight: 500;
-  transition: color 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .el-breadcrumb__inner:hover {
@@ -301,7 +287,7 @@
 }
 
 .el-step__description {
-  font-size: 0.9rem;
+  font-size: var(--text-body);
 }
 
 /* 优化卡片组 */
@@ -329,7 +315,7 @@
 
 .el-pager li {
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .el-pager li:hover {
@@ -376,25 +362,20 @@
   border: 2px solid var(--border-color);
 }
 
-/* 优化滑块 */
-.el-slider__bar {
-  transition: height 0.2s ease;
-}
-
 .el-slider__button {
   border: 2px solid var(--border-color);
 }
 
 /* 优化开关 */
 .el-switch__core {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background-color var(--transition-base), border-color var(--transition-base);
 }
 
 /* 优化输入框组 */
 .el-input-group__prepend,
 .el-input-group__append {
   font-weight: 500;
-  background: rgba(247, 250, 253, 0.8);
+  background: var(--bg-panel-muted);
 }
 
 /* 优化自动完成 */
@@ -418,7 +399,7 @@
 
 /* 优化图片加载 */
 .el-image__wrapper {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -432,11 +413,13 @@
 
 /* 优化文件上传列表 */
 .el-upload-list__item {
-  transition: all 0.3s ease;
+  transition: background-color var(--transition-base), transform var(--transition-base);
 }
 
-.el-upload-list__item:hover {
-  transform: translateX(4px);
+@media (hover: hover) and (pointer: fine) {
+  .el-upload-list__item:hover {
+    transform: translateX(4px);
+  }
 }
 
 /* 优化上传进度条 */
@@ -461,7 +444,7 @@
 
 /* 优化上传提示 */
 .el-upload__tip {
-  font-size: 0.85rem;
+  font-size: var(--text-body);
   color: var(--text-secondary);
 }
 
@@ -473,10 +456,6 @@
 /* 优化上传进度动画 */
 .el-progress__text {
   font-weight: 600;
-}
-
-.el-progress-bar__inner--anim {
-  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* 优化上传完成提示 */
@@ -498,13 +477,13 @@
 
 /* 优化上传文件预览 */
 .el-upload-list__item-thumbnail {
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 /* 优化上传文件删除按钮 */
 .el-upload-list__item-delete {
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast), opacity var(--transition-fast);
   opacity: 0;
 }
 
@@ -512,9 +491,10 @@
   opacity: 1;
 }
 
-.el-upload-list__item-delete:hover {
-  color: var(--el-color-danger);
-  transform: scale(1.1);
+@media (hover: hover) and (pointer: fine) {
+  .el-upload-list__item-delete:hover {
+    color: var(--el-color-danger);
+  }
 }
 
 /* 优化上传文件名称截断 */
@@ -527,7 +507,7 @@
 
 /* 优化上传文件状态图标 */
 .el-upload-list__item-status-label {
-  font-size: 16px;
+  font-size: var(--text-body);
 }
 
 .el-upload-list__item-status-label.is-success {
@@ -548,13 +528,13 @@
 
 /* 优化上传文件进度条颜色 */
 .el-progress__text {
-  font-size: 10px;
+  font-size: var(--text-caption);
   line-height: 1;
 }
 
 /* 优化上传文件进度条背景 */
 .el-progress-bar__outer {
-  background-color: rgba(226, 232, 240, 0.5);
+  background-color: var(--bg-panel-muted);
   border-radius: 2px;
 }
 
@@ -604,12 +584,3 @@
 /* 优化上传文件拖拽动画 */
 
 /* 优化上传文件拖拽完成 */
-
-@keyframes drop-bounce {
-  0%, 100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(0.98);
-  }
-}

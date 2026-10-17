@@ -1,6 +1,6 @@
 <template>
   <div class="page-shell platform-page">
-    <PageHeaderCompact title="API Key 管理" subtitle="创建、轮换、监控 API Key 的使用情况与配额">
+    <PageHeaderCompact title="API Key 管理">
       <template #actions>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon> 创建 Key
@@ -12,21 +12,6 @@
     </PageHeaderCompact>
 
     <div class="platform-content">
-      <div class="stats-row">
-        <div class="stat-card">
-          <div class="stat-value">{{ keys.length }}</div>
-          <div class="stat-label">活跃 Key</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ revokedCount }}</div>
-          <div class="stat-label">已撤销</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ quotaExhaustedCount }}</div>
-          <div class="stat-label">配额耗尽</div>
-        </div>
-      </div>
-
       <el-table :data="keys" v-loading="loading" stripe>
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column prop="prefix" label="Key 前缀" min-width="160">
@@ -96,21 +81,25 @@
     </el-dialog>
 
     <!-- 创建成功提示 -->
-    <el-dialog v-model="showCreatedKey" title="Key 创建成功" width="520px">
+    <el-dialog v-model="showCreatedKey" title="Key 创建成功" width="520px" :close-on-click-modal="false">
       <el-alert type="warning" title="请立即复制并安全保存此 Key，关闭后将无法再次查看！" :closable="false" show-icon />
       <div class="created-key-box">
         <code>{{ createdRawKey }}</code>
         <el-button @click="copyKey" size="small" type="primary" style="margin-top: 8px">复制到剪贴板</el-button>
       </div>
+      <template #footer>
+        <el-button type="primary" @click="showCreatedKey = false">我已保存，关闭</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { platformApi } from '@/api/platform'
+import { isHandledRequestError } from '@/api/request'
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue'
 
 const loading = ref(false)
@@ -126,16 +115,13 @@ const createForm = ref({
   rate_limit: 60,
 })
 
-const revokedCount = computed(() => keys.value.filter(k => k.status === 'revoked').length)
-const quotaExhaustedCount = computed(() => keys.value.filter(k => k.quota_tokens > 0 && k.tokens_used >= k.quota_tokens).length)
-
 async function loadData() {
   loading.value = true
   try {
     const res = await platformApi.listApiKeys()
     keys.value = res.data || []
   } catch (e) {
-    ElMessage.error('加载 API Key 列表失败')
+    if (!isHandledRequestError(e)) ElMessage.error('加载 API Key 列表失败')
   } finally {
     loading.value = false
   }
@@ -149,7 +135,7 @@ async function createKey() {
     showCreatedKey.value = true
     loadData()
   } catch (e) {
-    ElMessage.error('创建失败')
+    if (!isHandledRequestError(e)) ElMessage.error('创建失败')
   }
 }
 
@@ -173,9 +159,13 @@ async function revokeKey(row: any) {
   } catch { /* 取消 */ }
 }
 
-function copyKey() {
-  navigator.clipboard.writeText(createdRawKey.value)
-  ElMessage.success('已复制到剪贴板')
+async function copyKey() {
+  try {
+    await navigator.clipboard.writeText(createdRawKey.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败，请手动选中上方 Key 后复制')
+  }
 }
 
 function resetCreateForm() {
@@ -203,11 +193,9 @@ onMounted(loadData)
 
 <style scoped>
 .platform-content { padding: 16px 0; }
-.stats-row { display: flex; gap: 16px; margin-bottom: 20px; }
-.stat-card { flex: 1; text-align: center; padding: 16px; border-radius: 8px; background: var(--el-fill-color-light); }
-.stat-value { font-size: 24px; font-weight: 700; color: var(--el-color-primary); }
-.stat-label { font-size: 13px; color: var(--el-text-color-secondary); margin-top: 4px; }
-.key-prefix { background: var(--el-fill-color); padding: 2px 8px; border-radius: 4px; font-size: 12px; }
-.created-key-box { margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: 8px; text-align: center; }
-.created-key-box code { word-break: break-all; font-size: 13px; }
+/* 配额进度条只随列表加载渲染，不做宽度补间 */
+.platform-content :deep(.el-progress-bar__inner) { transition: none; }
+.key-prefix { background: var(--el-fill-color); padding: 2px 8px; border-radius: var(--radius-xs); font-size: var(--text-caption); }
+.created-key-box { margin-top: 16px; padding: 12px; background: var(--el-fill-color-light); border-radius: var(--radius-sm); text-align: center; }
+.created-key-box code { word-break: break-all; font-size: var(--text-caption); }
 </style>

@@ -17,6 +17,7 @@ import {
   updateChatSession,
   type ChatScope
 } from '@/api/chat';
+import { listAgentProfiles, listPromptTemplates } from '@/api/platform';
 import { createIdempotencyKey, isAbortRequestError, isHandledRequestError } from '@/api/request';
 import { buildSafetyNotice } from '@/utils/safety';
 import type { KBChatFocusHint } from '@/views/chat/chatRoutePresets';
@@ -35,6 +36,12 @@ export const useChatStore = defineStore('chat', () => {
   const selectedCorpusIds = ref<string[]>([]);
   const selectedDocumentIds = ref<string[]>([]);
   const allowCommonKnowledge = ref(false);
+  // scope 里的两个可选标识：后端 resolve_platform_context 用它们决定 persona / 工具集，
+  // 留空即「不套用」。列表供范围弹层选择，按 chat.use 权限即可读。
+  const agentProfileId = ref('');
+  const promptTemplateId = ref('');
+  const agentProfiles = ref<any[]>([]);
+  const promptTemplates = ref<any[]>([]);
   const executionMode = ref<'grounded' | 'agent'>('grounded');
   const activeFocusHint = ref<KBChatFocusHint>({});
 
@@ -64,7 +71,9 @@ export const useChatStore = defineStore('chat', () => {
       mode: scopeMode.value,
       corpus_ids: [...selectedCorpusIds.value],
       document_ids: [...selectedDocumentIds.value],
-      allow_common_knowledge: allowCommonKnowledge.value
+      allow_common_knowledge: allowCommonKnowledge.value,
+      agent_profile_id: agentProfileId.value,
+      prompt_template_id: promptTemplateId.value
     };
   }
 
@@ -77,6 +86,8 @@ export const useChatStore = defineStore('chat', () => {
     selectedCorpusIds.value = [...(normalized.corpus_ids || [])];
     selectedDocumentIds.value = [...(normalized.document_ids || [])];
     allowCommonKnowledge.value = Boolean(normalized.allow_common_knowledge);
+    agentProfileId.value = String(normalized.agent_profile_id || '');
+    promptTemplateId.value = String(normalized.prompt_template_id || '');
   }
 
   function setFocusHint(focusHint: KBChatFocusHint | Record<string, any> | null | undefined) {
@@ -217,7 +228,9 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId.value = String(session.id || '');
     clearFocusHint();
     applyScope(session.scope_json || defaultChatScope());
-    executionMode.value = session.execution_mode === 'agent' ? 'agent' : 'grounded';
+    // 后端 serialize_chat_session 把 execution_mode 提到顶层；旧响应只有 scope_json，做一次兜底。
+    const sessionExecutionMode = String(session.execution_mode || (session.scope_json || {}).execution_mode || 'grounded');
+    executionMode.value = sessionExecutionMode === 'agent' ? 'agent' : 'grounded';
     await ensureDocuments(selectedCorpusIds.value);
     const res: any = await listChatMessages(activeSessionId.value);
     messages.value = (res.items || []).map((item: any) => attachMessageSafety(item));
@@ -309,13 +322,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function handleExecutionModeChange() {
-    if (activeSessionId.value) {
-      await updateChatSession(activeSessionId.value, { execution_mode: executionMode.value });
-      await loadSessions();
-    }
-  }
-
   async function handleCorpusChange() {
     if (scopeMode.value === 'single' && selectedCorpusIds.value.length > 1) {
       selectedCorpusIds.value = selectedCorpusIds.value.slice(-1);
@@ -328,53 +334,113 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function ask(currentQuestion: string, onScrollRequest: (smooth: boolean) => void) {
-    if (asking.value || !currentQuestion.trim()) return;
+  async function handleExecutionModeChange() {
+    if (activeSessionId.value) {
+      await updateChatSession(activeSessionId.value, { execution_mode: executionMode.value });
+      await loadSessions();
+    }
+  }
+
+  // 会话级 scope 改动与 handleScopeModeChange 同构：有会话就同步写回。
+  async function handleAgentProfileChange() {
+    if (activeSessionId.value) {
+      await updateChatSession(activeSessionId.value, { scope: buildScope() });
+    }
+  }
+
+  async function handlePromptTemplateChange() {
+    if (activeSessionId.value) {
+      await updateChatSession(activeSessionId.value, { scope: buildScope() });
+    }
+  }
+
+  async function loadScopeOptions() {
+    const [profiles, templates]: any[] = await Promise.all([
+      listAgentProfiles(),
+      listPromptTemplates()
+    ]);
+    agentProfiles.value = profiles?.items || [];
+    promptTemplates.value = templates?.items || [];
+  }
+
+  function buildPendingAssistantMessage(messageId: string) {
+    return attachMessageSafety({
+      id: messageId,
+      role: 'assistant',
+      content: '',
+      answer: '',
+      answer_mode: '',
+      execution_mode: executionMode.value,
+      evidence_status: 'streaming',
+      grounding_score: 0,
+      refusal_reason: '',
+      citations: [],
+      evidence_path: [],
+      retrieval: null,
+      latency: null,
+      cost: null,
+      provider: '',
+      model: '',
+      usage: {},
+      safety: null,
+      streaming: true
+    });
+  }
+
+  // 失败态承载在同一条 assistant 消息上（复用 safety_notice 通道），
+  // 必须在 finally 的 streaming 重算之后调用，否则会被重算覆盖。
+  function markAskFailed(messageId: string) {
+    const index = messages.value.findIndex((item: any) => item?.id === messageId);
+    if (index < 0) return;
+    messages.value[index] = {
+      ...messages.value[index],
+      streaming: false,
+      evidence_status: 'failed',
+      safety_notice: {
+        level: 'error',
+        title: '回答生成失败',
+        message: '本次提问没有拿到回答，问题已保留在对话里，可以重新发送或稍后再问。'
+      }
+    };
+  }
+
+  // 同步返回「是否受理本次提问」，调用方据此决定是否清空输入框。
+  function ask(currentQuestion: string, onScrollRequest: (smooth: boolean) => void): boolean {
+    if (asking.value || !currentQuestion.trim()) return false;
 
     if (scopeMode.value !== 'all' && !selectedCorpusIds.value.length) {
       ElMessage.warning('请先选择知识范围');
-      return;
+      return false;
     }
 
+    void runAsk(currentQuestion, onScrollRequest);
+    return true;
+  }
+
+  async function runAsk(currentQuestion: string, onScrollRequest: (smooth: boolean) => void) {
     stopStreaming();
     currentController = new AbortController();
     asking.value = true;
+
+    // 问句与占位回答先入列，等待态只由消息内的指示器表达，不再需要页面级兜底块。
+    const pendingMessageId = `local-assistant-${Date.now()}`;
+    messages.value.push({
+      id: `local-user-${Date.now()}`,
+      role: 'user',
+      content: currentQuestion
+    });
+    messages.value.push(buildPendingAssistantMessage(pendingMessageId));
+
+    await nextTick();
+    onScrollRequest(false);
+
+    let failed = false;
     try {
       const sessionId = await ensureSession();
-      const pendingMessageId = `local-assistant-${Date.now()}`;
-
-      messages.value.push({
-        id: `local-user-${Date.now()}`,
-        role: 'user',
-        content: currentQuestion
-      });
-
-      messages.value.push(attachMessageSafety({
-        id: pendingMessageId,
-        session_id: sessionId,
-        role: 'assistant',
-        content: '',
-        answer: '',
-        answer_mode: '',
-        execution_mode: executionMode.value,
-        evidence_status: 'streaming',
-        grounding_score: 0,
-        refusal_reason: '',
-        citations: [],
-        evidence_path: [],
-        retrieval: null,
-        latency: null,
-        cost: null,
-        provider: '',
-        model: '',
-        usage: {},
-        safety: null,
-        streaming: true,
-        isRetrieving: true
-      }));
-
-      await nextTick();
-      onScrollRequest(true);
+      const pendingMessage = messages.value.find((item: any) => item.id === pendingMessageId);
+      if (pendingMessage) {
+        pendingMessage.session_id = sessionId;
+      }
 
       const result: any = await createChatRunV2(sessionId, {
         question: currentQuestion,
@@ -395,14 +461,22 @@ export const useChatStore = defineStore('chat', () => {
       await loadSessions();
       onScrollRequest(true);
     } catch (error: any) {
-      messages.value = messages.value.filter((item: any) => !(item?.streaming && item.role === 'assistant' && !String(item.content || item.answer || '').trim()));
-      if (isAbortRequestError(error)) return;
-      if (isHandledRequestError(error)) return;
-      ElMessage.error('问答失败，请重试');
+      if (isAbortRequestError(error)) {
+        messages.value = messages.value.filter((item: any) => item.id !== pendingMessageId);
+      } else if (isHandledRequestError(error)) {
+        failed = true;
+      } else {
+        failed = true;
+        ElMessage.error('问答失败，请重试');
+      }
     } finally {
       currentController = null;
       messages.value = messages.value.map((item: any) => item?.streaming ? attachMessageSafety({ ...item, streaming: false }) : item);
       asking.value = false;
+    }
+
+    if (failed) {
+      markAskFailed(pendingMessageId);
     }
   }
 
@@ -418,10 +492,20 @@ export const useChatStore = defineStore('chat', () => {
     if (!runId || asking.value) return;
     asking.value = true;
     message.submitting = true;
+
+    // 恢复期间同样要有等待态：占位消息入列，结束后移除。
+    const pendingMessageId = `local-resume-${Date.now()}`;
+    messages.value.push(buildPendingAssistantMessage(pendingMessageId));
+    await nextTick();
+    if (onScrollRequest) {
+      onScrollRequest(false);
+    }
+
     try {
       const result: any = await resumeChatRunV2(runId, payload, {
         idempotencyKey: createIdempotencyKey(`chat-resume:${runId}`)
       });
+      messages.value = messages.value.filter((item: any) => item.id !== pendingMessageId);
       if (result?.status === 'interrupted' && result?.run) {
         appendPendingInterrupt(result.run, result.interrupt);
       } else {
@@ -433,6 +517,7 @@ export const useChatStore = defineStore('chat', () => {
         onScrollRequest(true);
       }
     } catch (error: any) {
+      messages.value = messages.value.filter((item: any) => item.id !== pendingMessageId);
       if (!isHandledRequestError(error)) {
         ElMessage.error('补充信息提交失败，请重试');
       }
@@ -440,6 +525,7 @@ export const useChatStore = defineStore('chat', () => {
     } finally {
       message.submitting = false;
       asking.value = false;
+      messages.value = messages.value.map((item: any) => item?.streaming ? attachMessageSafety({ ...item, streaming: false }) : item);
     }
   }
 
@@ -483,6 +569,10 @@ export const useChatStore = defineStore('chat', () => {
     selectedCorpusIds,
     selectedDocumentIds,
     allowCommonKnowledge,
+    agentProfileId,
+    promptTemplateId,
+    agentProfiles,
+    promptTemplates,
     executionMode,
     activeFocusHint,
     activeFocusLabel,
@@ -503,6 +593,9 @@ export const useChatStore = defineStore('chat', () => {
     handleScopeModeChange,
     handleExecutionModeChange,
     handleCorpusChange,
+    handleAgentProfileChange,
+    handlePromptTemplateChange,
+    loadScopeOptions,
     stopStreaming,
     ask,
     resumeInterrupt,

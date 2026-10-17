@@ -8,7 +8,6 @@
         placeholder="输入您的问题，Enter 发送，Shift + Enter 换行"
         resize="none"
         class="modern-input"
-        @keydown.ctrl.enter.prevent="handleAsk"
         @keydown.enter.exact.prevent="handleAsk"
       />
       <button
@@ -38,17 +37,26 @@ const chatStore = useChatStore();
 const question = ref('');
 
 const emit = defineEmits<{
-  (e: 'ask', q: string): void;
+  (e: 'ask', q: string, done: (accepted: boolean) => void): void;
 }>();
 
-function handleAsk() {
-  if (question.value.trim() && !chatStore.asking) {
-    emit('ask', question.value);
-    question.value = '';
+function handleAsk(event?: KeyboardEvent) {
+  // 输入法组合过程中的 Enter（含 keyCode 229 的旧实现）不当作发送
+  if (event?.isComposing || event?.keyCode === 229) {
+    return;
   }
+  if (!question.value.trim() || chatStore.asking) {
+    return;
+  }
+  // 仅在 store 受理本次提问后清空输入，避免被拒绝时吞掉用户输入
+  emit('ask', question.value, (accepted: boolean) => {
+    if (accepted) {
+      question.value = '';
+    }
+  });
 }
 
-// Expose setQuestion for suggested prompts
+// 供路由预设等外部来源回填问题
 defineExpose({
   setQuestion: (val: string) => { question.value = val; }
 });
@@ -65,7 +73,7 @@ defineExpose({
   max-width: 800px;
   margin: 0 auto;
   position: relative;
-  background: #fff;
+  background: var(--bg-panel);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   padding: 4px;
@@ -76,7 +84,7 @@ defineExpose({
   box-shadow: none !important;
   background: transparent !important;
   padding: 14px 48px 14px 16px;
-  font-size: 15px;
+  font-size: var(--text-body);
   line-height: 1.5;
   resize: none;
 }
@@ -91,15 +99,15 @@ defineExpose({
   bottom: 12px;
   width: 44px;
   height: 44px;
-  border-radius: 8px;
-  background: #e5e5e5;
-  color: #fff;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel-muted);
+  color: var(--el-color-white);
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  font-size: var(--text-body);
+  transition: background-color var(--transition-fast), color var(--transition-fast), transform 120ms var(--ease-enter);
 }
 
 .modern-send-btn.is-active {
@@ -107,8 +115,8 @@ defineExpose({
   cursor: pointer;
 }
 
-.modern-send-btn.is-active:hover {
-  background: var(--blue-700);
+.modern-send-btn.is-active:active {
+  transform: scale(0.94);
 }
 
 .modern-send-btn:disabled {
@@ -118,7 +126,7 @@ defineExpose({
 
 .composer-footer {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   margin-top: 12px;
 }

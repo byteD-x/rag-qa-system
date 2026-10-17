@@ -1,4 +1,4 @@
-import request, { createIdempotencyKey, streamRequest, type StreamRequestOptions } from './request';
+import request, { createIdempotencyKey } from './request';
 
 export interface ChatScope {
   mode: 'single' | 'multi' | 'all';
@@ -101,20 +101,6 @@ export function sendChatMessage(
   return request.post(`/chat/sessions/${sessionId}/messages`, data, {
     headers: {
       'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-message')
-    }
-  });
-}
-
-export function streamChatMessage(
-  sessionId: string,
-  data: { question: string; scope?: ChatScope; execution_mode?: 'grounded' | 'agent' },
-  options: StreamRequestOptions & { idempotencyKey?: string } = {}
-) {
-  return streamRequest(`/api/v1/chat/sessions/${sessionId}/messages/stream`, data, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      'Idempotency-Key': options.idempotencyKey || createIdempotencyKey('chat-message-stream')
     }
   });
 }

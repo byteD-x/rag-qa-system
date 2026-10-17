@@ -1,0 +1,20 @@
+Changed branch/field: apps/web/src/router/index.ts, router.beforeEach / requiresAnyPermission.
+Original source hash: 6d6900e854bdd5a3eb469136ff2973d10df1b274
+Modified source hash: aaebebab69664994c774418e18a795fff50a92f6
+
+MODIFIED_FILE: E:\Project\rag-qa-system\.codex\bugfix-platform-hub\MODIFIED_FILE
+DIFF_FILE: E:\Project\rag-qa-system\.codex\bugfix-platform-hub\DIFF_FILE
+VERIFICATION.txt: E:\Project\rag-qa-system\.codex\bugfix-platform-hub\VERIFICATION.txt
+ROLLBACK.sh: E:\Project\rag-qa-system\.codex\bugfix-platform-hub\ROLLBACK.sh
+
+BASELINE_COMMAND: cd apps/web && npm run test:unit
+BASELINE_RESULT: exit 0; 26 test files passed; 58 tests passed.
+
+MODIFIED_COMMAND: cd apps/web && npm run test:unit
+MODIFIED_RESULT: exit 0; 26 test files passed; 59 tests passed.
+
+ROLLBACK_COMMAND: bash .codex/bugfix-platform-hub/ROLLBACK.sh .codex/bugfix-platform-hub/ROLLBACK_COPY
+ROLLBACK_RESULT: exit 0; literal output `ROLLBACK_RESULT=restored:.codex/bugfix-platform-hub/ROLLBACK_COPY`; SHA256 matched MODIFIED_FILE; copy removed after verification.
+
+RESTORED_BEHAVIOR: the rollback copy contains the pre-change fixture field and is separate from the changed MODIFIED_FILE.
+CURRENT_BEHAVIOR: a kb.manage-only account can enter /workspace/platform, matching the sidebar visibility rule.

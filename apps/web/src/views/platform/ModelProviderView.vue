@@ -1,10 +1,7 @@
 <template>
   <div class="page-shell platform-page">
     <PageHeaderCompact title="模型接入">
-      <template #subtitle>
-        <span>发现 OpenAI-compatible 中转站模型，并生成部署配置片段</span>
-      </template>
-      <template #actions>
+            <template #actions>
         <el-button @click="loadConfig" :loading="configLoading">
           <el-icon><Refresh /></el-icon>
           刷新配置
@@ -135,38 +132,32 @@
             <span class="muted">{{ discoveryResult?.count || 0 }} 个模型</span>
           </div>
 
-          <div v-if="discovering" class="loading-state">
-            <el-icon class="is-loading" :size="28"><Loading /></el-icon>
-            <span>正在请求中转站 /models...</span>
-          </div>
+          <Transition name="loading-fade">
+            <LoadingState v-if="discovering" label="正在请求中转站 /models..." />
+          </Transition>
 
-          <EnhancedEmpty
-            v-else-if="!models.length"
-            variant="document"
-            title="尚未获取模型"
-            description="填写 Base URL 与 API Key 后获取模型列表"
-          />
+          <template v-if="!discovering">
+            <EnhancedEmpty
+              v-if="!models.length"
+              variant="document"
+              title="尚未获取模型"
+              description="填写 Base URL 与 API Key 后获取模型列表"
+            />
 
-          <template v-else>
-            <el-select
-              v-model="selectedModel"
-              filterable
-              placeholder="选择模型"
-              style="width: 100%; margin-bottom: 12px;"
-            >
-              <el-option
-                v-for="model in models"
-                :key="model.id"
-                :label="model.id"
-                :value="model.id"
-              >
-                <span>{{ model.id }}</span>
-                <span class="model-owner">{{ model.owned_by || 'unknown' }}</span>
-              </el-option>
-            </el-select>
-
-            <el-table :data="models" height="280" size="small" @row-click="selectModel">
-              <el-table-column prop="id" label="模型 ID" min-width="220" show-overflow-tooltip />
+            <el-table v-else :data="models" height="280" size="small" @row-click="selectModel">
+              <el-table-column label="模型 ID" min-width="220" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <button
+                    type="button"
+                    class="model-id"
+                    :class="{ 'is-selected': row.id === selectedModel }"
+                    :aria-pressed="row.id === selectedModel"
+                    @click.stop="selectModel(row)"
+                  >
+                    {{ row.id }}
+                  </button>
+                </template>
+              </el-table-column>
               <el-table-column prop="owned_by" label="Owner" width="130" show-overflow-tooltip />
               <el-table-column label="Created" width="120">
                 <template #default="{ row }">
@@ -180,14 +171,25 @@
 
       <section class="panel config-output">
         <div class="panel-header">
-          <h2>配置片段</h2>
+          <h2>环境变量配置片段</h2>
           <el-button size="small" plain :disabled="!selectedModel" @click="copyConfig">
             <el-icon><CopyDocument /></el-icon>
             复制
           </el-button>
         </div>
 
-        <pre>{{ configSnippet }}</pre>
+        <template v-if="selectedModel">
+          <pre>{{ configSnippet }}</pre>
+          <p class="muted snippet-hint">
+            仅在本页未保存任何模型配置、或已保存配置被禁用时生效；已启用的数据库配置会覆盖这些环境变量（ai_client.py:211-229）。
+          </p>
+        </template>
+        <EnhancedEmpty
+          v-else
+          variant="document"
+          title="尚未选择模型"
+          description="从上方模型列表中选定一个模型后生成配置片段"
+        />
       </section>
 
       <section v-if="routeEntries.length" class="panel">
@@ -215,10 +217,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
-import { CopyDocument, Loading, Refresh, Search } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { CopyDocument, Refresh, Search } from '@element-plus/icons-vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import {
   discoverLlmModels,
   getLlmConfig,
@@ -358,6 +361,11 @@ async function testSavedConfig(configId: string) {
 }
 
 async function disableSavedConfig(configId: string) {
+  try {
+    await ElMessageBox.confirm('停用后该配置会立即从列表移除且无法撤销，确定停用吗？', '停用确认', { type: 'warning' });
+  } catch {
+    return;
+  }
   await disableModelProviderConfig(configId);
   modelConfigs.value = modelConfigs.value.filter(item => item.id !== configId);
   ElMessage.success('模型配置已停用');
@@ -433,22 +441,18 @@ onMounted(() => {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
+  gap: 4px;
 }
 
 .summary-label {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
 }
 
 .summary-item strong {
   min-width: 0;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
@@ -463,13 +467,6 @@ onMounted(() => {
   grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
-}
-
-.panel {
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel);
-  padding: 16px;
 }
 
 .panel + .panel,
@@ -488,7 +485,7 @@ onMounted(() => {
 .panel-header h2 {
   margin: 0;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
@@ -507,7 +504,7 @@ onMounted(() => {
   padding-top: 14px;
   border-top: 1px solid var(--border-color);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.6;
 }
 
@@ -521,24 +518,42 @@ onMounted(() => {
   margin: 0;
 }
 
-.loading-state {
-  display: flex;
+/* 保留结果面板的最小高度，避免加载态 → 列表的跳变（LoadingState 自身只给 padding）。 */
+:deep(.loading-state) {
   min-height: 220px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--text-muted);
 }
 
-.muted,
-.model-owner {
-  color: var(--text-muted);
-  font-size: 12px;
+/* 加载态进场只淡入 opacity，不改尺寸；离开不加过渡，避免与新内容在文档流里重叠跳动。 */
+.loading-fade-enter-active {
+  transition: opacity var(--transition-fast);
 }
 
-.model-owner {
-  float: right;
+.loading-fade-enter-from {
+  opacity: 0;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+.snippet-hint {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.model-id {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue-600);
+  font: inherit;
+  text-align: left;
+}
+
+.model-id.is-selected {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .config-output pre {
@@ -548,7 +563,7 @@ onMounted(() => {
   border-radius: var(--radius-xs);
   background: var(--bg-panel-muted);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;

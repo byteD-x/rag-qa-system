@@ -1,7 +1,7 @@
 <template>
   <div class="login-view">
     <h2 class="login-title">登录</h2>
-    <p class="login-subtitle">使用企业账号或演示账号登录工作台</p>
+    <p class="login-subtitle">使用企业账号登录工作台</p>
 
     <el-form
       ref="formRef"
@@ -19,7 +19,6 @@
           :prefix-icon="Message"
           autocomplete="username"
           size="large"
-          @input="selectedPreset = 'custom'"
         />
       </el-form-item>
 
@@ -32,7 +31,6 @@
           show-password
           autocomplete="current-password"
           size="large"
-          @input="selectedPreset = 'custom'"
         />
       </el-form-item>
 
@@ -47,44 +45,16 @@
       <RouterLink to="/register">注册新账号</RouterLink>
       <RouterLink to="/password-reset">忘记密码？</RouterLink>
     </div>
-
-    <div class="demo-section">
-      <span class="demo-label">演示账号</span>
-      <div class="demo-accounts">
-        <button
-          type="button"
-          class="demo-btn"
-          :class="{ active: selectedPreset === 'admin' }"
-          @click="applyPreset('admin')"
-        >
-          <el-icon><User /></el-icon>
-          <span>管理员</span>
-          <span class="demo-email">{{ demoAccounts.admin.email }}</span>
-        </button>
-        <button
-          type="button"
-          class="demo-btn"
-          :class="{ active: selectedPreset === 'member' }"
-          @click="applyPreset('member')"
-        >
-          <el-icon><User /></el-icon>
-          <span>成员</span>
-          <span class="demo-email">{{ demoAccounts.member.email }}</span>
-        </button>
-      </div>
-      <p class="demo-hint">密码：<span class="demo-password">{{ selectedDemoPassword }}</span></p>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { Lock, Message, User } from '@element-plus/icons-vue';
+import { Lock, Message } from '@element-plus/icons-vue';
 import { login } from '@/api/auth';
 import { useAuthStore } from '@/store/auth';
-import { demoAccounts } from './loginPresets';
 
 const router = useRouter();
 const route = useRoute();
@@ -96,29 +66,11 @@ const form = reactive({
   password: ''
 });
 
-const selectedPreset = ref<'admin' | 'member' | 'custom'>('custom');
 const loading = ref(false);
-
-const selectedDemoPassword = computed(() => {
-  if (selectedPreset.value === 'admin') {
-    return demoAccounts.admin.password;
-  }
-  if (selectedPreset.value === 'member') {
-    return demoAccounts.member.password;
-  }
-  return '点击账号即可自动填入';
-});
 
 const rules = {
   email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
-};
-
-const applyPreset = (type: 'admin' | 'member') => {
-  selectedPreset.value = type;
-  const account = demoAccounts[type];
-  form.email = account.email;
-  form.password = account.password;
 };
 
 const handleLogin = async () => {
@@ -194,95 +146,17 @@ const handleLogin = async () => {
 .submit-button {
   width: 100%;
   min-height: 46px;
-  font-size: 1rem;
+  font-size: var(--text-body);
   font-weight: 600;
   border-radius: var(--radius-sm);
   transition: opacity var(--transition-base);
-}
-
-.demo-section {
-  padding-top: 24px;
-  border-top: 1px solid var(--border-color);
-}
-
-.demo-label {
-  display: block;
-  margin-bottom: 14px;
-  font-size: var(--text-caption, 0.75rem);
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.demo-accounts {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.demo-btn {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel-muted);
-  color: var(--text-primary);
-  font-size: var(--text-body, 0.9375rem);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--transition-base), background var(--transition-base);
-}
-
-.demo-btn .el-icon {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  font-size: 18px;
-}
-
-.demo-btn span:first-of-type {
-  font-weight: 600;
-  min-width: 52px;
-}
-
-.demo-email {
-  margin-left: auto;
-  font-size: var(--text-caption, 0.75rem);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
-.demo-btn:hover {
-  border-color: var(--blue-600);
-  background: var(--blue-50);
-}
-
-.demo-btn.active {
-  border-color: var(--blue-600);
-  background: var(--blue-50);
-}
-
-.demo-btn.active .el-icon {
-  color: var(--blue-600);
-}
-
-.demo-hint {
-  margin: 14px 0 0;
-  font-size: var(--text-caption, 0.75rem);
-  color: var(--text-muted);
-}
-
-.demo-password {
-  font-family: var(--font-mono);
 }
 
 .auth-links {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  font-size: var(--text-caption, 0.8125rem);
+  font-size: var(--text-caption, 0.75rem);
 }
 
 .auth-links a { color: var(--blue-600); }

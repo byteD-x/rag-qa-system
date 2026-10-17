@@ -92,6 +92,42 @@
                 @change="chatStore.handleScopeModeChange"
               />
             </el-form-item>
+            <el-form-item label="Agent 角色">
+              <el-select
+                v-model="chatStore.agentProfileId"
+                clearable
+                filterable
+                placeholder="不套用角色"
+                size="small"
+                style="width: 100%"
+                @change="chatStore.handleAgentProfileChange"
+              >
+                <el-option
+                  v-for="profile in chatStore.agentProfiles"
+                  :key="profile.id"
+                  :label="profile.name"
+                  :value="profile.id"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="Prompt 模板">
+              <el-select
+                v-model="chatStore.promptTemplateId"
+                clearable
+                filterable
+                placeholder="不套用模板"
+                size="small"
+                style="width: 100%"
+                @change="chatStore.handlePromptTemplateChange"
+              >
+                <el-option
+                  v-for="template in chatStore.promptTemplates"
+                  :key="template.id"
+                  :label="template.name"
+                  :value="template.id"
+                />
+              </el-select>
+            </el-form-item>
           </el-form>
           <div class="scope-summary-box">
             <p>{{ selectedCorpusSummary }}</p>
@@ -112,7 +148,7 @@
             <el-radio-button value="grounded" style="flex: 1;">标准 RAG</el-radio-button>
             <el-radio-button value="agent" style="flex: 1;">Agent 模式</el-radio-button>
           </el-radio-group>
-          <p class="scope-summary" style="margin-top: 12px; font-size: 12px; color: var(--text-muted);">
+          <p class="scope-summary" style="margin-top: 12px; font-size: var(--text-caption); color: var(--text-muted);">
             {{ chatStore.executionMode === 'agent' ? '允许助手多步思考、分解问题并多次检索，适合解决复杂问题。' : '基于检索到的片段直接生成回答，速度较快。' }}
           </p>
         </div>
@@ -189,7 +225,7 @@ const selectedCorpusSummary = computed(() => {
 }
 
 .chat-title {
-  font-size: 16px;
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -209,9 +245,9 @@ const selectedCorpusSummary = computed(() => {
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
-  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
   cursor: pointer;
 }
 
@@ -221,26 +257,31 @@ const selectedCorpusSummary = computed(() => {
   }
 }
 
-.action-chip:hover {
-  background: var(--bg-panel-muted);
-  color: var(--text-primary);
-}
-
-.action-chip.is-agent {
-  color: #059669;
-  border-color: #a7f3d0;
-  background: #ecfdf5;
+@media (hover: hover) and (pointer: fine) {
+  .action-chip:hover {
+    background: var(--bg-panel-muted);
+    color: var(--text-primary);
+  }
 }
 
 .action-chip--focus {
-  color: #275dad;
-  border-color: #bfd7ff;
-  background: #f5f9ff;
+  color: var(--text-info-strong);
+  border-color: var(--border-info-soft);
+  background: var(--bg-panel-muted);
+}
+
+/* 原 #059669/#a7f3d0/#ecfdf5 为 3.58:1，低于 AA 4.5:1（90-sweep-a11y.md:51）。
+   改用成功语义 token，深浅主题各自适配（深色 9.85:1 / 浅色 5.15:1）。
+   不设彩色底：EP 的 --el-color-success-light-9 是固定浅色，本仓库未引入 EP 深色主题，
+   深色模式下会渲染成近白底。 */
+.action-chip.is-agent {
+  color: var(--text-success-status);
+  border-color: color-mix(in srgb, var(--text-success-status) 45%, var(--border-color));
 }
 
 .focus-clear {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--text-caption);
 }
 
 .scope-popover-title {
@@ -253,7 +294,7 @@ const selectedCorpusSummary = computed(() => {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color);
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 </style>

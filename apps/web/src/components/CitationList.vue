@@ -1,19 +1,13 @@
 <template>
   <div class="citation-container">
     <el-collapse class="citation-collapse" v-model="activeNames">
-      <el-collapse-item name="1">
+      <el-collapse-item name="1" :disabled="!expandable">
         <template #title>
           <div class="citation-summary">
             <div class="citation-icon-wrap">
               <el-icon><Reading /></el-icon>
             </div>
             <span class="summary-text">{{ citations.length }} 个引用来源</span>
-            <div class="citation-avatars">
-              <div v-for="(_, i) in citations.slice(0, 3)" :key="i" class="citation-mini-badge">
-                {{ i + 1 }}
-              </div>
-              <span v-if="citations.length > 3" class="citation-more">...</span>
-            </div>
           </div>
         </template>
         
@@ -24,18 +18,28 @@
               <div class="source-title-group">
                 <h4 class="source-title">{{ citation.section_title || citation.document_title || '未命名片段' }}</h4>
                 <div class="source-meta">
-                  <span v-if="citation.document_title && citation.section_title" class="meta-doc" :title="citation.document_title">
-                    {{ citation.document_title }}
+                  <span
+                    v-if="citation.version_label || citation.is_current_version || citation.version_status"
+                    class="meta-group meta-group--version"
+                  >
+                    <span v-if="citation.version_label" class="meta-tag">{{ citation.version_label }}</span>
+                    <span v-if="citation.is_current_version" class="meta-tag">当前生效</span>
+                    <span v-if="citation.version_status" class="meta-tag">{{ citation.version_status }}</span>
                   </span>
-                  <span class="meta-divider" v-if="citation.document_title">·</span>
-                  <span class="meta-tag">{{ citation.corpus_type || mode }}</span>
-                  <span class="meta-tag" v-if="citation.version_label">{{ citation.version_label }}</span>
-                  <span class="meta-tag" v-if="citation.is_current_version">当前生效</span>
-                  <span class="meta-tag" v-if="citation.version_status">{{ citation.version_status }}</span>
-                  <span class="meta-tag" v-if="evidenceKindLabel(citation)">{{ evidenceKindLabel(citation) }}</span>
-                  <span class="meta-tag" v-if="citation.page_number">第 {{ citation.page_number }} 页</span>
-                  <span class="meta-tag" v-if="regionLabel(citation)">{{ regionLabel(citation) }}</span>
-                  <span class="meta-tag" v-if="typeof citation.confidence === 'number'">置信度 {{ (citation.confidence * 100).toFixed(1) }}%</span>
+                  <span class="meta-group meta-group--location">
+                    <span v-if="citation.document_title && citation.section_title" class="meta-doc" :title="citation.document_title">
+                      {{ citation.document_title }}
+                    </span>
+                    <span class="meta-tag">{{ citation.corpus_type || mode }}</span>
+                    <span v-if="evidenceKindLabel(citation)" class="meta-tag">{{ evidenceKindLabel(citation) }}</span>
+                    <span v-if="citation.page_number" class="meta-tag">第 {{ citation.page_number }} 页</span>
+                    <span v-if="regionLabel(citation)" class="meta-tag">{{ regionLabel(citation) }}</span>
+                  </span>
+                  <span v-if="typeof citation.confidence === 'number'" class="meta-group meta-group--score">
+                    <span class="meta-tag" title="视觉区域识别置信度，来自 kb_visual_asset_regions.confidence">
+                      区域识别 {{ (citation.confidence * 100).toFixed(1) }}%
+                    </span>
+                  </span>
                 </div>
               </div>
               <a
@@ -70,7 +74,10 @@
                       :class="getScoreClass(citation.evidence_path.relevance)"
                     ></div>
                   </div>
-                  <span class="relevance-text">{{ (citation.evidence_path.relevance * 100).toFixed(1) }}% 相关性</span>
+                  <span
+                    class="relevance-text"
+                    title="检索相关性，来自 dense 单路余弦相似度（evidence_path.relevance）"
+                  >{{ (citation.evidence_path.relevance * 100).toFixed(1) }}% 相关性</span>
                 </div>
               </div>
             </div>
@@ -112,13 +119,20 @@ interface CitationItem {
   };
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   citations: CitationItem[];
   title?: string;
   mode: 'kb';
-}>();
+  defaultExpanded?: boolean;
+  expandable?: boolean;
+}>(), {
+  expandable: true
+});
 
-const activeNames = ref<string[]>([]);
+const AUTO_EXPAND_LIMIT = 3;
+const prefersExpanded = props.defaultExpanded ?? props.citations.length <= AUTO_EXPAND_LIMIT;
+const expandedByDefault = !props.expandable || prefersExpanded;
+const activeNames = ref<string[]>(expandedByDefault ? ['1'] : []);
 
 const documentPath = (citation: CitationItem) => {
   const basePath = `/workspace/kb/documents/${citation.document_id}`;
@@ -175,7 +189,7 @@ const getScoreClass = (score: number) => {
   border-radius: var(--radius-md);
   background: var(--bg-panel);
   overflow: hidden;
-  transition: all var(--transition-base);
+  transition: border-color var(--transition-fast);
 }
 
 .citation-collapse:hover {
@@ -188,7 +202,7 @@ const getScoreClass = (score: number) => {
   padding: 12px 16px;
   background: transparent;
   border-bottom: none;
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -218,36 +232,7 @@ const getScoreClass = (score: number) => {
 .summary-text {
   font-weight: 500;
   color: var(--text-primary);
-  font-size: 13px;
-}
-
-.citation-avatars {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  gap: -4px;
-}
-
-.citation-mini-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  background: var(--bg-panel-muted);
-  border: 1px solid var(--border-color);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  position: relative;
-  margin-right: 4px;
-}
-
-.citation-more {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-left: 4px;
+  font-size: var(--text-caption);
 }
 
 .citation-grid {
@@ -282,10 +267,10 @@ const getScoreClass = (score: number) => {
   flex-shrink: 0;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--blue-50);
   color: var(--blue-600);
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-weight: 600;
 }
 
@@ -296,7 +281,7 @@ const getScoreClass = (score: number) => {
 
 .source-title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-caption);
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -307,31 +292,33 @@ const getScoreClass = (score: number) => {
 
 .source-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 10px;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.meta-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .meta-doc {
   max-width: 120px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.meta-divider {
-  color: var(--border-strong);
 }
 
 .meta-tag {
   padding: 1px 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
 }
 
@@ -341,11 +328,11 @@ const getScoreClass = (score: number) => {
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--text-secondary);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
-  transition: color 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .source-link:hover {
@@ -363,14 +350,14 @@ const getScoreClass = (score: number) => {
   width: 100%;
   max-height: 132px;
   object-fit: cover;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
 }
 
 .source-content {
   padding: 12px 14px;
-  font-size: 13px;
+  font-size: var(--text-caption);
   line-height: 1.6;
   color: var(--text-regular);
 }
@@ -380,7 +367,7 @@ const getScoreClass = (score: number) => {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
@@ -401,7 +388,7 @@ const getScoreClass = (score: number) => {
   content: '"';
   color: var(--border-strong);
   font-family: serif;
-  font-size: 28px;
+  font-size: var(--text-h1);
   position: absolute;
   left: -2px;
   top: -8px;
@@ -431,15 +418,14 @@ const getScoreClass = (score: number) => {
 .relevance-fill {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.5s ease;
 }
 
-.fill-high { background: #10b981; }
-.fill-medium { background: #f59e0b; }
-.fill-low { background: #94a3b8; }
+.fill-high { background: var(--el-color-success); }
+.fill-medium { background: var(--el-color-warning); }
+.fill-low { background: var(--slate-500); }
 
 .relevance-text {
-  font-size: 11px;
+  font-size: var(--text-caption);
   font-family: var(--font-mono);
   color: var(--text-muted);
 }

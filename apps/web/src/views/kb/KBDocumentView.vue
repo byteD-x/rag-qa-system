@@ -1,30 +1,25 @@
 <template>
   <div class="page-shell doc-page">
-    <PageHeaderCompact :title="document?.file_name || '加载中'">
+    <PageHeaderCompact title="文档详情" :subtitle="document?.file_name">
       <template #actions>
-        <el-button plain @click="router.push('/workspace/kb/upload')">返回</el-button>
-        <el-button plain :disabled="!document || !canWrite" @click="openEditDrawer">编辑</el-button>
-        <el-button plain :disabled="!document" @click="router.push(`/workspace/kb/documents/${document.id}/chunks`)">切片管理</el-button>
-        <el-button plain type="danger" :disabled="!document || !canWrite" @click="handleDeleteDocument">删除</el-button>
-        <el-button
-          v-if="document?.latest_job?.retryable && canManage"
-          plain
-          type="warning"
-          :loading="retryingJob"
-          @click="handleRetryIngest"
-        >
-          重试
-        </el-button>
-        <el-button type="primary" @click="goChat">按当前版本提问</el-button>
-        <el-button plain :disabled="!document" @click="goCompareChat(selectedVersionId || document?.id)">比较提问</el-button>
+        <el-button plain @click="handleBack">返回</el-button>
+        <el-dropdown trigger="click" @command="handleDocumentCommand">
+          <el-button plain :loading="retryingJob">管理</el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="edit" :disabled="!document || !canWrite">编辑</el-dropdown-item>
+              <el-dropdown-item command="chunks" :disabled="!document">切片管理</el-dropdown-item>
+              <el-dropdown-item command="retry" :disabled="!document?.latest_job?.retryable || !canManage">重试</el-dropdown-item>
+              <el-dropdown-item command="rebuild" :disabled="!document || !canWrite || rebuilding">重建本文档</el-dropdown-item>
+              <el-dropdown-item command="delete" divided :disabled="!document || !canWrite">删除</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </template>
     </PageHeaderCompact>
 
     <div class="doc-content">
-      <div v-if="!document" class="doc-loading">
-        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-        <span>加载中</span>
-      </div>
+      <LoadingState v-if="!document" label="加载中" :icon-size="24" />
 
       <template v-else>
         <div class="doc-info-row">
@@ -140,29 +135,21 @@
                   <span>生效结束：{{ formatDateTime(item.effective_to) }}</span>
                 </div>
                 <div class="version-card__actions">
-                  <el-button size="small" plain @click="inspectVersion(item)">查看内容</el-button>
+                  <el-button size="small" plain @click="inspectVersionFromCard(item)">查看内容</el-button>
                   <el-button size="small" plain type="primary" @click="goChat(String(item.id || ''))">按此版本提问</el-button>
                   <el-button
                     v-if="String(item.id) !== String(document.id)"
                     size="small"
                     type="primary"
                     plain
-                    @click="inspectVersion(item, true)"
+                    @click="inspectVersionFromCard(item, true)"
                   >
                     对比当前
-                  </el-button>
-                  <el-button
-                    v-if="String(item.id) !== String(document.id)"
-                    size="small"
-                    plain
-                    @click="goCompareChat(String(item.id || ''))"
-                  >
-                    比较提问
                   </el-button>
                 </div>
               </article>
             </div>
-            <div v-if="selectedVersionContent" class="version-inspector">
+            <div v-if="selectedVersionContent" id="version-inspector" class="version-inspector">
               <div class="version-inspector__header">
                 <div>
                   <strong>{{ selectedVersionContent.version_label || selectedVersionContent.file_name }}</strong>
@@ -224,7 +211,7 @@
                     </article>
                   </div>
                 </el-tab-pane>
-                <el-tab-pane label="与当前版本差异" name="diff">
+                <el-tab-pane v-if="compareVersionReady" label="与当前版本差异" name="diff">
                   <EnhancedEmpty
                     v-if="!selectedVersionDiff?.diff?.diff_text"
                     variant="document"
@@ -287,7 +274,12 @@
                     :src="asset.thumbnail_url"
                     :alt="asset.file_name || 'visual asset'"
                     class="visual-thumb"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`选中截图 ${asset.file_name || asset.asset_index || ''} 作为提问焦点`"
                     @click="focusVisualAsset(asset.asset_id)"
+                    @keydown.enter.prevent="focusVisualAsset(asset.asset_id)"
+                    @keydown.space.prevent="focusVisualAsset(asset.asset_id)"
                   />
                   <div v-if="asset.thumbnail_url && focusedRegionForAsset(asset) && focusedRegionBoxStyle(asset).width" class="visual-region-box" :style="focusedRegionBoxStyle(asset)"></div>
                   <div v-if="!asset.thumbnail_url" class="visual-thumb visual-thumb--empty">无预览</div>
@@ -299,15 +291,9 @@
                   <span v-if="visualRegionsFor(asset).length">区域 {{ visualRegionsFor(asset).length }} 个</span>
                 </div>
                 <div v-if="visualRegionsFor(asset).length" class="visual-region-list">
-                  <article v-for="region in visualRegionsFor(asset)" :id="visualRegionDomId(region.region_id)" :key="region.region_id" class="visual-region-item" :class="{ 'visual-region-item--focused': isFocusedRegion(region.region_id) }" @click="focusVisualRegion(asset.asset_id, region.region_id)">
+                  <article v-for="region in visualRegionsFor(asset)" :id="visualRegionDomId(region.region_id)" :key="region.region_id" class="visual-region-item" :class="{ 'visual-region-item--focused': isFocusedRegion(region.region_id) }" role="button" tabindex="0" @click="focusVisualRegion(asset.asset_id, region.region_id)" @keydown.enter.prevent="focusVisualRegion(asset.asset_id, region.region_id)" @keydown.space.prevent="focusVisualRegion(asset.asset_id, region.region_id)">
                     <strong>{{ region.region_label }}</strong>
                     <span v-if="region.layout_hints?.length">{{ region.layout_hints.join(' / ') }}</span>
-                    <span v-if="region.confidence !== null && region.confidence !== undefined">
-                      置信度 {{ (Number(region.confidence) * 100).toFixed(1) }}%
-                    </span>
-                    <span v-if="region.bbox?.length === 4">
-                      坐标 {{ region.bbox.map((item: number) => Number(item).toFixed(2)).join(', ') }}
-                    </span>
                     <span>{{ region.summary || '无摘要' }}</span>
                   </article>
                 </div>
@@ -375,7 +361,7 @@
                   <article class="visual-compare-card visual-compare-card--diff">
                     <div class="visual-compare-card__meta">
                       <strong>变化热区</strong>
-                      <span v-if="visualDiffState.bounds">橙框代表主要变化区域</span>
+                      <span v-if="visualDiffState.bounds">红框代表主要变化区域</span>
                       <span v-else>未检测到明显像素变化</span>
                     </div>
                     <canvas ref="visualDiffCanvas" class="visual-compare-canvas"></canvas>
@@ -461,9 +447,11 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { Loading } from '@element-plus/icons-vue';
 import DocumentEvents from '@/components/DocumentEvents.vue';
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import LoadingState from '@/components/LoadingState.vue';
 import PageHeaderCompact from '@/components/PageHeaderCompact.vue';
 import { useAuthStore } from '@/store/auth';
 import {
+  buildKnowledgeRebuildSignature,
   deleteKBDocument,
   getKBDocument,
   getKBDocumentEvents,
@@ -472,15 +460,18 @@ import {
   getKBDocumentVersions,
   getKBVisualAssetRegions,
   getKBDocumentVisualAssets,
+  rebuildKnowledgeDocument,
   retryKBIngestJob,
-  updateKBDocument
+  updateKBDocument,
+  type RebuildKnowledgeDocumentResponse
 } from '@/api/kb';
 import { buildKbChatRouteQuery } from '@/views/chat/chatRoutePresets';
 import { buildCompareVersionsFocus, buildSingleVersionFocus, buildVisualFocus } from '@/views/kb/kbChatFocus';
-import { computePixelDiffMask, findBestMatchingCompareVisual, resolveVisualRegionBox } from '@/views/kb/kbVisualCompare';
+import { KB_VISUAL_CHANGE_COLOR, computePixelDiffMask, findBestMatchingCompareVisual, resolveVisualRegionBox } from '@/views/kb/kbVisualCompare';
 import { buildVersionSummary } from '@/views/kb/kbVersionSummary';
 import { formatBytes } from '@/utils/format';
 import { statusMeta } from '@/utils/status';
+import { isHandledRequestError } from '@/api/request';
 
 const route = useRoute();
 const router = useRouter();
@@ -504,6 +495,7 @@ const selectedVersionDiff = ref<any | null>(null);
 const versionInspectorTab = ref<'summary' | 'content' | 'diff'>('content');
 const questionDraft = ref('');
 const retryingJob = ref(false);
+const rebuilding = ref(false);
 const editDrawerVisible = ref(false);
 const activeCollapse = ref<string[]>(['versions', 'chunks', 'visuals']);
 const versionStatusOptions = ['active', 'draft', 'superseded', 'archived'];
@@ -712,6 +704,8 @@ const ensureVisualCollapseOpen = () => {
   }
 };
 
+const prefersReducedMotion = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+
 const scrollToVisualAnchor = async () => {
   const targetId = focusedVisualRegionId.value
     ? visualRegionDomId(focusedVisualRegionId.value)
@@ -725,7 +719,13 @@ const scrollToVisualAnchor = async () => {
   await nextTick();
   const target = globalThis.document?.getElementById(targetId)
     || (focusedVisualAssetId.value ? globalThis.document?.getElementById(visualAssetDomId(focusedVisualAssetId.value)) : null);
-  target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  target?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
+};
+
+const scrollToVersionInspector = async () => {
+  await nextTick();
+  const target = globalThis.document?.getElementById('version-inspector');
+  target?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
 };
 
 const syncVisualFocusFromRoute = async () => {
@@ -752,6 +752,7 @@ const updateVisualFocusQuery = async (assetId: string, regionId: string = '') =>
   await router.replace({ path: route.path, query: nextQuery });
 };
 
+// 滚动统一由 route → syncVisualFocusFromRoute 承担，差异渲染统一由下方焦点 watch 承担，避免同一次点击重复触发。
 const focusVisualAsset = async (assetId: string) => {
   const normalizedAssetId = String(assetId || '').trim();
   if (!normalizedAssetId) {
@@ -760,8 +761,6 @@ const focusVisualAsset = async (assetId: string) => {
   focusedVisualAssetId.value = normalizedAssetId;
   focusedVisualRegionId.value = '';
   await updateVisualFocusQuery(normalizedAssetId);
-  await scrollToVisualAnchor();
-  await renderCrossVersionVisualDiff();
 };
 
 const focusVisualRegion = async (assetId: string, regionId: string) => {
@@ -773,8 +772,6 @@ const focusVisualRegion = async (assetId: string, regionId: string) => {
   focusedVisualAssetId.value = normalizedAssetId;
   focusedVisualRegionId.value = normalizedRegionId;
   await updateVisualFocusQuery(normalizedAssetId, normalizedRegionId);
-  await scrollToVisualAnchor();
-  await renderCrossVersionVisualDiff();
 };
 
 const buildVisualRegionsMap = async (assets: any[]) => {
@@ -895,7 +892,7 @@ const drawDiffBounds = (context: CanvasRenderingContext2D | null, bounds: { left
   const height = Math.max(1, bounds.bottom - bounds.top);
   context.save();
   context.lineWidth = 2;
-  context.strokeStyle = '#f97316';
+  context.strokeStyle = KB_VISUAL_CHANGE_COLOR;
   context.setLineDash([6, 4]);
   context.strokeRect(bounds.left, bounds.top, width, height);
   context.restore();
@@ -913,6 +910,7 @@ const renderCrossVersionVisualDiff = async () => {
   if (!visualCompareEligible.value || !focusedVisualAsset.value || !compareVisualAsset.value) {
     return;
   }
+  ensureVisualCollapseOpen();
   const currentSource = String(focusedVisualAsset.value.thumbnail_url || '');
   const compareSource = String(compareVisualAsset.value.thumbnail_url || '');
   if (!currentSource || !compareSource) {
@@ -988,16 +986,22 @@ const load = async () => {
 
 const inspectVersion = async (item: any, openDiff: boolean = false) => {
   if (!document.value) return;
-  selectedVersionId.value = String(item.id || '');
-  versionInspectorTab.value = openDiff ? 'diff' : 'content';
+  const itemId = String(item.id || '');
+  const canDiff = itemId !== String(document.value.id || '');
+  selectedVersionId.value = itemId;
+  versionInspectorTab.value = openDiff && canDiff ? 'diff' : 'content';
   const [contentResult, diffResult]: any[] = await Promise.all([
-    getKBDocumentVersionContent(String(document.value.id), String(item.id)),
-    getKBDocumentVersionDiff(String(document.value.id), String(item.id))
+    getKBDocumentVersionContent(String(document.value.id), itemId),
+    getKBDocumentVersionDiff(String(document.value.id), itemId)
   ]);
   selectedVersionContent.value = contentResult.document || null;
   selectedVersionDiff.value = diffResult || null;
-  await loadCompareVisualBundle(String(item.id || ''));
-  await renderCrossVersionVisualDiff();
+  await loadCompareVisualBundle(itemId);
+};
+
+const inspectVersionFromCard = async (item: any, openDiff: boolean = false) => {
+  await inspectVersion(item, openDiff);
+  await scrollToVersionInspector();
 };
 
 const resolveQuestion = (fallback: string) => questionDraft.value.trim() || fallback;
@@ -1015,7 +1019,7 @@ const goChat = (documentId: string = '') => {
   openChatWithQuery(buildKbChatRouteQuery({
     baseId: String(document.value.base_id || ''),
     documentId: String(target.id || document.value.id || ''),
-    question: resolveQuestion('请基于当前版本回答我的问题。'),
+    question: resolveQuestion('请基于所选版本回答我的问题。'),
     focusHint: buildSingleVersionFocus({
       documentId: String(target.id || document.value.id || ''),
       versionLabel: String(target.version_label || ''),
@@ -1125,6 +1129,44 @@ const handleRetryIngest = async () => {
   }
 };
 
+// 单文档 rebuild 的签名门控：先 dry_run 取得与当前 doc_id 匹配的签名，
+// 执行时必须复用同一签名（后端 kb_rebuild.py 校验失败即拒绝）。
+const handleRebuildDocument = async () => {
+  if (!canWrite.value || !document.value || rebuilding.value) return;
+  const docId = String(document.value.id);
+  const signature = buildKnowledgeRebuildSignature({ doc_id: docId });
+  rebuilding.value = true;
+  try {
+    const previewResponse = await rebuildKnowledgeDocument({ doc_id: docId, dry_run: true, signature });
+    const preview = ((previewResponse as any).data ?? previewResponse) as RebuildKnowledgeDocumentResponse;
+    const previewSummary = [
+      preview.version ? `版本 ${preview.version}` : '',
+      typeof preview.chunk_count === 'number' ? `${preview.chunk_count} 个分块` : ''
+    ].filter(Boolean).join('，');
+    try {
+      await ElMessageBox.confirm(
+        `将按「${document.value.file_name}」的当前内容重新生成分块与向量，并替换该文档现有的分块${previewSummary ? `（${previewSummary}）` : ''}。`,
+        '确认重建文档',
+        { type: 'warning', confirmButtonText: '确认重建', cancelButtonText: '取消' }
+      );
+    } catch {
+      return;
+    }
+    const response = await rebuildKnowledgeDocument({ doc_id: docId, dry_run: false, signature });
+    const result = ((response as any).data ?? response) as RebuildKnowledgeDocumentResponse;
+    const doneSummary = [
+      result.version ? `版本 ${result.version}` : '',
+      typeof result.chunk_count === 'number' ? `${result.chunk_count} 个分块` : ''
+    ].filter(Boolean).join('，');
+    ElMessage.success(doneSummary ? `已重建：${doneSummary}` : '已提交重建');
+    await load();
+  } catch (error) {
+    if (!isHandledRequestError(error)) ElMessage.error('文档 rebuild 失败');
+  } finally {
+    rebuilding.value = false;
+  }
+};
+
 const handleDeleteDocument = async () => {
   if (!canWrite.value || !document.value) return;
   try {
@@ -1140,6 +1182,37 @@ const handleDeleteDocument = async () => {
   await deleteKBDocument(String(document.value.id));
   ElMessage.success('已删除');
   router.push({ path: '/workspace/kb/upload', query: baseId ? { baseId } : {} });
+};
+
+const handleBack = () => {
+  if (globalThis.history?.state?.back) {
+    router.back();
+    return;
+  }
+  router.push('/workspace/kb/governance');
+};
+
+const handleDocumentCommand = (command: string) => {
+  if (command === 'edit') {
+    openEditDrawer();
+    return;
+  }
+  if (command === 'chunks') {
+    if (!document.value) return;
+    router.push(`/workspace/kb/documents/${document.value.id}/chunks`);
+    return;
+  }
+  if (command === 'retry') {
+    void handleRetryIngest();
+    return;
+  }
+  if (command === 'rebuild') {
+    void handleRebuildDocument();
+    return;
+  }
+  if (command === 'delete') {
+    void handleDeleteDocument();
+  }
 };
 
 const formatDateTimeInput = (value: string | Date | null | undefined) => {
@@ -1191,15 +1264,6 @@ onMounted(() => void load());
   overflow-y: auto;
 }
 
-.doc-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px;
-  color: var(--text-muted);
-}
-
 .doc-info-row {
   display: flex;
   flex-wrap: wrap;
@@ -1215,10 +1279,8 @@ onMounted(() => void load());
   margin-bottom: 16px;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--border-color));
-  border-radius: 14px;
-  background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 36%),
-    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
 }
 
 .smart-ask-panel__header {
@@ -1230,13 +1292,13 @@ onMounted(() => void load());
 
 .smart-ask-panel__header h3 {
   margin: 0 0 4px;
-  font-size: 16px;
+  font-size: var(--text-body);
   color: var(--text-primary);
 }
 
 .smart-ask-panel__header p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-caption);
   line-height: 1.6;
   color: var(--text-secondary);
 }
@@ -1255,19 +1317,19 @@ onMounted(() => void load());
 
 .smart-ask-preset {
   padding: 8px 12px;
-  border: 1px solid #d9e5fb;
+  border: 1px solid var(--border-info-subtle);
   border-radius: 999px;
-  background: #fff;
-  color: #275dad;
-  font-size: 12px;
+  background: var(--bg-panel);
+  color: var(--text-info-strong);
+  font-size: var(--text-caption);
   cursor: pointer;
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
 }
 
-.smart-ask-preset:hover {
-  transform: translateY(-1px);
-  border-color: #8bb6ff;
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08);
+@media (hover: hover) and (pointer: fine) {
+  .smart-ask-preset:hover {
+    border-color: var(--border-info);
+  }
 }
 
 .smart-ask-panel__actions {
@@ -1277,7 +1339,7 @@ onMounted(() => void load());
 }
 
 .info-item {
-  font-size: 14px;
+  font-size: var(--text-body);
   color: var(--text-secondary);
 }
 
@@ -1292,15 +1354,15 @@ onMounted(() => void load());
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-panel-muted);
-  font-size: 13px;
+  font-size: var(--text-caption);
 }
 
 .chunk-index {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
@@ -1314,7 +1376,7 @@ onMounted(() => void load());
 }
 
 .chunk-meta {
-  font-size: 11px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
@@ -1332,13 +1394,12 @@ onMounted(() => void load());
   gap: 8px;
   padding: 14px;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--bg-panel);
 }
 
 .version-card--active {
   border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--el-color-primary) 25%, transparent);
 }
 
 .version-card__header {
@@ -1357,7 +1418,7 @@ onMounted(() => void load());
 .version-card__meta {
   display: grid;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1373,7 +1434,7 @@ onMounted(() => void load());
   margin-top: 16px;
   padding: 16px;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--bg-panel-muted);
 }
 
@@ -1387,7 +1448,7 @@ onMounted(() => void load());
 .version-inspector__sub {
   display: block;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1406,27 +1467,27 @@ onMounted(() => void load());
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
 .version-summary__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
 .version-summary-card {
   display: grid;
   gap: 8px;
-  padding: 14px;
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-panel);
+  background: transparent;
+  border: 0;
+  padding: 0;
 }
 
 .version-summary-card--fallback {
-  background: var(--bg-panel-muted);
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
 }
 
 .version-summary-card__header {
@@ -1434,7 +1495,7 @@ onMounted(() => void load());
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  font-size: 13px;
+  font-size: var(--text-caption);
 }
 
 .version-summary-card__header span {
@@ -1451,7 +1512,7 @@ onMounted(() => void load());
   display: grid;
   gap: 8px;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
 }
@@ -1462,7 +1523,7 @@ onMounted(() => void load());
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   line-height: 1.6;
 }
 
@@ -1470,7 +1531,7 @@ onMounted(() => void load());
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1484,24 +1545,26 @@ onMounted(() => void load());
   display: grid;
   gap: 10px;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: transform var(--transition-base), border-color var(--transition-base);
 }
 
 .visual-card--focused {
   border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
-  transform: translateY(-1px);
 }
 
 .visual-thumb-wrap {
   position: relative;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--bg-panel-muted);
   border: 1px solid var(--border-color);
+}
+
+.visual-thumb-wrap:focus-within {
+  box-shadow: var(--shadow-focus);
 }
 
 .visual-thumb {
@@ -1514,9 +1577,9 @@ onMounted(() => void load());
 
 .visual-region-box {
   position: absolute;
-  border: 2px solid #d92d20;
-  background: rgba(217, 45, 32, 0.14);
-  border-radius: 6px;
+  border: 2px solid var(--el-color-danger);
+  background: color-mix(in srgb, var(--el-color-danger) 14%, transparent);
+  border-radius: var(--radius-sm);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9) inset;
   pointer-events: none;
 }
@@ -1530,7 +1593,7 @@ onMounted(() => void load());
 .visual-meta {
   display: grid;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1547,19 +1610,23 @@ onMounted(() => void load());
   display: grid;
   gap: 4px;
   padding: 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   background: var(--bg-panel-muted);
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition: transform var(--transition-base), border-color var(--transition-base);
+}
+
+.visual-region-item:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
 }
 
 .visual-region-item--focused {
   border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--el-color-primary) 18%, transparent);
-  background: color-mix(in srgb, var(--el-color-primary-light-9, #ecf5ff) 70%, white);
+  background: color-mix(in srgb, var(--el-color-primary-light-9) 70%, var(--bg-panel));
 }
 
 .visual-region-item strong {
@@ -1570,12 +1637,6 @@ onMounted(() => void load());
   display: grid;
   gap: 14px;
   margin-top: 16px;
-  padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--el-color-primary) 18%, var(--border-color));
-  border-radius: 12px;
-  background:
-    radial-gradient(circle at top right, rgba(249, 115, 22, 0.08), transparent 32%),
-    linear-gradient(180deg, #fffdf8 0%, #ffffff 100%);
 }
 
 .visual-compare-panel__header {
@@ -1587,7 +1648,7 @@ onMounted(() => void load());
 
 .visual-compare-panel__header p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1595,7 +1656,7 @@ onMounted(() => void load());
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1617,19 +1678,19 @@ onMounted(() => void load());
   display: grid;
   gap: 10px;
   padding: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   background: var(--bg-panel);
 }
 
 .visual-compare-card--diff {
-  background: color-mix(in srgb, #fff7ed 60%, white);
+  background: color-mix(in srgb, var(--bg-warning-subtle) 60%, var(--bg-panel));
 }
 
 .visual-compare-card__meta {
   display: grid;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
 }
 
@@ -1640,8 +1701,8 @@ onMounted(() => void load());
 .visual-compare-canvas {
   width: 100%;
   min-height: 120px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  background: #0f172a;
+  background: var(--bg-media-canvas);
 }
 </style>

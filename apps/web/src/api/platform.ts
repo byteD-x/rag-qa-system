@@ -373,7 +373,6 @@ async function requestItems(promise: Promise<any>): Promise<{ data: any[] }> {
 
 export const platformApi = {
   listPromptTemplates: (params?: any) => requestItems(listPromptTemplates(params)),
-  applyPromptTemplate: (templateId: string) => requestData(request.post(`/platform/prompt-templates/${templateId}/apply`)),
 
   listExperiments: () => requestItems(request.get('/platform/experiments')),
   startExperiment: (data: any) => requestData(request.post('/platform/experiments', data)),

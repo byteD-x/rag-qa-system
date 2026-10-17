@@ -26,12 +26,6 @@
       >
         <div class="event-card">
           <div class="event-head">
-            <div class="event-title-group">
-              <el-icon v-if="getStageIcon(item.stage)" :color="getTimelineNodeColor(item.stage)" class="stage-icon">
-                <component :is="getStageIcon(item.stage)" />
-              </el-icon>
-              <strong>{{ stageLabel(item.stage) }}</strong>
-            </div>
             <el-tag :type="statusMeta(item.stage).type" effect="plain" size="small">{{ statusMeta(item.stage).label }}</el-tag>
           </div>
           <p class="event-message" :class="{'error-text': item.stage === 'failed'}">{{ item.message }}</p>
@@ -44,7 +38,7 @@
                     <el-icon><Monitor /></el-icon> 详情
                   </div>
                 </template>
-                <pre class="event-details"><code class="language-json">{{ pretty(item.details_json) }}</code></pre>
+                <JsonPreview :value="item.details_json" />
               </el-collapse-item>
             </el-collapse>
           </div>
@@ -56,17 +50,10 @@
 
 <script setup lang="ts">
 import EnhancedEmpty from '@/components/EnhancedEmpty.vue';
+import JsonPreview from '@/components/JsonPreview.vue';
 import { statusMeta } from '@/utils/status';
 import { formatDateTime } from '@/utils/time';
-import { 
-  Monitor, 
-  UploadFilled, 
-  Document, 
-  Cpu, 
-  Connection, 
-  CircleCheckFilled, 
-  WarningFilled 
-} from '@element-plus/icons-vue';
+import { Monitor } from '@element-plus/icons-vue';
 
 interface EventItem {
   stage: string;
@@ -81,19 +68,6 @@ defineProps<{
   description?: string;
 }>();
 
-const STAGE_LABELS: Record<string, string> = {
-  uploaded: '已接收',
-  parsing_fast: '快速解析',
-  parsing: '深度解析',
-  fast_index_ready: '快速可查',
-  enhancing: '增强处理中',
-  hybrid_ready: '混合检索就绪',
-  ready: '流程完成',
-  failed: '处理失败'
-};
-
-const stageLabel = (stage: string) => STAGE_LABELS[stage] || stage;
-
 const getTimelineNodeType = (stage: string) => {
   if (stage === 'ready') return 'success';
   if (stage === 'failed') return 'danger';
@@ -102,23 +76,11 @@ const getTimelineNodeType = (stage: string) => {
 };
 
 const getTimelineNodeColor = (stage: string) => {
-  if (stage === 'ready') return '#10b981';
-  if (stage === 'failed') return '#ef4444';
+  if (stage === 'ready') return 'var(--el-color-success)';
+  if (stage === 'failed') return 'var(--el-color-danger)';
   if (stage === 'enhancing' || stage === 'parsing') return 'var(--blue-600)';
   return 'var(--text-muted)';
 };
-
-const getStageIcon = (stage: string) => {
-  if (stage === 'uploaded') return UploadFilled;
-  if (stage === 'parsing_fast' || stage === 'parsing') return Document;
-  if (stage === 'enhancing') return Cpu;
-  if (stage.includes('ready') && stage !== 'ready') return Connection;
-  if (stage === 'ready') return CircleCheckFilled;
-  if (stage === 'failed') return WarningFilled;
-  return null;
-};
-
-const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 </script>
 
 <style scoped>
@@ -146,18 +108,18 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
 .events-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 600;
 }
 
 .events-header p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
 }
 
 .events-count {
-  font-size: 12px;
+  font-size: var(--text-caption);
   color: var(--text-muted);
   margin-left: auto;
 }
@@ -179,7 +141,7 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 .events-timeline :deep(.el-timeline-item__timestamp) {
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-caption);
   margin-bottom: 6px;
 }
 
@@ -197,35 +159,20 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
   gap: 12px;
 }
 
-.event-title-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.stage-icon {
-  font-size: 18px;
-}
-
-.event-title-group strong {
-  font-size: 1.05rem;
-  color: var(--text-primary);
-}
-
 .event-message {
   margin-top: 12px;
   color: var(--text-regular);
   line-height: 1.7;
-  font-size: 14px;
+  font-size: var(--text-body);
 }
 
 .error-text {
-  color: #ef4444;
+  color: var(--el-color-danger);
 }
 
 .event-details-wrapper {
   margin-top: 16px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   border: 1px solid var(--border-color);
 }
@@ -250,30 +197,14 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 }
 
 .custom-collapse :deep(.el-collapse-item__content) {
-  padding: 0;
+  padding: 12px;
 }
 
 .collapse-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--text-caption);
   font-weight: 600;
-}
-
-.event-details {
-  margin: 0;
-  padding: 16px;
-  overflow: auto;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  border-top: 1px dashed var(--border-color);
-}
-
-.event-details code {
-  font-family: inherit;
 }
 </style>
