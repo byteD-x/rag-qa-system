@@ -60,6 +60,10 @@ def serialize_chat_session(row: dict[str, Any], *, default_scope_fn: Any) -> dic
         "title": str(row.get("title") or ""),
         "scope_json": scope_json,
         "execution_mode": str(scope_json.get("execution_mode") or "grounded"),
+        "conversation_summary": str(row.get("conversation_summary") or ""),
+        "conversation_state": dict(row.get("conversation_state_json") or {}),
+        "summary_version": int(row.get("summary_version") or 1),
+        "summary_updated_at": row.get("summary_updated_at"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }

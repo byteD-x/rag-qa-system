@@ -67,6 +67,16 @@ def _stream_metadata_payload(prepared: dict[str, Any], workflow_run: dict[str, A
         "safety": prepared["safety"],
         "resume": dict(prepared.get("resume") or {}),
         "retrieval": prepared["retrieval_meta"],
+        "conversation": {
+            "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
+            "summary_updated_at": (prepared.get("conversation_context") or {}).get("summary_updated_at"),
+        },
+        "memory": {
+            "retrieved_count": len(list(prepared.get("memory_context") or [])),
+            "stored_count": 0,
+            "stored_ids": [],
+            "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
+        },
         "workflow_run": workflow_run or {},
     }
 
@@ -505,6 +515,8 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                     "safety": result.get("safety", {}),
                     "resume": result.get("resume", {}),
                     "retrieval": result.get("retrieval", {}),
+                    "conversation": result.get("conversation", {}),
+                    "memory": result.get("memory", {}),
                     "workflow_run": result.get("workflow_run", {}),
                 },
             )
@@ -676,6 +688,13 @@ async def stream_chat_message(session_id: str, payload: SendMessageRequest, requ
                         "refusal_reason": prepared["refusal_reason"],
                     },
                 )
+            yield encode_sse_event(
+                "metadata",
+                {
+                    "conversation": result.get("conversation", {}),
+                    "memory": result.get("memory", {}),
+                },
+            )
             yield encode_sse_event("message", final_message)
             yield encode_sse_event("done", {"session_id": session_id, "trace_id": prepared["trace_id"]})
         except Exception as exc:

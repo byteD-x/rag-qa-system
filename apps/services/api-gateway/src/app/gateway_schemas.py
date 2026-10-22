@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -189,6 +190,28 @@ class CacheConfigRequest(BaseModel):
     semantic_threshold: float | None = Field(default=None, ge=0.7, le=0.99)
     default_ttl: float | None = Field(default=None, ge=60, le=604800)
     max_entries: int | None = Field(default=None, ge=100, le=100000)
+
+
+class MemoryEntryUpdateRequest(BaseModel):
+    summary: str | None = Field(default=None, max_length=320)
+    object: str | None = Field(default=None, max_length=240)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    importance: float | None = Field(default=None, ge=0, le=1)
+    status: str | None = Field(default=None, max_length=32)
+    is_active: bool | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    expires_at: datetime | None = None
+
+    @field_validator("status")
+    @classmethod
+    def normalize_memory_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in {"active", "superseded", "archived", "forgotten"}:
+            raise ValueError("unsupported memory status")
+        return normalized
 
 
 class ModelProviderConfigRequest(BaseModel):

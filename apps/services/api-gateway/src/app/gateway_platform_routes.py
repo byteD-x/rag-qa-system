@@ -45,6 +45,7 @@ from .gateway_schemas import (
     UpdateModelProviderConfigRequest,
     CacheConfigRequest,
     CacheInvalidateRequest,
+    MemoryEntryUpdateRequest,
 )
 from .business_tools import ensure_business_tools_registered
 from .model_health import model_health_monitor
@@ -285,13 +286,21 @@ async def toggle_platform_tool(tool_name: str, payload: dict[str, bool], request
 
 
 @router.get("/api/v1/platform/memory/entries")
-async def list_memory_entries(request: Request, user: CurrentUser, memory_type: str = Query(default="", max_length=32), limit: int = Query(default=20, ge=1, le=200), offset: int = Query(default=0, ge=0)) -> dict[str, object]:
+async def list_memory_entries(request: Request, user: CurrentUser, memory_type: str = Query(default="", max_length=32), scope_type: str = Query(default="", max_length=32), status: str = Query(default="", max_length=32), include_expired: bool = False, limit: int = Query(default=20, ge=1, le=200), offset: int = Query(default=0, ge=0)) -> dict[str, object]:
     _platform_read(request, user, action="platform.memory.list", resource_type="memory")
     clauses = ["user_id = %s"]
     params: list[object] = [user.user_id]
     if memory_type.strip():
         clauses.append("memory_type = %s")
         params.append(memory_type.strip().lower())
+    if scope_type.strip():
+        clauses.append("scope_type = %s")
+        params.append(scope_type.strip().lower())
+    if status.strip():
+        clauses.append("status = %s")
+        params.append(status.strip().lower())
+    if not include_expired:
+        clauses.append("(expires_at IS NULL OR expires_at > NOW())")
     with gateway_db.connect() as conn:
         with conn.cursor() as cur:
             where = " AND ".join(clauses)
@@ -303,18 +312,51 @@ async def list_memory_entries(request: Request, user: CurrentUser, memory_type: 
 
 
 def _serialize_memory(row: dict[str, object]) -> dict[str, object]:
-    return {"id": str(row.get("id") or ""), "user_id": str(row.get("user_id") or ""), "memory_type": str(row.get("memory_type") or "fact"), "subject": str(row.get("subject") or ""), "predicate": str(row.get("predicate") or ""), "object": str(row.get("object") or ""), "confidence": float(row.get("confidence") or 0.0), "source_session_id": str(row.get("source_session_id") or ""), "version": int(row.get("version") or 1), "is_active": bool(row.get("is_active")), "created_at": row.get("created_at"), "updated_at": row.get("updated_at")}
+    return {
+        "id": str(row.get("id") or ""),
+        "user_id": str(row.get("user_id") or ""),
+        "memory_type": str(row.get("memory_type") or "fact"),
+        "subject": str(row.get("subject") or ""),
+        "predicate": str(row.get("predicate") or ""),
+        "object": str(row.get("object") or ""),
+        "summary": str(row.get("summary") or ""),
+        "confidence": float(row.get("confidence") or 0.0),
+        "importance": float(row.get("importance") or 0.5),
+        "scope_type": str(row.get("scope_type") or "user"),
+        "scope_id": str(row.get("scope_id") or ""),
+        "entity_keys": list(row.get("entity_keys_json") or []),
+        "valid_from": row.get("valid_from"),
+        "valid_to": row.get("valid_to"),
+        "expires_at": row.get("expires_at"),
+        "status": str(row.get("status") or "active"),
+        "supersedes_id": str(row.get("supersedes_id") or ""),
+        "access_count": int(row.get("access_count") or 0),
+        "last_accessed_at": row.get("last_accessed_at"),
+        "source_session_id": str(row.get("source_session_id") or ""),
+        "version": int(row.get("version") or 1),
+        "is_active": bool(row.get("is_active")),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
 
 
 @router.get("/api/v1/platform/memory/search")
-async def search_memory_entries(request: Request, user: CurrentUser, query: str = Query(min_length=1, max_length=512), memory_type: str = Query(default="", max_length=32), limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
+async def search_memory_entries(request: Request, user: CurrentUser, query: str = Query(min_length=1, max_length=512), memory_type: str = Query(default="", max_length=32), scope_type: str = Query(default="", max_length=32), status: str = Query(default="active", max_length=32), include_expired: bool = False, limit: int = Query(default=50, ge=1, le=200)) -> dict[str, object]:
     _platform_read(request, user, action="platform.memory.search", resource_type="memory")
     pattern = f"%{query.strip()}%"
-    clauses = ["user_id = %s", "(subject ILIKE %s OR predicate ILIKE %s OR object ILIKE %s)"]
-    params: list[object] = [user.user_id, pattern, pattern, pattern]
+    clauses = ["user_id = %s", "(subject ILIKE %s OR predicate ILIKE %s OR object ILIKE %s OR summary ILIKE %s)"]
+    params: list[object] = [user.user_id, pattern, pattern, pattern, pattern]
     if memory_type.strip():
         clauses.append("memory_type = %s")
         params.append(memory_type.strip().lower())
+    if scope_type.strip():
+        clauses.append("scope_type = %s")
+        params.append(scope_type.strip().lower())
+    if status.strip():
+        clauses.append("status = %s")
+        params.append(status.strip().lower())
+    if not include_expired:
+        clauses.append("(expires_at IS NULL OR expires_at > NOW())")
     with gateway_db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SELECT * FROM agent_memory_entries WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT %s", (*params, limit))
@@ -322,9 +364,36 @@ async def search_memory_entries(request: Request, user: CurrentUser, query: str 
     return {"items": [_serialize_memory(row) for row in rows], "total": len(rows)}
 
 
+@router.patch("/api/v1/platform/memory/entries/{memory_id}")
+async def update_memory_entry(memory_id: str, payload: MemoryEntryUpdateRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_manage(request, user, action="platform.memory.update", resource_type="memory")
+    values = payload.model_dump(exclude_unset=True)
+    if "status" in values and values["status"] in {"archived", "forgotten", "superseded"}:
+        values["is_active"] = False
+    if "status" in values and values["status"] == "active":
+        values["is_active"] = True
+    if not values:
+        raise_api_error(400, "memory_update_empty", "memory update payload is empty")
+    assignments = [f"{key} = %s" for key in values]
+    params: list[object] = list(values.values())
+    params.extend([memory_id, user.user_id])
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE agent_memory_entries SET {', '.join(assignments)}, version = version + 1, updated_at = NOW() WHERE id = %s AND user_id = %s RETURNING *",
+                params,
+            )
+            row = cur.fetchone()
+        conn.commit()
+    if row is None:
+        raise_api_error(404, "memory_not_found", "memory entry not found")
+    write_gateway_audit_event(action="platform.memory.update", outcome="success", request=request, user=user, resource_type="memory", resource_id=memory_id, scope="owner", details={"fields": sorted(values)})
+    return _serialize_memory(row)
+
+
 @router.delete("/api/v1/platform/memory/entries/{memory_id}")
 async def deactivate_memory_entry(memory_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
-    _platform_read(request, user, action="platform.memory.deactivate", resource_type="memory")
+    _platform_manage(request, user, action="platform.memory.deactivate", resource_type="memory")
     with gateway_db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE agent_memory_entries SET is_active = FALSE, updated_at = NOW() WHERE id = %s AND user_id = %s RETURNING id", (memory_id, user.user_id))
@@ -333,6 +402,33 @@ async def deactivate_memory_entry(memory_id: str, request: Request, user: Curren
     if row is None:
         raise_api_error(404, "memory_not_found", "memory entry not found")
     return {"id": memory_id, "is_active": False}
+
+
+@router.get("/api/v1/platform/memory/sessions/{session_id}/context")
+async def get_session_memory_context(session_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
+    _platform_read(request, user, action="platform.memory.session_context", resource_type="chat_session")
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, conversation_summary, conversation_state_json, summary_version, summary_updated_at FROM chat_sessions WHERE id = %s AND user_id = %s",
+                (session_id, user.user_id),
+            )
+            session = cur.fetchone()
+            cur.execute(
+                "SELECT * FROM agent_memory_entries WHERE user_id = %s AND source_session_id = %s ORDER BY updated_at DESC LIMIT 100",
+                (user.user_id, session_id),
+            )
+            memories = cur.fetchall()
+    if session is None:
+        raise_api_error(404, "chat_session_not_found", "chat session not found")
+    return {
+        "session_id": session_id,
+        "summary": str(session.get("conversation_summary") or ""),
+        "state": dict(session.get("conversation_state_json") or {}),
+        "summary_version": int(session.get("summary_version") or 1),
+        "summary_updated_at": session.get("summary_updated_at"),
+        "memories": [_serialize_memory(row) for row in memories],
+    }
 
 
 @router.get("/api/v1/platform/memory/stats")

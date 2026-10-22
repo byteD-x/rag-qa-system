@@ -39,6 +39,14 @@ from .gateway_scope import normalize_execution_mode
 from .semantic_cache import CacheHit, semantic_cache
 from .gateway_transport import downstream_headers, request_service_json
 from .gateway_workflows import workflow_kind_for_turn
+from .conversation_memory import (
+    contextualize_question as contextualize_memory_question,
+    extract_and_store_memories,
+    load_conversation_context,
+    memory_prompt_block,
+    search_memories,
+    update_conversation_context,
+)
 
 
 RESUME_TARGET_GENERATION = "generate_answer"
@@ -58,6 +66,25 @@ def _platform_instruction_text(platform_context: dict[str, Any]) -> str:
     enabled_tools = list(agent_profile.get("enabled_tools") or [])
     if enabled_tools:
         parts.append("Enabled agent tools: " + ", ".join(enabled_tools))
+    return "\n\n".join(parts).strip()
+
+
+def _memory_instruction_text(*, memories: list[dict[str, Any]], conversation_summary: str, conversation_state: dict[str, Any]) -> str:
+    parts: list[str] = []
+    memory_text = memory_prompt_block(memories)
+    if memory_text:
+        parts.append(memory_text)
+    if conversation_summary.strip():
+        parts.append("本轮会话摘要（用于理解省略和指代，不替代知识库证据）：\n" + conversation_summary[-2400:])
+    state_lines = []
+    for key, label in (("last_question", "上一轮问题"), ("open_tasks", "未完成任务")):
+        value = conversation_state.get(key)
+        if isinstance(value, list):
+            value = "；".join(str(item) for item in value[:6])
+        if str(value or "").strip():
+            state_lines.append(f"{label}：{str(value).strip()[:800]}")
+    if state_lines:
+        parts.append("对话状态：\n" + "\n".join(state_lines))
     return "\n\n".join(parts).strip()
 
 
@@ -1219,6 +1246,9 @@ def _build_resume_checkpoint(
         "grounding_score": float(prepared.get("grounding_score") or 0.0),
         "refusal_reason": str(prepared.get("refusal_reason") or ""),
         "safety": dict(prepared.get("safety") or {}),
+        "conversation_context": dict(prepared.get("conversation_context") or {}),
+        "memory_context": list(prepared.get("memory_context") or []),
+        "memory_prompt": str(prepared.get("memory_prompt") or ""),
     }
     sanitized_generation_checkpoint = _sanitize_generation_checkpoint(generation_checkpoint)
     if sanitized_generation_checkpoint:
@@ -1282,6 +1312,9 @@ def _restore_prepared_from_resume_checkpoint(
         "grounding_score": float(checkpoint.get("grounding_score") or 0.0),
         "refusal_reason": str(checkpoint.get("refusal_reason") or ""),
         "safety": dict(checkpoint.get("safety") or {}),
+        "conversation_context": dict(checkpoint.get("conversation_context") or {}),
+        "memory_context": list(checkpoint.get("memory_context") or []),
+        "memory_prompt": str(checkpoint.get("memory_prompt") or ""),
         "timing": {
             "total_started": total_started,
             "scope_ms": 0.0,
@@ -1365,6 +1398,8 @@ def build_workflow_event(
         "execution_mode": prepared["execution_mode"],
         "answer_mode": prepared["answer_mode"],
         "evidence_count": len(prepared["evidence"]),
+        "memory_count": len(list(prepared.get("memory_context") or [])),
+        "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
         "retrieval_ms": float(prepared["timing"].get("retrieval_ms") or 0.0),
     }
     if prepared.get("resume"):
@@ -1406,6 +1441,8 @@ def build_chat_workflow_state(
         "contextualized_question": prepared["contextualized_question"],
         "scope_snapshot": dict(prepared["scope_snapshot"]),
         "evidence_count": len(prepared["evidence"]),
+        "memory_count": len(list(prepared.get("memory_context") or [])),
+        "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
         "selected_candidates": int(aggregate.get("selected_candidates") or len(prepared["evidence"])),
         "partial_failure": bool(aggregate.get("partial_failure")),
         "retrieval_aggregate": aggregate,
@@ -1513,13 +1550,25 @@ async def prepare_chat_message(
         scope_snapshot["mode"] = "multi"
         scope_snapshot["corpus_ids"] = list(agent_profile.get("default_corpus_ids") or [])
     scope_ms = round((time.perf_counter() - scope_started) * 1000.0, 3)
-    history = recent_history_messages_fn(session_id, user, limit=8)
+    conversation_context = load_conversation_context(session_id, user.user_id)
+    history = recent_history_messages_fn(session_id, user, limit=20)
+    memory_question = contextualize_memory_question(
+        str(payload.question or ""),
+        history,
+        str(conversation_context.get("summary") or ""),
+    )
+    memory_context = search_memories(
+        user_id=user.user_id,
+        session_id=session_id,
+        query=memory_question,
+        limit=6,
+    )
     retrieval_started = time.perf_counter()
     if execution_mode == "agent":
         evidence, contextualized_question, retrieval_meta = await _run_agent_retrieval(
             user=user,
             scope_snapshot=scope_snapshot,
-            question=payload.question,
+            question=memory_question,
             history=history,
             focus_hint=focus_hint,
             agent_profile=agent_profile,
@@ -1531,7 +1580,7 @@ async def prepare_chat_message(
         evidence, contextualized_question, retrieval_meta = await retrieve_scope_evidence_fn(
             user=user,
             scope_snapshot=scope_snapshot,
-            question=payload.question,
+            question=memory_question,
             history=history,
             focus_hint=focus_hint,
         )
@@ -1582,7 +1631,14 @@ async def prepare_chat_message(
             )
         except Exception:
             logger.warning("failed to load version diff summary compare_document_ids=%s", compare_document_ids, exc_info=True)
+    memory_prompt = _memory_instruction_text(
+        memories=memory_context,
+        conversation_summary=str(conversation_context.get("summary") or ""),
+        conversation_state=dict(conversation_context.get("state") or {}),
+    )
     settings_prompt_append = _platform_instruction_text(platform_context)
+    if memory_prompt:
+        settings_prompt_append = "\n\n".join(part for part in (settings_prompt_append, memory_prompt) if part)
     if comparison_summary:
         settings_prompt_append = "\n\n".join(
             part
@@ -1600,6 +1656,9 @@ async def prepare_chat_message(
         "scope_snapshot": scope_snapshot,
         "execution_mode": execution_mode,
         "history": history,
+        "conversation_context": conversation_context,
+        "memory_context": memory_context,
+        "memory_prompt": memory_prompt,
         "evidence": evidence,
         "contextualized_question": contextualized_question,
         "retrieval_meta": retrieval_meta,
@@ -1689,6 +1748,16 @@ def build_chat_response_payload(
             "resume_ms": float(prepared["timing"].get("resume_ms") or 0.0),
         },
         "cost": cost_meta,
+        "conversation": {
+            "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
+            "summary_updated_at": (prepared.get("conversation_context") or {}).get("summary_updated_at"),
+        },
+        "memory": {
+            "retrieved_count": len(list(prepared.get("memory_context") or [])),
+            "stored_count": 0,
+            "stored_ids": [],
+            "summary_version": int((prepared.get("conversation_context") or {}).get("summary_version") or 1),
+        },
     }
     return _apply_answer_verifier_gate(prepared=prepared, response_payload=response_payload)
 
@@ -1799,6 +1868,42 @@ def finalize_chat_message(
         compact_text_fn=compact_text,
         usage_with_meta_fn=usage_with_meta,
     )
+    # 记忆写入属于回答成功后的 best-effort 后处理，失败不影响已经生成的答案。
+    memory_meta = dict(response_payload.get("memory") or {})
+    try:
+        question = str(prepared["payload"].question or "").strip()
+        answer = str(response_payload.get("answer") or "").strip()
+        context = dict(prepared.get("conversation_context") or {})
+        updated_context = update_conversation_context(
+            session_id=prepared["session_id"],
+            user_id=user.user_id,
+            question=question,
+            answer=answer,
+            current_summary=str(context.get("summary") or ""),
+            current_state=dict(context.get("state") or {}),
+        )
+        stored = extract_and_store_memories(
+            user_id=user.user_id,
+            session_id=prepared["session_id"],
+            question=question,
+            answer=answer,
+            message_ids=[str(persisted_message.get("id") or "")],
+        )
+        memory_meta.update(
+            {
+                "stored_count": len(stored),
+                "stored_ids": [str(item.get("id") or "") for item in stored],
+                "summary_version": int(updated_context.get("summary_version") or memory_meta.get("summary_version") or 1),
+            }
+        )
+        response_payload["conversation"] = {
+            "summary_version": memory_meta["summary_version"],
+            "summary_updated_at": updated_context.get("summary_updated_at"),
+        }
+    except Exception:
+        logger.warning("conversation memory post-processing failed", exc_info=True)
+        memory_meta["error"] = "post_processing_failed"
+    response_payload["memory"] = memory_meta
     write_gateway_audit_event(
         action="chat.message.send",
         outcome="blocked" if bool((prepared.get("safety") or {}).get("blocked")) else "success",

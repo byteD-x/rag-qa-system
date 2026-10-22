@@ -275,7 +275,28 @@ Gateway 收到检索结果后，会去重 citations，调用 `classify_evidence`
 
 这使得单知识库问答和跨知识库统一聊天共用同一套证据契约：每条证据包含文档、section、页码/区域、版本、来源、信号分数和门控动作，前端和审计侧不需要猜测来源。
 
-### 5. LangGraph 编排、人工澄清与恢复
+### 5. 多轮对话与记忆系统
+
+多轮问答采用“当前轮 -> 最近历史 -> 滚动摘要 -> 相关历史记忆 -> 知识库证据”的分层上下文，避免把完整会话无限追加到 Prompt：
+
+1. 当前问题先经过指代消解，处理“那它呢”“继续说”等追问；滚动摘要只提取少量实体和主题词参与检索，完整摘要只进入生成 Prompt。
+2. 最近 20 条消息用于保留局部上下文，`chat_sessions.conversation_summary` 保存最多约 4000 字符的滚动摘要，`conversation_state_json` 保存上一轮问题、答案和未完成任务。
+3. 回答生成后，系统以 best-effort 方式抽取用户明确表达的偏好、身份、决定和任务，写入 `agent_memory_entries`；助手文本只有出现明确确认语句时才产生决定记忆。
+4. 记忆按 `user`、`session` 等作用域隔离，支持 `summary`、`evidence_quote`、`entity_keys`、重要性、访问次数、有效期和过期时间。相同主体/谓词的新事实会将旧事实标记为 `superseded`，保留版本关系。
+5. 记忆检索当前采用 PostgreSQL ILIKE + token overlap + 置信度/重要性/时效性的可解释混合排序，接口契约已为后续向量记忆索引预留，不把记忆当作知识库证据替代品。
+
+上下文优先级固定为：当前用户输入 > 当前知识库 evidence > 当前任务状态 > 长期用户记忆 > 普通历史摘要。长期记忆用于个性化、指代消解和任务连续性；正式业务结论仍必须引用知识库证据。
+
+记忆治理接口：
+
+- `GET /api/v1/platform/memory/entries`：按类型、作用域、状态和过期策略分页查看。
+- `GET /api/v1/platform/memory/search`：按关键词检索可用记忆，可显式包含过期项。
+- `PATCH /api/v1/platform/memory/entries/{memory_id}`：修正摘要、对象、置信度、重要性、状态和有效期。
+- `DELETE /api/v1/platform/memory/entries/{memory_id}`：停用记忆；将状态恢复为 `active` 可重新激活。
+- `GET /api/v1/platform/memory/sessions/{session_id}/context`：查看会话摘要、结构化状态和该会话产生的记忆。
+- `GET /api/v1/platform/memory/stats`：查看记忆总量、类型和主体分布。
+
+### 6. LangGraph 编排、人工澄清与恢复
 
 系统在两个层次使用 LangGraph：
 
@@ -286,7 +307,7 @@ Gateway 图的控制流是：先准备 scope、历史和 evidence；需要版本
 
 恢复语义由 LangGraph checkpoint 提供，`chat_workflow_runs` 负责列表展示和审计投影，`chat_graph_interrupts` 负责人工问题和提交内容。`trace_id`、`current_node` 和 `step_events` 让前端、排障和运营侧能够定位一次 run 当前停在哪个阶段。
 
-### 6. Agent 编排与受控工具
+### 7. Agent 编排与受控工具
 
 统一聊天的 `agent` 模式不是让模型绕过 RAG 自由调用外部系统，而是在当前用户 scope 内使用受控工具：
 
@@ -299,7 +320,7 @@ Agent runtime 会先做复杂度判断，再把复杂问题拆成 DAG，可并�
 
 Tool Workflow 与 MCP 只暴露注册表中明确声明的只读能力，并通过工具发现、流水线和 sandbox 控制输入、调用次数与执行边界，不开放任意 shell、任意 HTTP 或任意文件写入。
 
-### 7. 可观测性与评测闭环
+### 8. 可观测性与评测闭环
 
 检索和问答结果都保留可解释统计，便于定位“没召回”“排序错了”还是“生成没有正确使用证据”：
 
