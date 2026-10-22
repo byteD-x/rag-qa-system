@@ -8,6 +8,19 @@
 python scripts/evaluation/run-retrieval-ablation.py --fixture tests/fixtures/evals/retrieval-ablation-fixture.json --output artifacts/reports/job_retrieval_ablation.json --summary-output artifacts/reports/job_retrieval_ablation.md
 ```
 
+如果要做真实 Cross-Encoder A/B，对同一 fixture 增加外部 `qwen3-rerank` 配置：
+
+```powershell
+python scripts/evaluation/run-retrieval-ablation.py `
+  --fixture tests/fixtures/evals/retrieval-ablation-fixture.json `
+  --with-cross-encoder `
+  --cross-encoder-api-url <rerank-base-url> `
+  --cross-encoder-api-key <key> `
+  --cross-encoder-model qwen3-rerank
+```
+
+报告会把 Cross-Encoder 配置单独列出，并在 JSON 的 `delta_vs_fusion_only` 中记录 Recall@K、MRR、NDCG 的变化。未提供 endpoint 或远程调用失败时标记为 `skipped`，不会把本地启发式排序冒充成 Cross-Encoder 结果。
+
 ## 2. Fixture 范围
 
 本次验证使用仓库内置 `tests/fixtures/evals/retrieval-ablation-fixture.json`，覆盖以下三个企业知识库常见问题：

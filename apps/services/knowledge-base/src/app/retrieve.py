@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -14,10 +15,11 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import ConfigDict
 from shared.logging import setup_logging
+from shared.jevgate import gate_evidence_blocks
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalResult, RetrievalStats, weighted_rrf
-from shared.text_search import build_simple_tsquery
+from shared.text_search import build_simple_tsquery, normalize_text
 
 from .query import compact_quote
 from .retrieval_cache import build_retrieval_cache_key, retrieval_result_cache
@@ -30,7 +32,9 @@ FUSION_WEIGHTS = {
     "structure": 1.3,
     "fts": 1.0,
     "vector": 0.9,
+    "grep": 1.2,
 }
+_EXACT_QUERY_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9][A-Za-z0-9_.:/-]{2,}(?![A-Za-z0-9])")
 _retrieval_executor: concurrent.futures.ThreadPoolExecutor | None = None
 _retrieval_executor_lock = threading.Lock()
 
@@ -76,6 +80,7 @@ class RetrievalGraphState(TypedDict, total=False):
     rewrite: Any
     doc_ids: list[str]
     signal_documents: dict[str, list[Document]]
+    grep_documents: list[Document]
     degraded_signals: list[str]
     warnings: list[str]
     result: RetrievalResult
@@ -248,6 +253,78 @@ class FTSRetriever(BaseRetriever):
         return [_row_to_document(row, signal_name="fts", score_key="fts_score") for row in rows]
 
 
+class GrepRetriever(BaseRetriever):
+    """Exact substring fallback for stable identifiers in plain-text chunks."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    base_id: str
+    document_ids: list[str]
+    terms: list[str]
+    limit: int = 40
+
+    def _get_relevant_documents(self, query: str, *, run_manager: Any) -> list[Document]:
+        if not self.terms or not self.document_ids:
+            return []
+        with db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        c.id AS unit_id,
+                        d.base_id::text AS base_id,
+                        c.document_id,
+                        d.file_name AS document_title,
+                        d.content_kind,
+                        d.question_type,
+                        d.difficulty,
+                        d.tags_json,
+                        b.metadata_json,
+                        d.version_family_key,
+                        d.version_label,
+                        d.version_number,
+                        d.version_status,
+                        d.is_current_version,
+                        d.effective_from,
+                        d.effective_to,
+                        s.title AS section_title,
+                        '' AS region_label,
+                        c.source_kind,
+                        c.page_number,
+                        COALESCE(c.asset_id::text, '') AS asset_id,
+                        '[]'::jsonb AS bbox_json,
+                        NULL::double precision AS confidence,
+                        c.char_start,
+                        c.char_end,
+                        c.text_content,
+                        (
+                            SELECT count(*)
+                            FROM unnest(%s::text[]) AS term
+                            WHERE position(lower(term) in lower(c.text_content)) > 0
+                        ) AS grep_score
+                    FROM kb_chunks c
+                    JOIN kb_sections s ON s.id = c.section_id
+                    JOIN kb_documents d ON d.id = c.document_id
+                    JOIN kb_bases b ON b.id = d.base_id
+                    WHERE d.base_id = %s
+                      AND d.query_ready = TRUE
+                      AND c.disabled = FALSE
+                      AND c.document_id = ANY(%s::uuid[])
+                      AND (c.source_kind IS NULL OR c.source_kind NOT LIKE 'visual%')
+                      AND EXISTS (
+                          SELECT 1
+                          FROM unnest(%s::text[]) AS term
+                          WHERE position(lower(term) in lower(c.text_content)) > 0
+                      )
+                    ORDER BY grep_score DESC, c.section_index ASC, c.chunk_index ASC
+                    LIMIT %s
+                    """,
+                    (self.terms, self.base_id, self.document_ids, self.terms, self.limit),
+                )
+                rows = cur.fetchall()
+        return [_row_to_document(row, signal_name="grep", score_key="grep_score") for row in rows]
+
+
 def retrieve_kb_evidence(
     *,
     base_id: str,
@@ -374,13 +451,15 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
     doc_ids = list(state["doc_ids"])
     if not doc_ids:
         state["signal_documents"] = {"structure": [], "fts": [], "vector": []}
+        state["grep_documents"] = []
         state["degraded_signals"] = []
         state["warnings"] = []
         return state
 
     tsquery = build_simple_tsquery(rewrite.retrieval_query)
+    exact_terms = _exact_query_terms(rewrite.retrieval_query)
 
-    # 三路信号独立执行；跨请求复用有界线程池，避免高并发时每个请求再创建三个线程。
+    # 召回信号独立执行；跨请求复用有界线程池，避免高并发时每个请求重复创建线程。
     def _run_structure() -> list[Document]:
         return StructureRetriever(
             base_id=state["base_id"],
@@ -403,23 +482,57 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
             limit=40,
         )
 
+    def _run_grep() -> list[Document]:
+        return GrepRetriever(
+            base_id=state["base_id"],
+            document_ids=doc_ids,
+            terms=exact_terms,
+        ).invoke(rewrite.retrieval_query)
+
     executor = _get_retrieval_executor()
     structure_future = executor.submit(_run_structure)
     fts_future = executor.submit(_run_fts)
     vector_future = executor.submit(_run_vector)
-    concurrent.futures.wait((structure_future, fts_future, vector_future))
+    grep_future = executor.submit(_run_grep) if exact_terms else None
+    futures = [structure_future, fts_future, vector_future]
+    if grep_future is not None:
+        futures.append(grep_future)
+    concurrent.futures.wait(futures)
     structure_docs = structure_future.result()
     fts_docs = fts_future.result()
     vector_docs, degraded_signals, warnings = vector_future.result()
+    grep_docs: list[Document] = []
+    if grep_future is not None:
+        try:
+            grep_docs = grep_future.result()
+        except Exception:
+            degraded_signals = [*degraded_signals, "grep"]
+            warnings = [*warnings, "grep exact retrieval failed"]
 
     state["signal_documents"] = {
         "structure": structure_docs,
         "fts": fts_docs,
         "vector": vector_docs,
     }
+    state["grep_documents"] = grep_docs
     state["degraded_signals"] = degraded_signals
     state["warnings"] = warnings
     return state
+
+
+def _exact_query_terms(query: str) -> list[str]:
+    terms: list[str] = []
+    for token in _EXACT_QUERY_TOKEN_RE.findall(query or ""):
+        normalized = token.strip("._:/-").lower()
+        if normalized and (
+            any(char.isdigit() for char in normalized)
+            or "_" in normalized
+            or token.isupper()
+            or any(char in normalized for char in ".:/-")
+        ):
+            if normalized not in terms:
+                terms.append(normalized)
+    return terms[:8]
 
 
 def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
@@ -444,6 +557,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
 
     for signal_name in ("structure", "fts", "vector"):
         _merge_documents(results, signal_lists, signal_documents.get(signal_name, []), signal_name)
+    _merge_documents(results, signal_lists, list(state.get("grep_documents") or []), "grep")
 
     fused = weighted_rrf(signal_lists, weights=FUSION_WEIGHTS)
     ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
@@ -495,7 +609,9 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
             )
         )
 
-    rerank_pool = fused_blocks[: max(int(state["limit"]) * 3, 12)]
+    fused_blocks = _dedupe_fused_blocks(fused_blocks)
+
+    rerank_pool = fused_blocks[: min(max(int(state["limit"]) * 3, 15), 30)]
     reranked_blocks, rerank_debug = rerank_evidence_blocks(
         rewrite.focus_query or state["question"],
         rerank_pool,
@@ -504,11 +620,23 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
     debug_by_unit = {item.unit_id: item.score for item in rerank_debug}
     rerank_provider = rerank_debug[0].provider if rerank_debug else ("heuristic" if rerank_pool else "")
 
+    gated_blocks, gate_debug, gate_meta = gate_evidence_blocks(
+        rewrite.focus_query or state["question"],
+        reranked_blocks,
+    )
+    gate_by_unit = {item.unit_id: item for item in gate_debug}
+    warnings = list(state.get("warnings") or [])
+    if gate_meta.warning:
+        warnings.append(gate_meta.warning)
+
     evidence: list[EvidenceBlock] = []
-    for final_rank, block in enumerate(reranked_blocks, start=1):
+    for final_rank, block in enumerate(gated_blocks, start=1):
         signal_scores = dict(block.signal_scores)
         if block.unit_id in debug_by_unit:
             signal_scores["rerank"] = debug_by_unit[block.unit_id]
+        gate_item = gate_by_unit.get(block.unit_id)
+        if gate_item is not None and gate_item.probability is not None:
+            signal_scores["jev"] = gate_item.probability
         evidence.append(
             EvidenceBlock(
                 unit_id=block.unit_id,
@@ -542,6 +670,8 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
             thumbnail_url=block.thumbnail_url,
             bbox=list(block.bbox),
             confidence=block.confidence,
+                gate_probability=gate_item.probability if gate_item is not None else None,
+                gate_action=gate_item.action if gate_item is not None else "",
             signal_scores=signal_scores,
             evidence_path=EvidencePath(
                     structure_hit=block.evidence_path.structure_hit,
@@ -561,16 +691,23 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         rewrite_tags=list(rewrite.strategy_tags),
         expansion_terms=list(rewrite.expansion_terms),
         degraded_signals=list(state.get("degraded_signals") or []),
-        warnings=list(state.get("warnings") or []),
+        warnings=warnings,
         structure_candidates=len(dict.fromkeys(signal_lists.get("structure", []))),
         fts_candidates=len(dict.fromkeys(signal_lists.get("fts", []))),
         vector_candidates=len(dict.fromkeys(signal_lists.get("vector", []))),
+        grep_candidates=len(dict.fromkeys(signal_lists.get("grep", []))),
         fused_candidates=len(fused_blocks),
         reranked_candidates=len(rerank_pool),
         selected_candidates=len(evidence),
         retrieval_ms=round((time.perf_counter() - float(state["started"])) * 1000.0, 3),
         rerank_applied=bool(rerank_pool),
         rerank_provider=rerank_provider,
+        gate_applied=gate_meta.provider in {"jev", "deterministic"},
+        gate_provider=gate_meta.provider,
+        gate_evaluated_candidates=gate_meta.evaluated_candidates,
+        gate_kept_candidates=gate_meta.kept_candidates,
+        gate_dropped_candidates=gate_meta.dropped_candidates,
+        gate_remote_calls=gate_meta.remote_calls,
     )
     return RetrievalResult(items=evidence, stats=stats)
 
@@ -774,6 +911,21 @@ def _rank_of(items: list[str], unit_id: str) -> int | None:
         return items.index(unit_id) + 1
     except ValueError:
         return None
+
+
+def _dedupe_fused_blocks(items: list[EvidenceBlock]) -> list[EvidenceBlock]:
+    """Remove exact duplicate text within the same document section."""
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[EvidenceBlock] = []
+    for item in items:
+        text = normalize_text(item.raw_text or item.quote)
+        key = (item.document_id, item.section_title, text)
+        if text and key in seen:
+            continue
+        if text:
+            seen.add(key)
+        deduped.append(item)
+    return deduped
 
 
 def _thumbnail_url_from_asset_id(asset_id: str) -> str:

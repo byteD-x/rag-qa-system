@@ -83,7 +83,7 @@ def load_rerank_settings() -> RerankSettings:
         api_key=_read_env("RERANK_API_KEY", "LLM_API_KEY", default=""),
         model=_read_env("RERANK_MODEL", default=""),
         timeout_seconds=max(_read_float("RERANK_TIMEOUT_SECONDS", default=20.0), 1.0),
-        top_n=max(_read_int("RERANK_TOP_N", default=12), 1),
+        top_n=max(_read_int("RERANK_TOP_N", default=30), 1),
         extra_body=_parse_extra_body(_read_env("RERANK_EXTRA_BODY_JSON", default="{}")),
     )
 

@@ -64,6 +64,7 @@ make smoke-eval
 - [技术栈](#技术栈)
 - [最快验证路径](#最快验证路径)
 - [一句话看懂系统](#一句话看懂系统)
+- [核心链路与实现思路](#核心链路与实现思路)
 - [核心能力](#核心能力)
 - [适合谁](#适合谁)
 - [快速开始](#快速开始)
@@ -147,6 +148,167 @@ make smoke-eval
 如果你只关心“能不能直接用”，答案是：可以，本仓库默认支持本地开发直接启动。
 
 如果你关心“是不是工程化的”，答案也是：是，这里不是单脚本项目，而是完整服务拆分。
+
+## 核心链路与实现思路
+
+这一节把系统的主链路集中放在一起，方便从代码入口理解 RAG 是如何落地的。系统把“找证据”和“生成答案”拆开：知识库服务负责文件处理、索引和证据检索，Gateway 负责作用域、会话、编排和回答封装，生成模型只消费经过筛选的证据。
+
+### 1. 总体 RAG 链路
+
+```text
+文件/连接器接入
+  -> 对象存储与文档登记
+  -> 异步解析、OCR、结构切分
+  -> PostgreSQL FTS + Qdrant 向量索引
+  -> 查询改写、权限与元数据过滤
+  -> 多路召回
+  -> weighted RRF 融合与去重
+  -> rerank 精排
+  -> JEV Context 门控（可选）
+  -> evidence 分类、引用与安全策略
+  -> 配置的聊天模型生成
+  -> 引用、trace、质量校验、反馈与成本记录
+```
+
+一次请求在代码中的职责边界大致如下：
+
+| 阶段 | 输入与输出 | 主要实现 |
+| --- | --- | --- |
+| 接入与索引 | 文件或连接器记录 -> 文档、section、chunk、向量 | `knowledge-base` 的上传路由、`worker.py`、`parsing.py`、`vector_store.py` |
+| 查询准备 | 用户问题与聊天历史 -> 规范化问题、focus query、允许的 corpus/document scope | `gateway_chat_service.py`、`retrieve.py` |
+| 证据检索 | 查询与过滤条件 -> `EvidenceBlock` 列表和检索统计 | `knowledge-base/src/app/retrieve.py`、`packages/python/shared/retrieval.py` |
+| 回答决策 | evidence -> grounded、partial、refusal 等回答模式 | `gateway_answering.py`、`kb_query_helpers.py` |
+| 生成与响应 | 证据、提示词、模型路由 -> answer、citations、trace 和 verification | `gateway_chat_service.py`、`gateway_graph.py` |
+
+系统的核心约束是：检索层提供可定位的证据，生成层负责组织表达；当证据不足、作用域为空或安全策略触发时，回答链路会降级为澄清、部分回答或拒答，而不是把空上下文交给模型自由发挥。
+
+### 2. 文件处理与 Ingest
+
+#### 支持的文件和连接器
+
+文件上传和本地目录同步使用同一套文件类型白名单：`txt`、`md`、`markdown`、`json`、`csv`、`xlsx`、`xls`、`pdf`、`docx`、`png`、`jpg`、`jpeg`。Notion、飞书、钉钉、Web 和 SQL 连接器会先把外部内容转换为文档记录，再进入相同的 ingest 流程。
+
+#### 异步处理流程
+
+1. 上传接口或连接器先写入对象存储，并创建 `kb_documents`、`kb_ingest_jobs` 和文档事件记录。
+2. `apps/services/knowledge-base/src/app/worker.py` 从数据库队列领取任务。领取时使用 `FOR UPDATE SKIP LOCKED`、lease token 和过期时间，避免多个 worker 重复处理同一任务。
+3. 解析失败会按退避时间进入 `retry`；超过最大尝试次数后写入 `dead_letter`，文档状态变为 `failed`，错误码和事件保留在数据库中。
+4. 文本解析先建立快速可检索状态，再进行视觉增强和向量索引。因此文档可以先进入 `fast_index_ready`，最后再进入 `hybrid_ready` 和 `ready`。
+
+#### 解析、切分和视觉增强
+
+- 文本和 Markdown 通过兼容编码读取；JSON 格式化为带缩进的文本；CSV 转为行级文本；XLS/XLSX 按 sheet 输出带 sheet 标题的行文本。
+- PDF 使用 `pypdf` 提取页面文本；DOCX 根据 heading 样式拆分 section；每个 section 和 chunk 都保留标题、字符范围、页码、来源类型和视觉资产 ID 等定位信息。
+- 图片以及 PDF/DOCX 中提取的视觉资产进入 OCR/布局处理，原始视觉资产和缩略图写入对象存储，OCR 文本、区域标签、bbox 和置信度作为 `visual_region` 等 chunk 参与检索和引用。
+- 默认字符滑窗约为 1000 字符、重叠约 120 字符；设置 `KB_CHUNK_MAX_TOKENS` 和 `KB_CHUNK_TOKEN_OVERLAP` 后，worker、批量 ingest 和预览入口会按 token 预算收窄 chunk。
+
+#### 两类索引
+
+- PostgreSQL 保存文档、section、chunk、ACL、版本、来源和 FTS 字段，承担权限过滤、结构检索和关键词检索。
+- Qdrant 保存 section summary 和 chunk 的 dense/sparse 向量，向量生成使用当前配置的 FastEmbed、本地模型或外部 embedding provider。
+- section 向量先建立，文档进入 `hybrid_ready`；chunk 向量完成后进入 `ready`。这让管理端可以分别看到“文本可查”和“混合检索完整可用”两个阶段。
+
+### 3. 检索链路：召回、融合、精排、门控、生成
+
+知识库检索图定义在 `apps/services/knowledge-base/src/app/retrieve.py`，由 `prepare_request`、`run_signal_retrievers`、`fuse_and_rerank` 三个节点组成。每个节点都返回结构化中间产物，最终统一为 `RetrievalResult`。
+
+#### 召回层：尽量找全
+
+查询准备阶段先做 query rewrite，得到 `original_query`、`rewritten_query`、`focus_query`、`rewrite_tags` 和 `expansion_terms`；同时解析用户可访问的文档范围，并把版本、内容类型、题型、难度、标签和部门 ACL 等条件前置到 SQL 过滤中。
+
+召回阶段并行执行多种信号：
+
+- **结构检索**：匹配标题、章节标题和正文结构，适合制度、目录和流程类文档。
+- **PostgreSQL FTS**：基于 `tsquery` 做词项匹配，适合专业术语、固定表达和条款编号。
+- **Qdrant 向量检索**：覆盖用户说法与原文表达不一致的语义相似问题。
+- **grep 精确兜底**：仅对错误码、版本号、函数名和其他稳定 token 做纯文本 substring 命中，补足语义检索容易漂移的场景，不承担普通自然语言主召回。
+
+某一路不可用时，检索结果会保留 `degraded_signals` 和 `warnings`，上层仍能拿到其他路的证据和明确的降级原因。
+
+#### 融合层：对齐排名并去重
+
+不同召回信号的原始分数不在同一量纲，系统使用 `weighted_rrf` 按排名做加权倒数排名融合，不直接相加原始分数。融合后按 `unit_id` 去重，并对同文档、同章节、正文完全重复的片段做结构感知去重，形成精排候选池。
+
+候选池大小按最终 `limit` 的倍数计算，并限制在 15 至 30 条之间：太小会丢失第二路召回的潜在好结果，太大会增加精排和门控延迟。
+
+#### 精排层：解决“相似但答非所问”
+
+精排由 `packages/python/shared/rerank.py` 统一封装：
+
+- 默认使用本地启发式分数，综合 RRF 分、词项重叠、标题命中、结构信号和视觉布局提示，低成本且可解释。
+- 设置 `RERANK_PROVIDER=cross-encoder` 或 `external-cross-encoder` 并提供 API 配置后，把 Query 和候选 Document 一起提交给 Cross-Encoder provider，使用 Query-Document 交叉注意力重新打分。
+- 外部 provider 不可用时自动回退到启发式 rerank，并在检索统计中记录实际 `rerank_provider`。
+
+因此 rerank 的职责是**相对排序**：把更可能回答当前问题的候选排到前面，但它本身不决定候选是否应进入最终 Context。
+
+#### 门控层：JEV 负责准入决策
+
+可选的 `packages/python/shared/jevgate.py` 位于精排之后、生成之前。它接收问题和精排候选，批量询问“这段内容是否能够直接帮助回答用户问题”，返回每条候选的相关性概率。
+
+- 高于 `JEV_HIGH_THRESHOLD`：保留为高优先级 Context。
+- 介于高低阈值之间：保留但标记为 `deprioritize`，作为低优先级参考。
+- 低于 `JEV_LOW_THRESHOLD`：标记为 `drop`，不进入生成 Context。
+- 查询中出现唯一稳定 token 且候选确定命中时，直接由确定性逻辑保留，避免不必要的 JEV 调用。
+- JEV 未配置或暂时不可用时保留精排候选，并写入 warning，避免门控服务故障造成证据整体丢失。
+
+JEV 的定位是 Context 门控，不替代 rerank，也不生成答案。阈值应基于业务标注数据校准，并通过 `gate_probability`、`gate_action`、`gate_dropped_candidates` 和 `gate_remote_calls` 记录实际决策过程。
+
+#### 生成层：只消费高纯度证据
+
+Gateway 收到检索结果后，会去重 citations，调用 `classify_evidence` 判断 grounded/weak/refusal，执行 prompt safety 策略，再把允许进入 Context 的 evidence 交给配置的聊天模型。响应统一包含：
+
+- `answer`、`citations`、`evidence_status`、`grounding_score`
+- `refusal_reason`、`retrieval`、`trace_id`
+- 可选的 `workflow`、`agent`、`verification` 和成本/延迟元数据
+
+生成模型只负责把证据组织成用户可读的答案；证据不足时由回答策略触发澄清、部分回答或拒答。
+
+### 4. 问答服务与多知识库聚合
+
+`apps/services/api-gateway/src/app/gateway_chat_service.py` 是统一聊天入口，主要步骤是：
+
+1. 认证用户并解析当前 session、执行模式和知识库/document scope。
+2. 结合最近历史做问题上下文整理，调用一个或多个 KB 服务检索。
+3. 对多知识库结果做并发 fan-out、权限过滤、evidence 合并和 citations 去重。
+4. 依据 evidence 状态决定生成、澄清、拒答或 common knowledge 策略。
+5. 写入消息、反馈、成本和链路事件，并把检索统计、模型路由和 trace 信息返回前端。
+
+这使得单知识库问答和跨知识库统一聊天共用同一套证据契约：每条证据包含文档、section、页码/区域、版本、来源、信号分数和门控动作，前端和审计侧不需要猜测来源。
+
+### 5. LangGraph 编排、人工澄清与恢复
+
+系统在两个层次使用 LangGraph：
+
+- **Gateway 聊天图**：`apps/services/api-gateway/src/app/gateway_graph.py` 将一次问答拆为 `prepare_turn`、`human_review_turn`、`generate_answer`、`persist_turn`。状态集中在 graph state 中，包含 payload、prepared、evidence、response、verification、`step_events`、`status` 和 `current_node`。
+- **KB 检索图**：`retrieve.py` 将查询准备、并行召回、融合精排门控拆为三个节点，使检索内部的中间结果和降级信号可观察。
+
+Gateway 图的控制流是：先准备 scope、历史和 evidence；需要版本澄清、scope 选择或证据不足时通过 `interrupt(...)` 生成结构化人工问题；恢复后把用户选择写回 payload 并重新准备；生成成功后才持久化最终消息。
+
+恢复语义由 LangGraph checkpoint 提供，`chat_workflow_runs` 负责列表展示和审计投影，`chat_graph_interrupts` 负责人工问题和提交内容。`trace_id`、`current_node` 和 `step_events` 让前端、排障和运营侧能够定位一次 run 当前停在哪个阶段。
+
+### 6. Agent 编排与受控工具
+
+统一聊天的 `agent` 模式不是让模型绕过 RAG 自由调用外部系统，而是在当前用户 scope 内使用受控工具：
+
+- `search_scope`：在当前可见知识范围内检索证据。
+- `list_scope_documents`：列出当前范围内可用文档及其 `query_ready` 状态。
+- `search_corpus`：在指定且已授权的知识库中检索。
+- `calculator`：执行受限的算术表达式，避免让模型手算关键数值。
+
+Agent runtime 会先做复杂度判断，再把复杂问题拆成 DAG，可并行执行多个检索子任务，最后聚合 evidence 并进入回答分类。工具调用受 `max_tool_calls`、`max_evidence` 和 `max_documents` 预算约束；增强 runtime 失败时自动回退到 simple runtime。所有模式最终都要经过 grounded answer 边界，不能因为进入 Agent 模式就绕过 scope、ACL、引用和拒答策略。
+
+Tool Workflow 与 MCP 只暴露注册表中明确声明的只读能力，并通过工具发现、流水线和 sandbox 控制输入、调用次数与执行边界，不开放任意 shell、任意 HTTP 或任意文件写入。
+
+### 7. 可观测性与评测闭环
+
+检索和问答结果都保留可解释统计，便于定位“没召回”“排序错了”还是“生成没有正确使用证据”：
+
+- 召回候选数：`structure_candidates`、`fts_candidates`、`vector_candidates`、`grep_candidates`
+- 后处理规模：`fused_candidates`、`reranked_candidates`、`selected_candidates`
+- 质量与决策：`rerank_provider`、`gate_provider`、门控保留/丢弃数、`degraded_signals`、`warnings`
+- 性能与链路：`retrieval_ms`、scope/generation timing、`trace_id`、worker phase metrics
+
+离线评测脚本可比较 `fusion_only`、`rewrite + fusion`、`rewrite + fusion + rerank`，并可选接入外部 Cross-Encoder A/B。报告关注 Recall@1/3/5、MRR、NDCG、检索延迟、候选数量和门控丢弃情况；线上用户反馈会绑定当前 prompt、模型路由、执行模式和成本信息，为后续查询改写、重排、分块和门控阈值调整提供依据。
 
 ## 核心能力
 
@@ -1014,6 +1176,10 @@ REPORTING_DB_DSN=postgresql://user:password@host:5432/reporting
 ### 支持的文档格式
 
 - `txt`
+- `md` / `markdown`
+- `json`
+- `csv`
+- `xlsx` / `xls`
 - `pdf`
 - `docx`
 - `png`
@@ -1541,8 +1707,8 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 | 节点 | 做什么 | 关键价值 |
 | --- | --- | --- |
 | `prepare_request` | 记录开始时间、标准化 `base_id / question / limit`、执行 query rewrite、解析实际可检索的 document ids | 把原始问题和检索问题区分开，保证后续召回链路都基于同一份 rewrite 结果 |
-| `run_signal_retrievers` | 统一执行三类召回：结构检索、全文检索、向量检索，并记录 degraded signals 与 warnings | 让“召回阶段”有独立边界，方便后续继续扩 parallel retriever 或失败降级 |
-| `fuse_and_rerank` | 汇总三路结果，做加权 RRF 融合，再执行 rerank，最后包装成统一 `RetrievalResult` | 让融合与重排成为独立的后处理阶段，而不是混在召回逻辑内部 |
+| `run_signal_retrievers` | 并行执行结构检索、全文检索、向量检索；稳定标识符查询按需增加 grep 精确通道，并记录 degraded signals 与 warnings | 让召回阶段同时覆盖语义、词项和字面精确匹配 |
+| `fuse_and_rerank` | 汇总召回结果，做加权 RRF 融合，执行 rerank，再由可选 JEV 做 Context 准入门控，最后包装成统一 `RetrievalResult` | 把融合、精排和“是否进入生成上下文”的决策拆开表达 |
 
 这三个节点背后的设计意图是：
 
@@ -1563,15 +1729,17 @@ Gateway 当前的聊天图定义在 `apps/services/api-gateway/src/app/gateway_g
 1. 结构检索偏向标题、章节名和结构化命中，适合制度类文档、目录型文档。
 2. 全文检索偏向关键词精确命中，适合专业术语、固定表达、编号条款。
 3. 向量检索偏向语义相似，适合用户提问和原文表达不完全一致的情况。
+4. grep 精确通道只处理错误码、版本号、函数名等稳定 token，作为纯文本兜底，不参与普通自然语言请求。
 
 这一步之所以保留三种信号而不是只留向量检索，是因为企业知识问答里，很多问题不是“语义像就够了”，而是需要同时兼顾标题结构、关键术语和语义相近表达。
 
 `fuse_and_rerank` 处理的是“把候选结果变成最终证据集”。
 
-1. 先把三路召回结果映射成统一的 `EvidenceBlock`。
+1. 先把召回结果映射成统一的 `EvidenceBlock`。
 2. 再用加权 RRF 做融合，避免单一信号把结果列表完全主导。
 3. 然后把融合后的前部候选送入 rerank。
-4. 最终输出 selected candidates、reranked candidates、degraded signals、warnings、retrieval ms 等调试字段。
+4. 精排后可由 JEV 批量判断候选相关性概率，低于校准低阈值的候选不会进入生成上下文。
+5. 最终输出 selected candidates、reranked candidates、grep 与门控统计、degraded signals、warnings、retrieval ms 等调试字段。
 
 所以，KB 图真正解决的问题不是“怎么把三次检索写成三行代码”，而是“怎么让一次 retrieval 过程有清楚的阶段边界和可解释的中间产物”。
 
@@ -1830,6 +1998,8 @@ python scripts/quality/check-job-readiness.py
 python scripts/observability/rag-daily-report.py --output artifacts/reports/rag_daily_report.md --json-output artifacts/reports/rag_daily_report.json
 python scripts/dev/smoke_eval.py --password <pwd> --wait-for-ready
 ```
+
+需要比较外部 Cross-Encoder 时，可在同一 fixture 上追加 `--with-cross-encoder --cross-encoder-api-url <base-url> --cross-encoder-api-key <key> --cross-encoder-model qwen3-rerank`；报告会输出相对 `fusion_only` 的指标差值，远程配置不可用时标记为 `skipped`。
 
 ### 面试演示的低成本默认路线
 

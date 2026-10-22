@@ -50,6 +50,8 @@ class EvidenceBlock:
     thumbnail_url: str = ""
     bbox: list[float] = field(default_factory=list)
     confidence: float | None = None
+    gate_probability: float | None = None
+    gate_action: str = ""
     signal_scores: dict[str, float] = field(default_factory=dict)
     evidence_path: EvidencePath = field(default_factory=EvidencePath)
 
@@ -72,12 +74,19 @@ class RetrievalStats:
     structure_candidates: int = 0
     fts_candidates: int = 0
     vector_candidates: int = 0
+    grep_candidates: int = 0
     fused_candidates: int = 0
     reranked_candidates: int = 0
     selected_candidates: int = 0
     retrieval_ms: float = 0.0
     rerank_applied: bool = False
     rerank_provider: str = ""
+    gate_applied: bool = False
+    gate_provider: str = ""
+    gate_evaluated_candidates: int = 0
+    gate_kept_candidates: int = 0
+    gate_dropped_candidates: int = 0
+    gate_remote_calls: int = 0
     cache_hit: bool = False
 
     def as_dict(self) -> dict[str, object]:

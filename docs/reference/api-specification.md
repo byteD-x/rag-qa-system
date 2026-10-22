@@ -744,7 +744,7 @@ SSE 流式回答，事件顺序：
 - `retrieval`
 - `trace_id`
 
-其中 `retrieval.cache_hit` 表示是否命中 KB 进程内 ACL 感知短 TTL 检索缓存；命中时会跳过本次三路召回与重排，但不改变 `items` 契约。
+其中 `retrieval.cache_hit` 表示是否命中 KB 进程内 ACL 感知短 TTL 检索缓存；命中时会跳过本次混合召回、重排与门控，但不改变 `items` 契约。`retrieval.grep_candidates` 表示精确 token 通道命中的候选数；`gate_*` 字段描述 JEV Context 门控是否启用、调用次数和准入结果。
 
 ### `POST /api/v2/kb/retrieve`
 
@@ -787,6 +787,8 @@ LangGraph 编排版检索接口。
 - `items[*].quote`
 - `items[*].raw_text`
 - `items[*].signal_scores`
+- `items[*].gate_probability`
+- `items[*].gate_action`
 - `items[*].evidence_path`
 - `items[*].debug.rank`
 - `items[*].debug.score`

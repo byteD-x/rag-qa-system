@@ -227,6 +227,38 @@ def test_enterprise_policy_poc_retrieval_fixture_runs_ablation() -> None:
         assert metrics["mrr"] > 0
 
 
+def test_retrieval_ablation_marks_cross_encoder_as_skipped_without_credentials(tmp_path: Path, monkeypatch) -> None:
+    retrieval_ablation = _load_script_module(
+        "retrieval_ablation_cross_encoder_skip_test",
+        "scripts/evaluation/run-retrieval-ablation.py",
+    )
+    output_path = tmp_path / "report.json"
+    summary_path = tmp_path / "report.md"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run-retrieval-ablation.py",
+            "--fixture",
+            str(REPO_ROOT / "tests/fixtures/evals/retrieval-ablation-fixture.json"),
+            "--output",
+            str(output_path),
+            "--summary-output",
+            str(summary_path),
+            "--with-cross-encoder",
+        ],
+    )
+
+    assert retrieval_ablation.main() == 0
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    cross_encoder = next(
+        metrics for name, metrics in report["summary"].items() if name.startswith("rewrite_plus_fusion_plus_cross_encoder:")
+    )
+    assert cross_encoder["skipped"] is True
+    assert "missing cross-encoder" in cross_encoder["reason"]
+    assert "skipped:" in summary_path.read_text(encoding="utf-8")
+
+
 def test_enterprise_policy_poc_runner_writes_offline_reports(tmp_path: Path) -> None:
     runner = _load_script_module(
         "enterprise_policy_poc_runner_test",

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -127,15 +128,70 @@ def write_markdown_report(report: dict[str, Any], output_path: Path) -> None:
     lines = [
         "# Retrieval Ablation Report",
         "",
-        "| config | recall@1 | recall@3 | mrr | ndcg@3 |",
-        "| --- | ---: | ---: | ---: | ---: |",
+        "| config | recall@1 | recall@3 | mrr | ndcg@3 | notes |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
     ]
     for name, metrics in report["summary"].items():
+        if metrics.get("skipped"):
+            lines.append(f"| {name} | - | - | - | - | skipped: {metrics['reason']} |")
+            continue
         lines.append(
             f"| {name} | {metrics['recall_at_1']:.4f} | {metrics['recall_at_3']:.4f} | "
-            f"{metrics['mrr']:.4f} | {metrics['ndcg_at_3']:.4f} |"
+            f"{metrics['mrr']:.4f} | {metrics['ndcg_at_3']:.4f} | - |"
         )
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _evaluate_config(
+    cases: list[dict[str, Any]],
+    *,
+    enable_rewrite: bool,
+    enable_rerank: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        ranked = rank_case(case, enable_rewrite=enable_rewrite, enable_rerank=enable_rerank)
+        metrics = score_ranking(case, ranked)
+        rows.append(
+            {
+                "id": str(case["id"]),
+                "question": str(case["question"]),
+                "top_units": [block.unit_id for block in ranked[:3]],
+                **metrics,
+            }
+        )
+    return (
+        {
+            "recall_at_1": average_metric(rows, "recall_at_1"),
+            "recall_at_3": average_metric(rows, "recall_at_3"),
+            "mrr": average_metric(rows, "mrr"),
+            "ndcg_at_3": average_metric(rows, "ndcg_at_3"),
+        },
+        rows,
+    )
+
+
+def _with_rerank_environment(
+    *,
+    api_url: str,
+    api_key: str,
+    model: str,
+) -> dict[str, str | None]:
+    names = ("RERANK_PROVIDER", "RERANK_API_BASE_URL", "RERANK_API_KEY", "RERANK_MODEL")
+    previous = {name: os.environ.get(name) for name in names}
+    os.environ["RERANK_PROVIDER"] = "external-cross-encoder"
+    os.environ["RERANK_API_BASE_URL"] = api_url.rstrip("/")
+    os.environ["RERANK_API_KEY"] = api_key
+    os.environ["RERANK_MODEL"] = model
+    return previous
+
+
+def _restore_environment(previous: dict[str, str | None]) -> None:
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 def main() -> int:
@@ -143,6 +199,10 @@ def main() -> int:
     parser.add_argument("--fixture", required=True)
     parser.add_argument("--output", default="artifacts/reports/retrieval_ablation_report.json")
     parser.add_argument("--summary-output", default="artifacts/reports/retrieval_ablation_report.md")
+    parser.add_argument("--with-cross-encoder", action="store_true")
+    parser.add_argument("--cross-encoder-api-url", default="")
+    parser.add_argument("--cross-encoder-api-key", default="")
+    parser.add_argument("--cross-encoder-model", default="qwen3-rerank")
     args = parser.parse_args()
 
     cases = json.loads(Path(args.fixture).read_text(encoding="utf-8"))
@@ -152,28 +212,53 @@ def main() -> int:
         "rewrite_plus_fusion_plus_rerank": {"enable_rewrite": True, "enable_rerank": True},
     }
     details: dict[str, list[dict[str, Any]]] = {}
-    summary: dict[str, dict[str, float]] = {}
+    summary: dict[str, dict[str, Any]] = {}
 
-    for name, config in configs.items():
-        rows: list[dict[str, Any]] = []
-        for case in cases:
-            ranked = rank_case(case, **config)
-            metrics = score_ranking(case, ranked)
-            rows.append(
-                {
-                    "id": str(case["id"]),
-                    "question": str(case["question"]),
-                    "top_units": [block.unit_id for block in ranked[:3]],
-                    **metrics,
-                }
+    baseline_env = {name: os.environ.get(name) for name in ("RERANK_PROVIDER", "RERANK_API_BASE_URL", "RERANK_API_KEY", "RERANK_MODEL")}
+    os.environ["RERANK_PROVIDER"] = "heuristic"
+    try:
+        for name, config in configs.items():
+            metrics, rows = _evaluate_config(cases, **config)
+            details[name] = rows
+            summary[name] = metrics
+    finally:
+        _restore_environment(baseline_env)
+
+    if args.with_cross_encoder:
+        cross_name = f"rewrite_plus_fusion_plus_cross_encoder:{args.cross_encoder_model}"
+        if not args.cross_encoder_api_url or not args.cross_encoder_api_key:
+            summary[cross_name] = {"skipped": True, "reason": "missing cross-encoder API URL or API key"}
+            details[cross_name] = []
+        else:
+            previous_env = _with_rerank_environment(
+                api_url=args.cross_encoder_api_url,
+                api_key=args.cross_encoder_api_key,
+                model=args.cross_encoder_model,
             )
-        details[name] = rows
-        summary[name] = {
-            "recall_at_1": average_metric(rows, "recall_at_1"),
-            "recall_at_3": average_metric(rows, "recall_at_3"),
-            "mrr": average_metric(rows, "mrr"),
-            "ndcg_at_3": average_metric(rows, "ndcg_at_3"),
-        }
+            try:
+                metrics, rows = _evaluate_config(
+                    cases,
+                    enable_rewrite=True,
+                    enable_rerank=True,
+                )
+            except Exception as exc:  # pragma: no cover - external service failure path
+                summary[cross_name] = {"skipped": True, "reason": str(exc)}
+                details[cross_name] = []
+            else:
+                summary[cross_name] = metrics
+                details[cross_name] = rows
+            finally:
+                _restore_environment(previous_env)
+
+    baseline = summary.get("fusion_only")
+    if isinstance(baseline, dict) and not baseline.get("skipped"):
+        for metrics in summary.values():
+            if metrics.get("skipped"):
+                continue
+            metrics["delta_vs_fusion_only"] = {
+                key: round(float(metrics[key]) - float(baseline[key]), 4)
+                for key in ("recall_at_1", "recall_at_3", "mrr", "ndcg_at_3")
+            }
 
     report = {
         "fixture": str(Path(args.fixture).resolve()),
