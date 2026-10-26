@@ -866,7 +866,7 @@ LLM_MODEL_ROUTING_JSON='{
 
 `api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。`fallback_route_key` 会被 Gateway 的回答生成链路用于本地调用抛出 5xx、上游不可用、非法响应或空回答等失败后的备线路由尝试；是否对供应商 4xx 继续尝试取决于调用层映射后的本地异常状态。平台配置摘要只返回 `api_key_configured`，不会返回密钥原文。
 
-平台页 `工作台 -> 模型接入` 提供模型接入向导：选择提供商和请求格式，输入 Base URL 与 API Key 后，前端调用 `POST /api/v1/platform/llm/models/discover` 拉取模型列表；模型列表支持搜索、下拉选择和手动输入，并可直接打开保存配置弹窗。默认使用 OpenAI Chat Completions，另支持 OpenAI Responses；Ollama 提供商会读取 `/api/tags`。服务端会规范化 Base URL、解析常见的 `data`/`models` 响应形状，并将请求格式保存在模型配置的 `extra.request_format` 中。该能力不会把 API Key 写入成功响应或审计详情；生产环境仍建议通过环境变量、密钥管理系统或显式的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` 白名单约束中转站。
+平台页 `工作台 -> 模型接入` 提供模型接入向导：选择提供商和请求格式，输入 Base URL 与 API Key 后，前端调用 `POST /api/v1/platform/llm/models/discover` 拉取模型列表；模型列表支持搜索，确认后使用“保存服务商”一次保存连接信息和完整模型目录。之后 RAG 阶段卡片按服务商分组搜索模型，每个阶段独立绑定目录中的模型，不再重复填写 Base URL 或 API Key。默认使用 OpenAI Chat Completions，另支持 OpenAI Responses；Ollama 提供商会读取 `/api/tags`。服务端会规范化 Base URL、解析常见的 `data`/`models` 响应形状，并将请求格式与脱敏模型目录保存在模型配置的 `extra` 中。该能力不会把 API Key 写入成功响应或审计详情；生产环境仍建议通过环境变量、密钥管理系统或显式的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` 白名单约束中转站。
 
 模型接入页的“RAG 阶段模型”区域按查询意图、查询改写、向量化、混合召回、Cross-Encoder 精排、JEV 意图识别、JEV Context 门控、答案生成和面试评分排序展示卡片。卡片只允许选择已保存且启用的服务方配置，不能再次填写 Base URL 或 API Key；`GET/PUT /api/v1/platform/model-stages` 负责读取和更新阶段绑定。JEV 配置同时用于用户问题路由判断和 rerank 后的 Context 相关性门控，调用失败时保留现有规则分类与证据降级路径。
 
@@ -881,8 +881,8 @@ LLM_MODEL_ROUTING_JSON='{
 - `POST /api/v1/interviews/sessions`：从题池固化题目快照后开始面试，题目响应不包含参考答案
 - `POST /api/v1/interviews/sessions/{session_id}/questions/{session_question_id}/answer`：提交回答并按配置调用评分模型
 - `GET /api/v1/interviews/sessions/{session_id}/report`：返回维度得分、薄弱点和每题来源追溯
-- `GET/POST/PATCH/DELETE /api/v1/platform/model-configs`：管理加密存储的多模型配置；响应只返回脱敏摘要，环境变量配置仍可作为回退
-- `GET/PUT /api/v1/platform/model-stages`：读取 RAG 阶段定义、启用的可选配置和当前绑定；更新时只接受已存在的启用配置 ID
+- `GET/POST/PATCH/DELETE /api/v1/platform/model-configs`：管理加密存储的服务商连接和可用模型目录；响应只返回脱敏摘要，环境变量配置仍可作为回退
+- `GET/PUT /api/v1/platform/model-stages`：读取 RAG 阶段定义、启用的服务商目录和当前绑定；更新时接受 `{config_id, model_name}`，并校验模型属于该服务商的已发现目录
 
 面试会话会保存 `question_id` 及其来源快照（知识库、文档、chunk），题目来源校验位于知识库服务，网关只消费题池结果。
 
