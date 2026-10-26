@@ -69,6 +69,8 @@ class RetrievalStats:
     focus_query: str = ""
     rewrite_tags: list[str] = field(default_factory=list)
     expansion_terms: list[str] = field(default_factory=list)
+    query_variants: list[dict[str, object]] = field(default_factory=list)
+    query_route: str = "semantic"
     degraded_signals: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     structure_candidates: int = 0
@@ -87,6 +89,15 @@ class RetrievalStats:
     gate_kept_candidates: int = 0
     gate_dropped_candidates: int = 0
     gate_remote_calls: int = 0
+    mmr_applied: bool = False
+    parent_context_expanded: bool = False
+    table_evidence_count: int = 0
+    graph_route: str = ""
+    evidence_safety_events: int = 0
+    freshness_refresh_count: int = 0
+    model_route: str = ""
+    estimated_cost: float = 0.0
+    trace_spans: list[dict[str, object]] = field(default_factory=list)
     cache_hit: bool = False
 
     def as_dict(self) -> dict[str, object]:

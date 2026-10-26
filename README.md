@@ -66,6 +66,7 @@ make smoke-eval
 - [一句话看懂系统](#一句话看懂系统)
 - [核心链路与实现思路](#核心链路与实现思路)
 - [核心能力](#核心能力)
+- [高级 RAG 增强实现](#高级-rag-增强实现)
 - [适合谁](#适合谁)
 - [快速开始](#快速开始)
 - [第一次使用怎么走](#第一次使用怎么走)
@@ -251,7 +252,7 @@ make smoke-eval
 - 查询中出现唯一稳定 token 且候选确定命中时，直接由确定性逻辑保留，避免不必要的 JEV 调用。
 - JEV 未配置或暂时不可用时保留精排候选，并写入 warning，避免门控服务故障造成证据整体丢失。
 
-JEV 的定位是 Context 门控，不替代 rerank，也不生成答案。阈值应基于业务标注数据校准，并通过 `gate_probability`、`gate_action`、`gate_dropped_candidates` 和 `gate_remote_calls` 记录实际决策过程。
+JEV 的定位是用户问题意图识别和 rerank 后 Context 门控，不替代 Cross-Encoder rerank，也不生成答案。平台页可以分别绑定 `jev_intent` 与 `jev_rerank` 阶段；阈值应基于业务标注数据校准，并通过 `gate_probability`、`gate_action`、`gate_dropped_candidates` 和 `gate_remote_calls` 记录实际决策过程。
 
 #### 生成层：只消费高纯度证据
 
@@ -273,6 +274,8 @@ Gateway 收到检索结果后，会去重 citations，调用 `classify_evidence`
 4. 依据 evidence 状态决定生成、澄清、拒答或 common knowledge 策略。
 5. 写入消息、反馈、成本和链路事件，并把检索统计、模型路由和 trace 信息返回前端。
 
+多知识库 fan-out 会聚合各 KB 的 `query_route`、`query_variants`、MMR、表格/图路由、新鲜度、安全事件和估算成本，统一放入 `retrieval_meta.aggregate`，因此跨库聊天仍能沿用单库的调试契约。
+
 这使得单知识库问答和跨知识库统一聊天共用同一套证据契约：每条证据包含文档、section、页码/区域、版本、来源、信号分数和门控动作，前端和审计侧不需要猜测来源。
 
 ### 5. 多轮对话与记忆系统
@@ -283,7 +286,7 @@ Gateway 收到检索结果后，会去重 citations，调用 `classify_evidence`
 2. 最近 20 条消息用于保留局部上下文，`chat_sessions.conversation_summary` 保存最多约 4000 字符的滚动摘要，`conversation_state_json` 保存上一轮问题、答案和未完成任务。
 3. 回答生成后，系统以 best-effort 方式抽取用户明确表达的偏好、身份、决定和任务，写入 `agent_memory_entries`；助手文本只有出现明确确认语句时才产生决定记忆。
 4. 记忆按 `user`、`session` 等作用域隔离，支持 `summary`、`evidence_quote`、`entity_keys`、重要性、访问次数、有效期和过期时间。相同主体/谓词的新事实会将旧事实标记为 `superseded`，保留版本关系。
-5. 记忆检索当前采用 PostgreSQL ILIKE + token overlap + 置信度/重要性/时效性的可解释混合排序，接口契约已为后续向量记忆索引预留，不把记忆当作知识库证据替代品。
+5. 记忆检索采用 PostgreSQL 词项候选 + 本地/外部 embedding 语义相似度 + 置信度/重要性/时效性的混合排序；`015_memory_semantic_index.sql` 为记忆保存 `embedding_json` 和模型标识，embedding 不可用时自动退回词项检索，不把记忆当作知识库证据替代品。
 
 上下文优先级固定为：当前用户输入 > 当前知识库 evidence > 当前任务状态 > 长期用户记忆 > 普通历史摘要。长期记忆用于个性化、指代消解和任务连续性；正式业务结论仍必须引用知识库证据。
 
@@ -327,9 +330,48 @@ Tool Workflow 与 MCP 只暴露注册表中明确声明的只读能力，并通�
 - 召回候选数：`structure_candidates`、`fts_candidates`、`vector_candidates`、`grep_candidates`
 - 后处理规模：`fused_candidates`、`reranked_candidates`、`selected_candidates`
 - 质量与决策：`rerank_provider`、`gate_provider`、门控保留/丢弃数、`degraded_signals`、`warnings`
+- 高级链路：`query_variants`、`query_route`、`mmr_applied`、`table_evidence_count`、`graph_route`、`freshness_refresh_count`、`evidence_safety_events`
 - 性能与链路：`retrieval_ms`、scope/generation timing、`trace_id`、worker phase metrics
 
 离线评测脚本可比较 `fusion_only`、`rewrite + fusion`、`rewrite + fusion + rerank`，并可选接入外部 Cross-Encoder A/B。报告关注 Recall@1/3/5、MRR、NDCG、检索延迟、候选数量和门控丢弃情况；线上用户反馈会绑定当前 prompt、模型路由、执行模式和成本信息，为后续查询改写、重排、分块和门控阈值调整提供依据。
+
+## 高级 RAG 增强实现
+
+这一层把成熟 RAG 项目的常用增强落到现有主链，不要求所有外部服务同时在线；每个能力都有本地 fallback，并把决策写入 `RetrievalStats` 或文档 `stats_json`，便于面试演示和后续离线评估。
+
+| 方向 | 代码实现 | 默认行为 |
+| --- | --- | --- |
+| A1 评测闭环 | `shared.advanced_rag.build_evaluation_record`、`scripts/evaluation/build-trace-dataset.py` 将脱敏 trace 转成带 dataset version、召回、引用、安全、延迟和成本字段的评测集；现有 Ragas 风格脚本继续负责指标与回归门禁 | 不主动上传数据，输入输出均为本地 JSON/JSONL |
+| A2 Semantic Chunking + Parent-Child | `parsing.build_section_chunks` 在窗口上优先寻找句号、分号和段落边界；`shared.advanced_rag.parent_child_retrieve` 支持将 child 命中扩展回 parent 上下文 | 保留原有 `KB_CHUNK_MAX_TOKENS` 和 overlap 约束 |
+| A3 Multi-Query / HyDE / 路由 | `query_rewrite.py` 生成原始、focus、multi-query 和可选 HyDE 变体；`classify_query` 把请求路由到 semantic、exact、table、multimodal、graph_local 或 graph_global | `RAG_HYDE_ENABLED=false` 时不调用外部模型；当前默认使用确定性文档式 fallback，接入生成器后可替换为真实 hypothetical document |
+| A4 Memory 2.0 | `conversation_memory.py` 组合 ILIKE、token overlap、embedding cosine、置信度、重要性、时效和作用域；新增 migration `015_memory_semantic_index.sql` 保存记忆向量 | embedding 失败自动回退词项检索 |
+| A5 OpenTelemetry / Phoenix | `shared.tracing.trace_span` 支持可选 OTEL span，并返回可序列化的阶段耗时记录；检索 stats 和 trace-to-dataset 脚本可作为 Phoenix dataset/experiment 的输入适配层 | `RAG_OTEL_ENABLED=false` 时仍保留本地 trace metadata；OTLP exporter 和 Phoenix 服务地址由部署侧配置 |
+| A6 表格 RAG | CSV/XLS/XLSX 在 ingest 时保留行文本；`normalize_table_evidence` 将 Markdown/分隔符表格规范化为列、行和置信度，检索结果写入 `table_evidence` | 无表格结构时继续按普通文本检索 |
+| A7 轻量 GraphRAG | `extract_graph_facts` 从关系句中抽取 subject/relation/object，`graph_route_evidence` 为关系问题提高实体和关系证据权重，并区分 local/global 路由 | 不依赖图数据库；当前是规则抽取和证据重排，后续可替换为 Neo4j/GraphRAG 社区摘要索引 |
+| A8 多模态证据 | 已有视觉资产、OCR、布局区域、bbox、缩略图和 `multimodal` 查询路由；视觉证据与文本证据统一为 `EvidenceBlock` | OCR/视觉 provider 不可用时保留文本路径 |
+| A9 安全红队闭环 | `prompt_safety.py` 处理用户、历史和证据注入；`sanitize_evidence_text` 在检索后移除证据中的指令式片段；`run-safety-regression.py` 使用 fixture 回放 | 高危请求进入拒答或弱证据 fallback |
+| A10 新鲜度与索引生命周期 | `build_freshness_metadata` 比较 `source_updated_at`、索引时间和生效时间，输出 keep/refresh/reindex；连接器已有软删除和版本治理 | 过期证据保留可解释标记，不静默覆盖版本 |
+| A11 Knowledge Compilation / PageIndex | ingest 生成 `knowledge_compilation`，包括 outline、关键词、实体、页码索引和内容 hash，写入文档 `stats_json` | 这是 PageIndex 风格的本地索引产物，不依赖外部 PageIndex 服务；解析失败不阻断基础 FTS/向量索引 |
+| A12 模型路由与成本 | `choose_rag_model_route` 按查询路由、候选数、上下文 token 和预算估算 fast/balanced/deep 路线；Gateway 原有 `model_routing` 继续负责真实模型 fallback | 未配置价格时只记录估算，不影响生成 |
+
+高级链路串联后是：
+
+```text
+规则/元数据解析 -> Query Route -> Multi-Query/可选 HyDE
+  -> 结构 + FTS + 向量 + grep 并行召回 -> RRF
+  -> Cross-Encoder/启发式精排 -> Graph/Table/视觉证据增强
+  -> 证据安全清洗 -> MMR 去重与 Parent Context -> JEV 准入
+  -> 新鲜度标记 -> 模型/成本路由 -> DeepSeek 等生成模型
+  -> trace / feedback -> trace-to-dataset -> 离线指标与回归门禁
+```
+
+代码入口：
+
+- `packages/python/shared/advanced_rag.py`：高级 RAG 原语和结构化数据契约。
+- `apps/services/knowledge-base/src/app/retrieve.py`：变体召回、路由、MMR、表格/图证据、清洗、新鲜度和成本元数据接入点。
+- `apps/services/knowledge-base/src/app/parsing.py`、`worker.py`、`kb_batch_ingest.py`：语义边界切分和知识编译产物。
+- `apps/services/api-gateway/src/app/conversation_memory.py`：多轮对话的语义记忆写入与混合检索。
+- `scripts/evaluation/build-trace-dataset.py`：把脱敏线上 trace 转成可标注、可回归的评测数据集。
 
 ## 核心能力
 
@@ -756,6 +798,7 @@ Gateway 与 KB Service `/readyz` 在关键依赖未就绪时返回 `503`，响�
 
 - 认证与基础环境：`APP_ENV`、`JWT_SECRET`
 - 数据库：`KB_DATABASE_DSN`、`GATEWAY_DATABASE_DSN`
+- 网关连接池：`GATEWAY_DB_POOL_TIMEOUT_SECONDS`（数据库暂时不可用时控制连接等待时长）
 - 对象存储：`OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_ACCESS_KEY`、`OBJECT_STORAGE_SECRET_KEY`、`OBJECT_STORAGE_BUCKET`
 - 向量检索：`QDRANT_URL`、`QDRANT_COLLECTION`、`QDRANT_TIMEOUT_SECONDS`、`QDRANT_PREFER_GRPC`、`FASTEMBED_MODEL_NAME`、`FASTEMBED_SPARSE_MODEL_NAME`
 - LLM：`LLM_ENABLED`、`LLM_PROVIDER`、`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`
@@ -769,6 +812,7 @@ JWT_SECRET=replace-this-in-local-env
 
 KB_DATABASE_DSN=postgresql://rag:rag@postgres:5432/kb_app
 GATEWAY_DATABASE_DSN=postgresql://rag:rag@postgres:5432/gateway_app
+GATEWAY_DB_POOL_TIMEOUT_SECONDS=5
 
 OBJECT_STORAGE_ENDPOINT=http://minio:9000
 OBJECT_STORAGE_ACCESS_KEY=minioadmin
@@ -822,7 +866,9 @@ LLM_MODEL_ROUTING_JSON='{
 
 `api_key` 字段同样只展示位置，部署时再由受控环境注入实际值。`fallback_route_key` 会被 Gateway 的回答生成链路用于本地调用抛出 5xx、上游不可用、非法响应或空回答等失败后的备线路由尝试；是否对供应商 4xx 继续尝试取决于调用层映射后的本地异常状态。平台配置摘要只返回 `api_key_configured`，不会返回密钥原文。
 
-平台页 `工作台 -> 模型接入` 提供中转站模型发现辅助：输入 Base URL 与 API Key 后，前端会调用 `POST /api/v1/platform/llm/models/discover`，后端会规范化 Base URL 并请求 `{base_url}/models` 拉取模型列表，返回可选择的模型 ID 与配置片段。现在配置片段还能生成主/备路由示例，方便演示 `fallback_route_key` 的降级闭环。该能力仅用于手动发现和配置辅助，不会保存 API Key，也不会把密钥写入成功响应或审计详情；上游错误消息会作为 `502` 摘要返回，因此生产中转站不应在错误体中包含敏感凭据。生产环境仍建议通过环境变量、容器密钥或专用密钥管理系统下发真实凭据。若需要限制可被发现的中转站域名，可配置逗号分隔的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS`（兼容别名：`AI_MODEL_DISCOVERY_ALLOWED_HOSTS`），例如 `relay.example.com,relay.example.com:8443`；未配置时保持对任意 OpenAI-compatible 中转站的兼容，生产环境建议显式配置 allowlist。
+平台页 `工作台 -> 模型接入` 提供模型接入向导：选择提供商和请求格式，输入 Base URL 与 API Key 后，前端调用 `POST /api/v1/platform/llm/models/discover` 拉取模型列表；模型列表支持搜索、下拉选择和手动输入，并可直接打开保存配置弹窗。默认使用 OpenAI Chat Completions，另支持 OpenAI Responses；Ollama 提供商会读取 `/api/tags`。服务端会规范化 Base URL、解析常见的 `data`/`models` 响应形状，并将请求格式保存在模型配置的 `extra.request_format` 中。该能力不会把 API Key 写入成功响应或审计详情；生产环境仍建议通过环境变量、密钥管理系统或显式的 `LLM_MODEL_DISCOVERY_ALLOWED_HOSTS` 白名单约束中转站。
+
+模型接入页的“RAG 阶段模型”区域按查询意图、查询改写、向量化、混合召回、Cross-Encoder 精排、JEV 意图识别、JEV Context 门控、答案生成和面试评分排序展示卡片。卡片只允许选择已保存且启用的服务方配置，不能再次填写 Base URL 或 API Key；`GET/PUT /api/v1/platform/model-stages` 负责读取和更新阶段绑定。JEV 配置同时用于用户问题路由判断和 rerank 后的 Context 相关性门控，调用失败时保留现有规则分类与证据降级路径。
 
 ### 通用知识库与 AI 面试增量能力
 
@@ -836,6 +882,7 @@ LLM_MODEL_ROUTING_JSON='{
 - `POST /api/v1/interviews/sessions/{session_id}/questions/{session_question_id}/answer`：提交回答并按配置调用评分模型
 - `GET /api/v1/interviews/sessions/{session_id}/report`：返回维度得分、薄弱点和每题来源追溯
 - `GET/POST/PATCH/DELETE /api/v1/platform/model-configs`：管理加密存储的多模型配置；响应只返回脱敏摘要，环境变量配置仍可作为回退
+- `GET/PUT /api/v1/platform/model-stages`：读取 RAG 阶段定义、启用的可选配置和当前绑定；更新时只接受已存在的启用配置 ID
 
 面试会话会保存 `question_id` 及其来源快照（知识库、文档、chunk），题目来源校验位于知识库服务，网关只消费题池结果。
 
@@ -1931,6 +1978,10 @@ Gateway 已提供本地可测试的人工接管队列抽象，用于坐席或运
 - `RERANK_API_BASE_URL`
 - `RERANK_API_KEY`
 - `RERANK_MODEL`
+- `RAG_HYDE_ENABLED`
+- `RAG_OTEL_ENABLED`
+- `RAG_DEFAULT_MODEL`
+- `RAG_INPUT_COST_PER_1K`
 - `VISION_PROVIDER`
 - `VISION_FALLBACK_PROVIDER`
 - `VISION_API_BASE_URL`

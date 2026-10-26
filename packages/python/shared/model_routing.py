@@ -52,6 +52,7 @@ def resolve_model_route(
         ),
         timeout_seconds=float(route.get("timeout_seconds") or getattr(settings, "timeout_seconds", 0.0)),
         extra_body=dict(extra_body) if isinstance(extra_body, dict) else dict(getattr(settings, "extra_body", {}) or {}),
+        request_format=str(route.get("request_format") or getattr(settings, "request_format", "chat_completions")),
     )
 
 
@@ -101,6 +102,7 @@ def _apply_route_decision(settings: Any, decision: RouteDecision) -> Any:
             default_temperature=decision["temperature"],
             default_max_tokens=decision["max_tokens"],
             extra_body=decision["extra_body"],
+            request_format=decision["request_format"],
         )
     proxy = type("RoutedSettings", (), {})()
     for key, value in vars(settings).items():
@@ -117,6 +119,7 @@ def _apply_route_decision(settings: Any, decision: RouteDecision) -> Any:
     proxy.default_temperature = decision["temperature"]
     proxy.default_max_tokens = decision["max_tokens"]
     proxy.extra_body = decision["extra_body"]
+    proxy.request_format = decision["request_format"]
     return proxy
 
 

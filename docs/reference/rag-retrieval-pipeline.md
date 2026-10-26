@@ -18,7 +18,7 @@
 
 ## 门控层
 
-精排结果随后进入 `shared.jevgate.gate_evidence_blocks`。JEV 只做结构化相关性判断，不生成回答：请求包含一个 query state 和一批候选 questions，响应可使用 `yes_probability`、`probability` 或 `score` 字段。
+查询准备阶段可先使用阶段绑定的 JEV 配置判断用户问题意图，返回 `semantic`、`exact`、`table`、`graph_local`、`graph_global` 或 `multimodal` 路由；调用失败时沿用规则分类。精排结果随后进入 `shared.jevgate.gate_evidence_blocks`。JEV 只做结构化相关性判断，不生成回答：请求包含一个 query state 和一批候选 questions，响应可使用 `yes_probability`、`probability` 或 `score` 字段。
 
 - 概率大于等于 `JEV_HIGH_THRESHOLD`：`keep`
 - 位于两个阈值之间：`deprioritize`，保留为低优先级证据
@@ -26,7 +26,7 @@
 
 包含唯一稳定标识符精确命中的请求会由确定性代码直接决策，JEV 远程调用为 0。JEV 未配置或暂时不可用时保留候选并在 `retrieval.warnings` 写入原因，避免门控故障误删证据。启用 JEV 后，`gate_remote_calls`、`gate_provider`、`gate_dropped_candidates` 会出现在检索统计中。
 
-阈值不是固定事实，应使用带相关性标注的数据集在误放和误删之间校准；更换 JEV 模型或版本后重新校准。
+JEV 的定位是用户问题意图识别和 rerank 后 Context 门控，不替代 Cross-Encoder rerank，也不生成答案。平台页可以分别绑定 `jev_intent` 与 `jev_rerank` 阶段；未绑定时继续使用环境变量或关闭 JEV。阈值不是固定事实，应使用带相关性标注的数据集在误放和误删之间校准；更换 JEV 模型或版本后重新校准。
 
 ## 生成层
 

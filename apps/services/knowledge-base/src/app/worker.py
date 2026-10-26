@@ -14,6 +14,7 @@ from shared.logging import setup_logging
 from shared.metrics import Counter, Histogram, start_http_server
 from shared.text_encoding import detect_text_encoding
 from shared.text_search import build_fts_lexeme_text
+from shared.advanced_rag import compile_knowledge_document, normalize_table_evidence
 
 from .parsing import KBChunk, KBSection, ParsedKB, TXT_HEADING_RE, build_section_chunks, parse_document
 from .runtime import BLOB_ROOT, KBChunkingSettings, db, load_chunking_settings, prepare_runtime, storage
@@ -231,11 +232,17 @@ def _index_binary_document(
     chunking_settings = chunking_settings or load_chunking_settings()
     parsed = parse_document(path, file_type, **chunking_settings.as_kwargs())
     _replace_document_units(document_id, parsed)
+    source_text = "\n".join(section.text for section in parsed.sections)
+    compilation = compile_knowledge_document(source_text, title=path.name)
+    table_count = sum(1 for chunk in parsed.chunks if normalize_table_evidence(chunk.text) is not None)
     return {
         "section_count": len(parsed.sections),
         "chunk_count": len(parsed.chunks),
         "section_preview": _section_preview_from_sections(parsed.sections),
         "chunking": chunking_settings.summary(),
+        "semantic_chunking": True,
+        "table_evidence_count": table_count,
+        "knowledge_compilation": compilation.as_dict(),
     }
 
 
@@ -317,7 +324,30 @@ def _index_txt_document(
         "chunk_count": chunk_total,
         "section_preview": _fetch_section_preview(document_id),
         "chunking": chunking_summary,
+        "semantic_chunking": True,
+        "table_evidence_count": _count_table_chunks(chunk_total, document_id),
+        "knowledge_compilation": _document_compilation_preview(document_id),
     }
+
+
+def _count_table_chunks(chunk_count: int, document_id: str) -> int:
+    if chunk_count <= 0:
+        return 0
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT text_content FROM kb_chunks WHERE document_id = %s", (document_id,))
+            rows = cur.fetchall()
+    return sum(1 for row in rows if normalize_table_evidence(str(row.get("text_content") or "")) is not None)
+
+
+def _document_compilation_preview(document_id: str) -> dict[str, Any]:
+    with db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT file_name FROM kb_documents WHERE id = %s", (document_id,))
+            document = cur.fetchone() or {}
+            cur.execute("SELECT text_content FROM kb_chunks WHERE document_id = %s ORDER BY section_index, chunk_index", (document_id,))
+            rows = cur.fetchall()
+    return compile_knowledge_document("\n".join(str(row.get("text_content") or "") for row in rows), title=str(document.get("file_name") or "")).as_dict()
 
 
 def _iter_text_lines(path: Path):

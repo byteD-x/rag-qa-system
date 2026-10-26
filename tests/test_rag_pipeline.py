@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from shared.jevgate import gate_evidence_blocks
+from shared.jevgate import JEVSettings, classify_query_intent, gate_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalStats
 
 from conftest import prioritize_service_src
@@ -83,6 +83,40 @@ def test_jev_gate_fails_open_when_provider_is_unavailable(monkeypatch) -> None:
     assert [item.unit_id for item in kept] == ["a"]
     assert debug[0].action == "fallback"
     assert meta.warning == "jev_unavailable"
+
+
+def test_jev_intent_accepts_known_route_and_ignores_unknown_payload(monkeypatch) -> None:
+    class _Response:
+        status_code = 200
+
+        def json(self):
+            return {"results": [{"answer": "graph_local"}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def post(self, url, *, headers, json):
+            assert json["state"]["task"] == "intent"
+            return _Response()
+
+    monkeypatch.setattr("shared.jevgate.httpx.Client", _Client)
+    settings = JEVSettings(True, "https://jev.example.test/intent", "secret", "system-one", 1.0, 4, 0.75, 0.35)
+
+    assert classify_query_intent("当前版本的审批流程", settings=settings) == {"route": "graph_local", "provider": "jev"}
+
+    class _UnknownResponse(_Response):
+        def json(self):
+            return {"route": "not-a-route"}
+
+    monkeypatch.setattr(_Client, "post", lambda self, url, *, headers, json: _UnknownResponse())
+    assert classify_query_intent("问题", settings=settings) is None
 
 
 def test_retrieval_stats_describe_exact_channel_and_context_gate() -> None:

@@ -84,7 +84,7 @@ def _parse_model_routing(raw: str) -> dict[str, dict[str, Any]]:
         if not isinstance(route_key, str) or not isinstance(raw_definition, dict):
             continue
         cleaned: dict[str, Any] = {}
-        for key in ("provider", "base_url", "api_key", "model"):
+        for key in ("provider", "base_url", "api_key", "model", "request_format"):
             value = raw_definition.get(key)
             if isinstance(value, str) and value.strip():
                 cleaned[key] = value.strip()
@@ -123,6 +123,7 @@ class LLMSettings:
     system_prompt: str
     extra_body: dict[str, Any]
     model_routing: dict[str, dict[str, Any]] = field(default_factory=dict)
+    request_format: str = "chat_completions"
 
     @property
     def configured(self) -> bool:
@@ -156,4 +157,5 @@ def load_llm_settings() -> LLMSettings:
         system_prompt=_read_env("LLM_SYSTEM_PROMPT", "AI_SYSTEM_PROMPT"),
         extra_body=_parse_extra_body(_read_env("LLM_EXTRA_BODY_JSON", "AI_EXTRA_BODY_JSON", default="{}")),
         model_routing=_parse_model_routing(_read_env("LLM_MODEL_ROUTING_JSON", "AI_MODEL_ROUTING_JSON", default="{}")),
+        request_format=_read_env("LLM_REQUEST_FORMAT", "AI_REQUEST_FORMAT", default="chat_completions"),
     )

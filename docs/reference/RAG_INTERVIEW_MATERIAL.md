@@ -70,7 +70,7 @@
 5. **KB 检索图怎么拆节点**：
    - `prepare_request`：把自然语言问题改写成真正的检索请求，同时解析实际允许参与检索的文档范围。
    - `run_signal_retrievers`：统一执行结构检索、全文检索、向量检索，并记录 degraded signals 和 warnings。
-   - `fuse_and_rerank`：把三路候选统一成证据块，做加权 RRF 融合，再执行重排，最后输出统一的 `RetrievalResult`。
+   - `fuse_and_rerank`：把结构、FTS、向量和按需 grep 候选统一成证据块，做加权 RRF 融合，再执行重排、去重和门控，最后输出统一的 `RetrievalResult`。
 6. **为什么 KB 也要 graph 化**：
    - 如果只有 Gateway 图，KB 对上层仍然是黑盒，上层只能知道“我发了一次 retrieve”，却不知道 retrieval 内部经历了哪些阶段。
    - 现在 KB 也有了明确的阶段边界，后续无论要扩更多检索信号、并行召回，还是做失败降级，都有稳定骨架可以挂载。
@@ -94,7 +94,7 @@
     - 这个亮点的价值在于，它体现的是后端工程能力，而不只是算法拼装能力。
     - 对 AI 工程岗、Agent 平台岗、RAG 后端岗来说，这比单纯讲“用了哪个 embedding 模型”更能体现架构水平。
 11. **面试表述**：
-    - “我这次做的不是简单把 LangChain 链写长一点，而是把查询面的编排层从手写 service 逻辑升级成 LangGraph 运行时。Gateway 侧把一次问答拆成 prepare、human review、generate、persist 四个稳定节点，KB 侧把 retrieval 拆成 query rewrite、三路召回、融合重排三个阶段。这样之后，中断、恢复、审计、节点级测试都有统一语义，系统从能跑提升到了能解释、能恢复、能演进。” 
+    - “我这次做的不是简单把 LangChain 链写长一点，而是把查询面的编排层从手写 service 逻辑升级成 LangGraph 运行时。Gateway 侧把一次问答拆成 prepare、human review、generate、persist 四个稳定节点，KB 侧把 retrieval 拆成 query route、Multi-Query、结构/全文/向量/grep 召回、融合精排和门控阶段。这样之后，中断、恢复、审计、节点级测试都有统一语义，系统从能跑提升到了能解释、能恢复、能演进。” 
 12. **可能的追问**：
     - 追问 1：“为什么不继续用 LangChain Runnable 或者手写 if/else，而要换 LangGraph？”
     - 追问 2：“为什么 Gateway 和 KB 都要 graph 化？”
@@ -103,7 +103,7 @@
     - 追问 5：“这次升级最直接的业务收益是什么？”
 13. **追问回答**：
     - 追问 1：“因为问题已经不是‘能不能把流程串起来’，而是‘能不能稳定地暂停、恢复、追踪和审计’。Runnable 很适合把几个步骤接起来，但对 interrupt、checkpoint 和显式状态机支持没有 LangGraph 这么直接。继续手写 if/else 当然也能做，但状态和恢复语义会越来越散。” 
-    - 追问 2：“因为如果只有 Gateway graph 化，KB 仍然是黑盒，上层只能看到一次 RPC，看不到 retrieval 内部经历了 query rewrite、三路召回、融合重排这些阶段。要做真正可解释的 Agentic RAG，上下游都要有清楚的阶段边界。” 
+    - 追问 2：“因为如果只有 Gateway graph 化，KB 仍然是黑盒，上层只能看到一次 RPC，看不到 retrieval 内部经历了 query route、Multi-Query、多路召回、融合精排和门控这些阶段。要做真正可解释的 Agentic RAG，上下游都要有清楚的阶段边界。” 
     - 追问 3：“现在主状态源是 LangGraph checkpoint。`workflow_run` 保留，但主要承担投影和审计职责。也就是说，恢复依赖 checkpoint，列表展示和运营查询依赖投影表。” 
     - 追问 4：“节点不是越多越好。我的原则是一个节点只做一类稳定职责。比如 Gateway 的 `prepare_turn` 是天然决策点，`generate_answer` 是天然执行点，`persist_turn` 是天然落库点。再往下拆会让图过碎，反而不利于理解和维护。” 
     - 追问 5：“最直接的收益是中断恢复和人工澄清终于有了统一机制。之前这种能力要靠业务层硬拼，现在它是运行时原生能力。同时 run 的状态更透明，排障和测试成本也明显下降。” 

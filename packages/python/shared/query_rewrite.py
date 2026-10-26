@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass, field
 
+from .advanced_rag import build_query_variants, classify_query
 from .text_search import normalize_text, tokenize_text, unique_non_empty
 
 
@@ -18,6 +20,8 @@ class QueryRewritePlan:
     focus_query: str
     expansion_terms: list[str] = field(default_factory=list)
     strategy_tags: list[str] = field(default_factory=list)
+    query_variants: list[dict[str, object]] = field(default_factory=list)
+    route: str = "semantic"
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -26,6 +30,8 @@ class QueryRewritePlan:
             "focus_query": self.focus_query,
             "expansion_terms": list(self.expansion_terms),
             "strategy_tags": list(self.strategy_tags),
+            "query_variants": [dict(item) for item in self.query_variants],
+            "route": self.route,
         }
 
 
@@ -60,10 +66,22 @@ def rewrite_query(question: str) -> QueryRewritePlan:
 
     unique_terms = unique_non_empty(expansion_terms)
     retrieval_query = " ".join(unique_non_empty([original, *unique_terms]))
+    hyde_enabled = str(os.getenv("RAG_HYDE_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"}
+    variants = build_query_variants(
+        retrieval_query,
+        expansion_terms=unique_terms,
+        include_hyde=hyde_enabled,
+        max_variants=5,
+    )
+    if hyde_enabled:
+        strategy_tags.append("hyde")
+    route = classify_query(original).route
     return QueryRewritePlan(
         original_query=original,
         retrieval_query=retrieval_query,
         focus_query=focus_query or original,
         expansion_terms=unique_terms,
         strategy_tags=unique_non_empty(strategy_tags),
+        query_variants=[variant.as_dict() for variant in variants],
+        route=route,
     )

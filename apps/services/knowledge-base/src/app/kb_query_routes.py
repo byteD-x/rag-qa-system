@@ -48,8 +48,10 @@ def _retrieve_kb_result_compat(**kwargs: Any) -> Any:
     except (TypeError, ValueError):
         return target(**kwargs)
     accepts_kwargs = any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values())
-    if "metadata_filter" not in signature.parameters and not accepts_kwargs:
-        kwargs.pop("metadata_filter", None)
+    if not accepts_kwargs:
+        for optional_name in ("metadata_filter", "model_stages"):
+            if optional_name not in signature.parameters:
+                kwargs.pop(optional_name, None)
     return target(**kwargs)
 
 
@@ -99,6 +101,7 @@ def retrieve_kb(payload: RetrieveRequest, request: Request, user: CurrentUser) -
         document_ids=payload.document_ids,
         limit=payload.limit,
         metadata_filter=payload.metadata_filter.model_dump(),
+        model_stages=payload.model_stages,
         use_cache=True,
         **_retrieval_access_kwargs(user),
     )
@@ -123,6 +126,7 @@ def retrieve_kb_v2(payload: RetrieveRequest, request: Request, user: CurrentUser
         document_ids=payload.document_ids,
         limit=payload.limit,
         metadata_filter=payload.metadata_filter.model_dump(),
+        model_stages=payload.model_stages,
         use_cache=True,
         **_retrieval_access_kwargs(user),
     )
@@ -155,6 +159,7 @@ def retrieve_kb_debug(payload: RetrievalDebugRequest, request: Request, user: Cu
         document_ids=payload.document_ids,
         limit=payload.limit,
         metadata_filter=payload.metadata_filter.model_dump(),
+        model_stages=payload.model_stages,
         **_retrieval_access_kwargs(user),
     )
     items = []
@@ -196,6 +201,7 @@ async def query_kb(payload: KBQueryRequest, request: Request, user: CurrentUser)
             question=payload.question,
             document_ids=payload.document_ids,
             metadata_filter=payload.metadata_filter.model_dump(),
+            model_stages=payload.model_stages,
             use_retrieval_cache=True,
             **_retrieval_access_kwargs(user),
         )
@@ -252,6 +258,7 @@ async def stream_query_kb(payload: KBQueryRequest, request: Request, user: Curre
         question=payload.question,
         document_ids=payload.document_ids,
         metadata_filter=payload.metadata_filter.model_dump(),
+        model_stages=payload.model_stages,
         use_retrieval_cache=True,
         **_retrieval_access_kwargs(user),
     )

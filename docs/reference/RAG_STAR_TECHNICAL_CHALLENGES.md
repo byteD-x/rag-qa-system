@@ -17,7 +17,7 @@
 
 **Situation**：面试演示时，检索调试页必须能让面试官看到“为什么召回了这段证据”。原链路存在前端发送 `query/top_k`、后端需要 `question/limit` 的契约不一致，现场演示会 422。
 
-**Task**：修复调试页请求契约，并把三路召回、RRF 融合、rerank 和证据来源展示出来。
+**Task**：修复调试页请求契约，并把多路召回、RRF 融合、rerank 和证据来源展示出来。
 
 **Action**：
 
@@ -190,7 +190,7 @@
 
 ## STAR 4.1：文档 ACL 与人员部门上下文分离
 
-**Situation**：企业知识库需要按部门限制文档访问，但人员会变化，不能把人员权限名单复制进知识库；同时结构、全文、向量三路召回和显式文档 ID 都不能出现绕过路径。
+**Situation**：企业知识库需要按部门限制文档访问，但人员会变化，不能把人员权限名单复制进知识库；同时结构、全文、向量主召回、按需 grep 和显式文档 ID 都不能出现绕过路径。
 
 **Task**：把文档权限和人员身份解耦，并保证查询、缓存和恢复链路都使用当前认证上下文。
 
@@ -198,7 +198,7 @@
 
 - 在文档和上传会话元数据中持久化 `allowed_departments`；空数组表示公开文档，不持久化人员权限。
 - 从签名 JWT 的 `CurrentUser.department` 取得当前部门，由 Gateway 传给 KB；管理员权限作为认证上下文中的管理标志处理。
-- 在 KB 解析实际文档范围后、三路召回前统一过滤，显式 `document_ids` 只能与有权文档求交；无部门用户仅能访问公开文档。
+- 在 KB 解析实际文档范围后、所有召回通道前统一过滤，显式 `document_ids` 只能与有权文档求交；无部门用户仅能访问公开文档。
 - 将部门/管理员范围纳入 Gateway 语义缓存键，并在恢复 checkpoint 时校验访问上下文，避免跨部门复用检索证据或回答。
 
 **Result**：权限边界由认证系统和知识库各自负责，人员变动不需要改写知识库；查询入口、显式文档范围、语义缓存和工作流恢复都保持相同的部门过滤语义。
@@ -259,7 +259,7 @@
 | 追问方向 | 推荐回答主线 | 证据 |
 |---|---|---|
 | 低成本 RAG 怎么落地 | 默认本地 embedding + Qdrant + FTS + 结构信号 + weighted RRF + heuristic rerank；外部模型是增强 | `retrieve.py`、`rerank.py`、`embeddings.py` |
-| 如何解释召回结果 | 看 `signal_scores`、`evidence_path`、`debug.rank`、`retrieval_ms`，从三路信号讲到最终排名 | `RetrievalDebuggerView.vue`、`kb_query_routes.py` |
+| 如何解释召回结果 | 看 `signal_scores`、`evidence_path`、`debug.rank`、`retrieval_ms`，从多路信号讲到最终排名 | `RetrievalDebuggerView.vue`、`kb_query_routes.py` |
 | 如何证明效果 | 最小 fixture 证明评测链路，真实业务数据再补压测和标注集 | `scripts/evaluation/*`、`tests/fixtures/evals/*` |
 | 如何控制幻觉 | grounded answer、引用、证据不足降级、安全测试；不宣称固定幻觉率 | `grounded_answering.py`、`test_safety_guardrails.py` |
 | 为什么要 LangGraph | 阶段边界、恢复、审计、节点级测试，而不是堆长链 | `retrieve.py`、`test_langgraph_runtime.py` |
@@ -349,14 +349,14 @@
 
 ## STAR 9：检索热路径并发优化，把连接与线程池开销从请求链路移出
 
-**Situation**：基线实现每次请求新建 PostgreSQL 连接和三路召回线程池；并发达到 8 以上后 QPS 约在 40 附近饱和，P95 随并发线性劣化，重复问题也会重复消耗检索资源。
+**Situation**：基线实现每次请求新建 PostgreSQL 连接和多路召回线程池；并发达到 8 以上后 QPS 约在 40 附近饱和，P95 随并发线性劣化，重复问题也会重复消耗检索资源。
 
 **Task**：在不改变检索结果语义的前提下，降低连接、线程池和重复查询开销，并建立可复现的 P95/QPS 对照口径。
 
 **Action**：
 
 - 将 PostgreSQL 连接改为跨请求复用的 `psycopg_pool.ConnectionPool`。
-- 将结构、FTS、向量三路召回改为共享的有界线程池，避免每请求创建 executor。
+- 将结构、FTS、向量主召回改为共享的有界线程池，grep 作为按需精确通道执行，避免每请求创建 executor。
 - 增加 ACL 感知的 TTL/LRU 检索缓存；相同问题并发请求通过 single-flight 复用 leader 结果，响应返回 `cache_hit`，Prometheus 暴露命中统计。
 - 压测脚本只统计成功请求，加入非空召回率与错误率，并采用同语料、同问题集、每档 500 请求的 ABBA 交替对照。
 

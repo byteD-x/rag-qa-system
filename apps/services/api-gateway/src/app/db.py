@@ -34,10 +34,12 @@ class GatewayDatabase:
             with self._pool_lock:
                 if self._pool is None:
                     max_size = max(int(os.getenv("GATEWAY_DB_POOL_MAX_SIZE", "10") or "10"), 1)
+                    pool_timeout = max(float(os.getenv("GATEWAY_DB_POOL_TIMEOUT_SECONDS", "5") or "5"), 0.5)
                     pool = ConnectionPool(
                         self._dsn,
                         min_size=1,
                         max_size=max_size,
+                        timeout=pool_timeout,
                         kwargs={"row_factory": dict_row},
                         open=False,
                     )

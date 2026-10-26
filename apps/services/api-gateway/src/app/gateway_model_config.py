@@ -4,7 +4,7 @@ import base64
 import hashlib
 import os
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from shared.api_errors import raise_api_error
 
@@ -17,6 +17,82 @@ DEFAULT_COLUMNS = {
     "interview": "is_default_interview",
     "scoring": "is_default_scoring",
 }
+
+MODEL_STAGE_DEFINITIONS = [
+    {
+        "key": "query_intent",
+        "name": "用户问题意图识别",
+        "description": "判断语义、精确匹配、表格和图谱检索路径。",
+        "order": 10,
+        "builtin": False,
+        "allowed_provider_types": [],
+    },
+    {
+        "key": "query_rewrite",
+        "name": "查询改写与 Multi-Query",
+        "description": "扩展检索表达并生成 focus query。当前默认使用内置规则。",
+        "order": 20,
+        "builtin": True,
+        "allowed_provider_types": [],
+    },
+    {
+        "key": "embedding",
+        "name": "向量化",
+        "description": "为知识库文档和用户问题生成向量。",
+        "order": 30,
+        "builtin": False,
+        "allowed_provider_types": [],
+    },
+    {
+        "key": "hybrid_retrieval",
+        "name": "混合召回",
+        "description": "结构、全文、向量和精确词并行召回，系统内置。",
+        "order": 40,
+        "builtin": True,
+        "allowed_provider_types": [],
+    },
+    {
+        "key": "rerank",
+        "name": "Cross-Encoder 精排",
+        "description": "对混合召回候选进行外部精排；未配置时使用启发式排序。",
+        "order": 50,
+        "builtin": False,
+        "allowed_provider_types": ["cross-encoder", "external-cross-encoder"],
+    },
+    {
+        "key": "jev_intent",
+        "name": "JEV 意图识别",
+        "description": "用 JEV 判断用户问题的检索路由，失败时回退规则分类。",
+        "order": 60,
+        "builtin": False,
+        "allowed_provider_types": ["jev"],
+    },
+    {
+        "key": "jev_rerank",
+        "name": "JEV Context 精排与门控",
+        "description": "对精排后的证据进行相关性判断，过滤低相关 Context。",
+        "order": 70,
+        "builtin": False,
+        "allowed_provider_types": ["jev"],
+    },
+    {
+        "key": "generation",
+        "name": "答案生成",
+        "description": "基于证据生成最终回答、引用和安全结果。",
+        "order": 80,
+        "builtin": False,
+        "allowed_provider_types": [],
+    },
+    {
+        "key": "interview_scoring",
+        "name": "面试评分",
+        "description": "生成面试评价、维度分数和改进建议。",
+        "order": 90,
+        "builtin": False,
+        "allowed_provider_types": [],
+    },
+]
+MODEL_STAGE_DEFINITION_BY_KEY = {item["key"]: item for item in MODEL_STAGE_DEFINITIONS}
 
 
 def _fernet() -> Any:
@@ -65,6 +141,24 @@ def _timestamp(value: Any) -> str:
 def serialize_model_config(row: dict[str, Any]) -> dict[str, Any]:
     encrypted = str(row.get("api_key_ciphertext") or "")
     decrypted = decrypt_api_key(encrypted)
+    extra = dict(row.get("extra_json") or {})
+    available_models = extra.get("available_models")
+    if not isinstance(available_models, list):
+        available_models = []
+    normalized_models = []
+    for item in available_models:
+        if isinstance(item, str) and item.strip():
+            normalized_models.append({"id": item.strip(), "object": "model", "owned_by": "", "created": None})
+        elif isinstance(item, dict) and str(item.get("id") or "").strip():
+            normalized_models.append({
+                "id": str(item.get("id") or "").strip(),
+                "object": str(item.get("object") or "model"),
+                "owned_by": str(item.get("owned_by") or ""),
+                "created": item.get("created"),
+            })
+    legacy_model = str(row.get("model_name") or "").strip()
+    if legacy_model and not any(item["id"] == legacy_model for item in normalized_models):
+        normalized_models.insert(0, {"id": legacy_model, "object": "model", "owned_by": "", "created": None})
     return {
         "id": str(row.get("id") or ""),
         "name": str(row.get("name") or ""),
@@ -80,7 +174,8 @@ def serialize_model_config(row: dict[str, Any]) -> dict[str, Any]:
         "default_purposes": [purpose for purpose, column in DEFAULT_COLUMNS.items() if bool(row.get(column))],
         "api_key_configured": bool(decrypted),
         "api_key_hint": f"***{decrypted[-4:]}" if decrypted else "",
-        "extra": dict(row.get("extra_json") or {}),
+        "available_models": normalized_models,
+        "extra": extra,
         "created_by": str(row.get("created_by") or ""),
         "created_at": _timestamp(row.get("created_at")),
         "updated_at": _timestamp(row.get("updated_at")),
@@ -201,14 +296,146 @@ def disable_model_config(config_id: str) -> None:
             cur.execute("UPDATE model_provider_configs SET enabled = FALSE, is_default_chat = FALSE, is_default_embedding = FALSE, is_default_interview = FALSE, is_default_scoring = FALSE, updated_at = NOW() WHERE id = %s", (config_id,))
             if cur.rowcount == 0:
                 raise_api_error(404, "model_provider_config_not_found", "model provider configuration not found")
+            cur.execute("UPDATE model_stage_bindings SET config_id = NULL, updated_at = NOW() WHERE config_id = %s", (config_id,))
         conn.commit()
 
 
+def _runtime_model_config(row: dict[str, Any]) -> dict[str, Any]:
+    extra = dict(row.get("extra_json") or {})
+    return {
+        "config_id": str(row.get("id") or ""),
+        "name": str(row.get("name") or ""),
+        "provider_type": str(row.get("provider_type") or ""),
+        "base_url": str(row.get("base_url") or "").rstrip("/"),
+        "api_key": decrypt_api_key(str(row.get("api_key_ciphertext") or "")),
+        "model_name": str(row.get("stage_model_name") or row.get("model_name") or ""),
+        "embedding_model": str(row.get("embedding_model") or ""),
+        "temperature": float(row.get("temperature") or 0.0),
+        "max_tokens": int(row.get("max_tokens") or 0),
+        "timeout_seconds": float(row.get("timeout_seconds") or 0.0),
+        "request_format": str(extra.get("request_format") or "chat_completions"),
+        "extra": extra,
+    }
+
+
+def list_enabled_model_configs() -> list[dict[str, Any]]:
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM model_provider_configs WHERE enabled = TRUE ORDER BY updated_at DESC, created_at DESC")
+            return [serialize_model_config(row) for row in cur.fetchall()]
+
+
+def load_active_stage_configs() -> dict[str, dict[str, Any]]:
+    try:
+        with gateway_db.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT b.stage_key, b.model_name AS stage_model_name, c.*
+                    FROM model_stage_bindings b
+                    JOIN model_provider_configs c ON c.id = b.config_id AND c.enabled = TRUE
+                    """
+                )
+                return {str(row["stage_key"]): _runtime_model_config(row) for row in cur.fetchall()}
+    except Exception:
+        # Migrations are applied lazily; preserve environment-only deployments.
+        return {}
+
+
+def get_model_stages() -> dict[str, Any]:
+    configs = list_enabled_model_configs()
+    bindings = load_active_stage_configs()
+    stages: list[dict[str, Any]] = []
+    for definition in MODEL_STAGE_DEFINITIONS:
+        stage_key = str(definition["key"])
+        active = bindings.get(stage_key)
+        active_config_id = str(active.get("config_id") or "") if active else ""
+        active_model_name = str(active.get("model_name") or "") if active else ""
+        stages.append({
+            **definition,
+            "config_id": active_config_id,
+            "model_name": active_model_name,
+            "config": next((item for item in configs if item["id"] == active_config_id), None),
+        })
+    return {"stages": stages, "available_configs": configs}
+
+
+def update_model_stages(*, bindings: dict[str, str | dict[str, Any] | None], user_id: str) -> dict[str, Any]:
+    unknown = sorted(set(bindings) - set(MODEL_STAGE_DEFINITION_BY_KEY))
+    if unknown:
+        raise_api_error(400, "unsupported_model_stage", f"unsupported model stage: {unknown[0]}")
+    with gateway_db.connect() as conn:
+        with conn.cursor() as cur:
+            for stage_key, raw_binding in bindings.items():
+                definition = MODEL_STAGE_DEFINITION_BY_KEY[stage_key]
+                if isinstance(raw_binding, dict):
+                    config_id = str(raw_binding.get("config_id") or "").strip() or None
+                    model_name = str(raw_binding.get("model_name") or "").strip()
+                else:
+                    config_id = str(raw_binding).strip() if raw_binding else None
+                    model_name = ""
+                if definition["builtin"] and config_id:
+                    raise_api_error(400, "builtin_model_stage", f"model stage is built-in: {stage_key}")
+                if config_id:
+                    try:
+                        UUID(str(config_id))
+                    except ValueError:
+                        raise_api_error(400, "invalid_model_provider_config_id", "model provider configuration ID is invalid")
+                    cur.execute("SELECT * FROM model_provider_configs WHERE id = %s AND enabled = TRUE", (config_id,))
+                    row = cur.fetchone()
+                    if row is None:
+                        raise_api_error(400, "model_provider_config_unavailable", "only enabled model provider configurations can be bound")
+                    allowed = list(definition["allowed_provider_types"])
+                    provider_type = str(row.get("provider_type") or "").lower()
+                    if allowed and provider_type not in allowed:
+                        raise_api_error(400, "model_provider_type_not_allowed", f"provider type {provider_type} cannot be bound to {stage_key}")
+                    available_models = dict(row.get("extra_json") or {}).get("available_models") or []
+                    known_models = {
+                        str(item.get("id") or "").strip() if isinstance(item, dict) else str(item).strip()
+                        for item in available_models
+                    }
+                    legacy_model = str(row.get("model_name") or "").strip()
+                    if legacy_model:
+                        known_models.add(legacy_model)
+                    if not model_name:
+                        model_name = legacy_model
+                    if not model_name or model_name not in known_models:
+                        raise_api_error(400, "model_not_available", "model must be selected from the provider model catalog")
+                cur.execute(
+                    """
+                    INSERT INTO model_stage_bindings(stage_key, config_id, model_name, updated_by, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    ON CONFLICT (stage_key) DO UPDATE SET config_id = EXCLUDED.config_id, model_name = EXCLUDED.model_name, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+                    """,
+                    (stage_key, config_id, model_name, user_id),
+                )
+        conn.commit()
+    return get_model_stages()
+
+
 def load_active_model_config(*, purpose: str = "chat") -> dict[str, Any] | None:
+    stage_key = {"chat": "generation", "scoring": "interview_scoring", "interview": "interview_scoring", "embedding": "embedding"}.get(purpose)
     column = DEFAULT_COLUMNS.get(purpose, DEFAULT_COLUMNS["chat"])
     try:
         with gateway_db.connect() as conn:
             with conn.cursor() as cur:
+                if stage_key:
+                    cur.execute(
+                        """
+                        SELECT b.model_name AS stage_model_name, c.* FROM model_stage_bindings b
+                        JOIN model_provider_configs c ON c.id = b.config_id AND c.enabled = TRUE
+                        WHERE b.stage_key = %s LIMIT 1
+                        """,
+                        (stage_key,),
+                    )
+                    row = cur.fetchone()
+                    if row is not None:
+                        selected_model = str(row.get("stage_model_name") or "").strip()
+                        return {
+                            **row,
+                            "model_name": selected_model or str(row.get("model_name") or ""),
+                            "api_key": decrypt_api_key(str(row.get("api_key_ciphertext") or "")),
+                        }
                 cur.execute(f"SELECT * FROM model_provider_configs WHERE enabled = TRUE AND {column} = TRUE ORDER BY updated_at DESC LIMIT 1")
                 row = cur.fetchone()
                 if row is None:

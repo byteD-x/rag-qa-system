@@ -13,6 +13,7 @@ from shared.auth import CurrentUser
 from .gateway_answering import contextualize_question
 from .gateway_runtime import logger, runtime_settings
 from .gateway_transport import downstream_headers, parse_corpus_id, request_service_json
+from .gateway_model_config import load_active_stage_configs
 
 
 async def retrieve_corpus_payload(
@@ -26,16 +27,25 @@ async def retrieve_corpus_payload(
     document_ids: list[str],
     semaphore: asyncio.Semaphore,
     kb_service_url: str,
+    model_stages: dict[str, dict[str, Any]] | None = None,
     request_service_json_fn: Any = request_service_json,
 ) -> dict[str, Any]:
     async with semaphore:
         try:
+            request_payload: dict[str, Any] = {
+                "base_id": base_id,
+                "question": question,
+                "document_ids": document_ids,
+                "limit": 8,
+            }
+            if model_stages:
+                request_payload["model_stages"] = model_stages
             payload = await request_service_json_fn(
                 client,
                 "POST",
                 f"{kb_service_url}/api/v1/kb/retrieve",
                 headers=headers,
-                json_body={"base_id": base_id, "question": question, "document_ids": document_ids, "limit": 8},
+                json_body=request_payload,
             )
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {"detail": str(exc.detail or "request failed")}
@@ -82,6 +92,7 @@ async def retrieve_scope_evidence(
     if not scope_snapshot["corpus_ids"]:
         return [], question.strip(), {"services": [], "aggregate": {"empty_scope": True, "service_count": 0}}
     contextualized_question = contextualize_question(question, history)
+    model_stages = load_active_stage_configs()
     document_scope_map = {
         str(corpus_id): [str(document_id) for document_id in (document_ids or []) if str(document_id).strip()]
         for corpus_id, document_ids in dict(scope_snapshot.get("documents_by_corpus") or {}).items()
@@ -116,6 +127,7 @@ async def retrieve_scope_evidence(
                     document_ids=document_ids,
                     semaphore=semaphore,
                     kb_service_url=kb_service_url,
+                    model_stages=model_stages,
                     request_service_json_fn=request_service_json_fn,
                 )
             )
@@ -199,6 +211,8 @@ async def retrieve_scope_evidence(
         "contextualized_query": contextualized_question,
         "rewritten_query": str(next((item.get("retrieval", {}).get("rewritten_query", "") for item in retrieval_services if item.get("retrieval", {}).get("rewritten_query")), contextualized_question)),
         "focus_query": str(next((item.get("retrieval", {}).get("focus_query", "") for item in retrieval_services if item.get("retrieval", {}).get("focus_query")), contextualized_question)),
+        "query_route": str(next((item.get("retrieval", {}).get("query_route", "") for item in retrieval_services if item.get("retrieval", {}).get("query_route")), "semantic")),
+        "query_variants": list(next((item.get("retrieval", {}).get("query_variants", []) for item in retrieval_services if item.get("retrieval", {}).get("query_variants")), [])),
         "structure_candidates": sum(int(item.get("retrieval", {}).get("structure_candidates", 0) or 0) for item in retrieval_services),
         "fts_candidates": sum(int(item.get("retrieval", {}).get("fts_candidates", 0) or 0) for item in retrieval_services),
         "vector_candidates": sum(int(item.get("retrieval", {}).get("vector_candidates", 0) or 0) for item in retrieval_services),
@@ -210,6 +224,13 @@ async def retrieve_scope_evidence(
         "max_service_retrieval_ms": round(max((float(item.get("retrieval", {}).get("retrieval_ms", 0.0) or 0.0) for item in retrieval_services), default=0.0), 3),
         "rewrite_tags": list(dict.fromkeys(tag for item in retrieval_services for tag in list(item.get("retrieval", {}).get("rewrite_tags", []) or []) if tag)),
         "expansion_terms": list(dict.fromkeys(term for item in retrieval_services for term in list(item.get("retrieval", {}).get("expansion_terms", []) or []) if term)),
+        "mmr_applied": any(bool(item.get("retrieval", {}).get("mmr_applied")) for item in retrieval_services),
+        "table_evidence_count": sum(int(item.get("retrieval", {}).get("table_evidence_count", 0) or 0) for item in retrieval_services),
+        "graph_routes": list(dict.fromkeys(str(item.get("retrieval", {}).get("graph_route") or "") for item in retrieval_services if str(item.get("retrieval", {}).get("graph_route") or ""))),
+        "evidence_safety_events": sum(int(item.get("retrieval", {}).get("evidence_safety_events", 0) or 0) for item in retrieval_services),
+        "freshness_refresh_count": sum(int(item.get("retrieval", {}).get("freshness_refresh_count", 0) or 0) for item in retrieval_services),
+        "model_routes": list(dict.fromkeys(str(item.get("retrieval", {}).get("model_route") or "") for item in retrieval_services if str(item.get("retrieval", {}).get("model_route") or ""))),
+        "estimated_cost": round(sum(float(item.get("retrieval", {}).get("estimated_cost", 0.0) or 0.0) for item in retrieval_services), 8),
         "focus_hint_applied": bool(normalized_focus_hint),
     }
     return filtered, contextualized_question, {"services": retrieval_services, "aggregate": aggregate}

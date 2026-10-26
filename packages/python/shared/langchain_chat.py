@@ -32,6 +32,7 @@ def build_chat_model(
         streaming=streaming,
         stream_usage=True,
         max_retries=0,
+        use_responses_api=str(getattr(settings, "request_format", "chat_completions")).lower() == "responses",
     )
 
 

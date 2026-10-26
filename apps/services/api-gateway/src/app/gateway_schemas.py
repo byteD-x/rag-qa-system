@@ -167,9 +167,10 @@ class LLMModelDiscoveryRequest(BaseModel):
     provider: str = Field(default="openai-compatible", max_length=64)
     base_url: str = Field(default="", max_length=512)
     credential: str = Field(default="", alias="api_key", max_length=4096)
+    request_format: str = Field(default="chat_completions", max_length=32)
     max_models: int = Field(default=200, ge=1, le=1000)
 
-    @field_validator("provider", "base_url", "credential")
+    @field_validator("provider", "base_url", "credential", "request_format")
     @classmethod
     def normalize_model_discovery_text(cls, value: str) -> str:
         return value.strip()
@@ -268,6 +269,23 @@ class UpdateModelProviderConfigRequest(BaseModel):
             return None
         allowed = {"chat", "embedding", "interview", "scoring"}
         return list(dict.fromkeys(item.strip().lower() for item in value if item.strip() in allowed))
+
+
+class ModelStageBindingsRequest(BaseModel):
+    bindings: dict[str, str | dict[str, Any] | None] = Field(default_factory=dict)
+
+    @field_validator("bindings")
+    @classmethod
+    def normalize_stage_bindings(cls, value: dict[str, str | dict[str, Any] | None]) -> dict[str, str | dict[str, Any] | None]:
+        return {
+            str(stage).strip().lower(): (
+                {str(key).strip(): (str(item).strip() if item is not None else "") for key, item in config_id.items()}
+                if isinstance(config_id, dict)
+                else (str(config_id).strip() if config_id else None)
+            )
+            for stage, config_id in value.items()
+            if str(stage).strip()
+        }
 
 
 class InterviewStartRequest(BaseModel):

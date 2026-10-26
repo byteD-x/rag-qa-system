@@ -34,6 +34,7 @@ def build_retrieval_cache_key(
     user_department: str = "",
     is_admin: bool = False,
     metadata_filter: dict[str, Any] | None = None,
+    model_stages: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Build a deterministic, permission-aware key without storing raw questions."""
     payload = {
@@ -45,9 +46,23 @@ def build_retrieval_cache_key(
         "user_department": str(user_department or "").strip().casefold(),
         "is_admin": bool(is_admin),
         "metadata_filter": _normalize_metadata_filter(metadata_filter),
+        "model_stages": _normalize_model_stages(model_stages),
     }
     canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _normalize_model_stages(value: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for stage_key, raw in sorted((value or {}).items()):
+        if not isinstance(raw, dict):
+            continue
+        result[str(stage_key)] = {
+            "provider": str(raw.get("provider_type") or raw.get("provider") or "").strip().lower(),
+            "model": str(raw.get("model_name") or raw.get("model") or "").strip(),
+            "request_format": str(raw.get("request_format") or "").strip().lower(),
+        }
+    return result
 
 
 def _normalize_metadata_filter(value: dict[str, Any] | None) -> dict[str, Any]:

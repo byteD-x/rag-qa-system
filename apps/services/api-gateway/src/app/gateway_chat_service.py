@@ -1550,19 +1550,40 @@ async def prepare_chat_message(
         scope_snapshot["mode"] = "multi"
         scope_snapshot["corpus_ids"] = list(agent_profile.get("default_corpus_ids") or [])
     scope_ms = round((time.perf_counter() - scope_started) * 1000.0, 3)
-    conversation_context = load_conversation_context(session_id, user.user_id)
+    try:
+        conversation_context = load_conversation_context(session_id, user.user_id)
+    except Exception:
+        logger.warning(
+            "conversation memory context unavailable; continuing without summary session_id=%s",
+            session_id,
+            exc_info=True,
+        )
+        conversation_context = {
+            "summary": "",
+            "state": {},
+            "summary_version": 1,
+            "summary_updated_at": None,
+        }
     history = recent_history_messages_fn(session_id, user, limit=20)
     memory_question = contextualize_memory_question(
         str(payload.question or ""),
         history,
         str(conversation_context.get("summary") or ""),
     )
-    memory_context = search_memories(
-        user_id=user.user_id,
-        session_id=session_id,
-        query=memory_question,
-        limit=6,
-    )
+    try:
+        memory_context = search_memories(
+            user_id=user.user_id,
+            session_id=session_id,
+            query=memory_question,
+            limit=6,
+        )
+    except Exception:
+        logger.warning(
+            "long-term memory unavailable; continuing without memory hits session_id=%s",
+            session_id,
+            exc_info=True,
+        )
+        memory_context = []
     retrieval_started = time.perf_counter()
     if execution_mode == "agent":
         evidence, contextualized_question, retrieval_meta = await _run_agent_retrieval(

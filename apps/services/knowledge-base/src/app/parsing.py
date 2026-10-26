@@ -156,6 +156,11 @@ def build_section_chunks(
     chunk_index = 1
     while cursor < len(section.text):
         end = min(cursor + window, len(section.text))
+        # Prefer sentence/paragraph boundaries so semantic chunks do not cut
+        # a policy clause in the middle; token budgets still remain authoritative.
+        boundary = _semantic_boundary(section.text, cursor, end)
+        if boundary > cursor + 80:
+            end = boundary
         if max_tokens is not None:
             end = _token_limited_end(section.text, cursor, end, max_tokens)
         snippet = section.text[cursor:end].strip()
@@ -183,6 +188,18 @@ def build_section_chunks(
         else:
             cursor = max(end - overlap, cursor + 1)
     return chunks
+
+
+def _semantic_boundary(text: str, cursor: int, end: int) -> int:
+    cjk_candidates = [match.end() for match in re.finditer(r"[\u3002\uff01\uff1f!\uff1b;]|[.!?](?=\s)", text[cursor:end])]
+    if cjk_candidates:
+        candidate = cursor + cjk_candidates[-1]
+        return min(max(candidate, cursor + 1), end)
+    candidates = [match.end() for match in re.finditer(r"[。！？!?；;.]\s+|\n\s*\n", text[cursor:end])]
+    if not candidates:
+        return end
+    candidate = cursor + candidates[-1]
+    return min(max(candidate, cursor + 1), end)
 
 
 def _token_limited_end(text: str, cursor: int, max_end: int, max_tokens: int) -> int:

@@ -13,8 +13,10 @@ from .gateway_llm_models import discover_openai_compatible_models, llm_config_su
 from .gateway_model_config import (
     create_model_config,
     disable_model_config,
+    get_model_stages,
     list_model_configs,
     load_model_config,
+    update_model_stages,
     update_model_config,
 )
 from .gateway_runtime import CHAT_PERMISSION
@@ -46,6 +48,7 @@ from .gateway_schemas import (
     CacheConfigRequest,
     CacheInvalidateRequest,
     MemoryEntryUpdateRequest,
+    ModelStageBindingsRequest,
 )
 from .business_tools import ensure_business_tools_registered
 from .model_health import model_health_monitor
@@ -104,15 +107,34 @@ async def remove_model_config(config_id: str, request: Request, user: CurrentUse
     return {"disabled": True, "config_id": config_id}
 
 
+@router.get("/api/v1/platform/model-stages")
+async def get_platform_model_stages(request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_stage.list")
+    return get_model_stages()
+
+
+@router.put("/api/v1/platform/model-stages")
+async def put_platform_model_stages(payload: ModelStageBindingsRequest, request: Request, user: CurrentUser) -> dict[str, object]:
+    _require_model_admin(request, user, action="platform.model_stage.update")
+    result = update_model_stages(bindings=payload.bindings, user_id=user.user_id)
+    write_gateway_audit_event(action="platform.model_stage.update", outcome="success", request=request, user=user, resource_type="model_stage_binding", resource_id="", scope="managed", details={"stage_count": len(payload.bindings)})
+    return result
+
+
 @router.post("/api/v1/platform/model-configs/{config_id}/test")
 async def test_model_config(config_id: str, request: Request, user: CurrentUser) -> dict[str, object]:
     _require_model_admin(request, user, action="platform.model_config.test", resource_id=config_id)
     row = load_model_config(config_id, include_secret=True)
+    if str(row.get("provider_type") or "").lower() == "jev":
+        if not str(row.get("base_url") or "").strip() or not str(row.get("api_key") or "").strip() or not str(row.get("model_name") or "").strip():
+            raise_api_error(400, "model_provider_config_incomplete", "JEV 配置需要 Base URL、API Key 和模型名")
+        return {"ok": True, "provider": "jev", "model_count": 1}
     result = await discover_openai_compatible_models(
         provider=str(row.get("provider_type") or "openai-compatible"),
         base_url=str(row.get("base_url") or ""),
         credential=str(row.get("api_key") or ""),
         max_models=1,
+        request_format=str((row.get("extra_json") or {}).get("request_format") or ""),
     )
     write_gateway_audit_event(action="platform.model_config.test", outcome="success", request=request, user=user, resource_type="model_provider_config", resource_id=config_id, scope="connectivity", details={"provider": result.get("provider", "")})
     return {"ok": True, "provider": result.get("provider", ""), "model_count": result.get("count", 0)}
@@ -509,6 +531,7 @@ async def post_discover_llm_models(payload: LLMModelDiscoveryRequest, request: R
         base_url=payload.base_url,
         credential=payload.credential,
         max_models=payload.max_models,
+        request_format=payload.request_format,
     )
     write_gateway_audit_event(
         action="platform.llm.models.discover",

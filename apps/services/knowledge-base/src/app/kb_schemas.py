@@ -235,6 +235,7 @@ class RetrieveRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     limit: int = Field(default=8, ge=1, le=20)
     metadata_filter: RetrievalMetadataFilter = Field(default_factory=RetrievalMetadataFilter)
+    model_stages: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class RetrievalDebugRequest(RetrieveRequest):
@@ -247,6 +248,7 @@ class KBQueryRequest(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
     debug: bool = False
     metadata_filter: RetrievalMetadataFilter = Field(default_factory=RetrievalMetadataFilter)
+    model_stages: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class CreateJobPositionRequest(BaseModel):

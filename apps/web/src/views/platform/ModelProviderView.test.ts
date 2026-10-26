@@ -1,10 +1,12 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { discoverLlmModels, getLlmConfig, listModelProviderConfigs, messageSuccess, messageWarning } = vi.hoisted(() => ({
+const { discoverLlmModels, getLlmConfig, listModelProviderConfigs, getModelStages, updateModelStages, messageSuccess, messageWarning } = vi.hoisted(() => ({
   discoverLlmModels: vi.fn(),
   getLlmConfig: vi.fn(),
   listModelProviderConfigs: vi.fn().mockResolvedValue({ items: [] }),
+  getModelStages: vi.fn().mockResolvedValue({ stages: [], available_configs: [] }),
+  updateModelStages: vi.fn(),
   messageSuccess: vi.fn(),
   messageWarning: vi.fn(),
 }));
@@ -20,6 +22,8 @@ vi.mock('@/api/platform', () => ({
   discoverLlmModels,
   getLlmConfig,
   listModelProviderConfigs,
+  getModelStages,
+  updateModelStages,
 }));
 
 import ModelProviderView from './ModelProviderView.vue';
@@ -103,6 +107,8 @@ describe('ModelProviderView', () => {
     discoverLlmModels.mockReset();
     getLlmConfig.mockReset();
     listModelProviderConfigs.mockReset();
+    getModelStages.mockReset();
+    updateModelStages.mockReset();
     messageSuccess.mockReset();
     messageWarning.mockReset();
 
@@ -117,6 +123,7 @@ describe('ModelProviderView', () => {
       model_routing: {},
     });
     listModelProviderConfigs.mockResolvedValue({ items: [] });
+    getModelStages.mockResolvedValue({ stages: [], available_configs: [] });
     discoverLlmModels.mockResolvedValue({
       provider: 'newapi',
       base_url: 'https://relay.example.test/v1',

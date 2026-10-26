@@ -45,6 +45,7 @@ def prepare_query_response(
     is_admin: bool = False,
     use_retrieval_cache: bool = False,
     metadata_filter: dict[str, Any] | None = None,
+    model_stages: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     strategy = detect_strategy(question)
     retrieval = retrieve_kb_result(
@@ -56,6 +57,7 @@ def prepare_query_response(
         is_admin=is_admin,
         use_cache=use_retrieval_cache,
         metadata_filter=metadata_filter,
+        model_stages=model_stages,
     )
     citations = dedupe_citations([serialize_evidence(item, corpus_id=f"kb:{base_id}") for item in retrieval.items])
     answer_mode, evidence_status, grounding_score, refusal_reason = classify_evidence(
@@ -101,6 +103,7 @@ async def build_query_response(
     is_admin: bool = False,
     use_retrieval_cache: bool = False,
     metadata_filter: dict[str, Any] | None = None,
+    model_stages: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # 检索+安全分析是同步阻塞;在 async 路由里放进线程池,避免阻塞事件循环。
     prepared = await run_in_threadpool(
@@ -112,6 +115,7 @@ async def build_query_response(
         is_admin=is_admin,
         use_retrieval_cache=use_retrieval_cache,
         metadata_filter=metadata_filter,
+        model_stages=model_stages,
     )
     answer = await _generate_query_answer(prepared=prepared)
     return _finalize_query_response(prepared=prepared, answer=answer)

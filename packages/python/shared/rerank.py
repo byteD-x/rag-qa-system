@@ -76,15 +76,17 @@ def _parse_extra_body(raw: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def load_rerank_settings() -> RerankSettings:
+def load_rerank_settings(model_config: dict[str, Any] | None = None) -> RerankSettings:
+    configured = model_config if isinstance(model_config, dict) else {}
+    extra = configured.get("extra") if isinstance(configured.get("extra"), dict) else {}
     return RerankSettings(
-        provider=_read_env("RERANK_PROVIDER", default="heuristic").lower(),
-        api_base_url=_read_env("RERANK_API_BASE_URL", "LLM_BASE_URL", default="").rstrip("/"),
-        api_key=_read_env("RERANK_API_KEY", "LLM_API_KEY", default=""),
-        model=_read_env("RERANK_MODEL", default=""),
-        timeout_seconds=max(_read_float("RERANK_TIMEOUT_SECONDS", default=20.0), 1.0),
-        top_n=max(_read_int("RERANK_TOP_N", default=30), 1),
-        extra_body=_parse_extra_body(_read_env("RERANK_EXTRA_BODY_JSON", default="{}")),
+        provider=str(configured.get("provider_type") or _read_env("RERANK_PROVIDER", default="heuristic")).lower(),
+        api_base_url=str(configured.get("base_url") or _read_env("RERANK_API_BASE_URL", "LLM_BASE_URL", default="")).rstrip("/"),
+        api_key=str(configured.get("api_key") or _read_env("RERANK_API_KEY", "LLM_API_KEY", default="")),
+        model=str(configured.get("model_name") or _read_env("RERANK_MODEL", default="")),
+        timeout_seconds=max(float(configured.get("timeout_seconds") or _read_float("RERANK_TIMEOUT_SECONDS", default=20.0)), 1.0),
+        top_n=max(int(extra.get("top_n") or _read_int("RERANK_TOP_N", default=30)), 1),
+        extra_body=extra.get("body") if isinstance(extra.get("body"), dict) else _parse_extra_body(_read_env("RERANK_EXTRA_BODY_JSON", default="{}")),
     )
 
 
@@ -94,12 +96,13 @@ def rerank_evidence_blocks(
     *,
     focus_query: str = "",
     limit: int | None = None,
+    model_config: dict[str, Any] | None = None,
 ) -> tuple[list[EvidenceBlock], list[RerankDebug]]:
     if not items:
         return [], []
 
     primary = (focus_query or question or "").strip()
-    settings = load_rerank_settings()
+    settings = load_rerank_settings(model_config)
     scores, provider = _score_items(primary, items, settings=settings)
     ranked = sorted(items, key=lambda item: scores.get(item.unit_id, 0.0), reverse=True)
     if limit is not None:

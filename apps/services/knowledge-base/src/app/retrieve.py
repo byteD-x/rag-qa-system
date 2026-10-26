@@ -15,11 +15,22 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from pydantic import ConfigDict
 from shared.logging import setup_logging
-from shared.jevgate import gate_evidence_blocks
+from shared.jevgate import classify_query_intent, gate_evidence_blocks, load_jev_settings
 from shared.query_rewrite import rewrite_query
 from shared.rerank import rerank_evidence_blocks
 from shared.retrieval import EvidenceBlock, EvidencePath, RetrievalResult, RetrievalStats, weighted_rrf
 from shared.text_search import build_simple_tsquery, normalize_text
+from shared.tracing import trace_span
+from shared.advanced_rag import (
+    adaptive_top_k,
+    build_freshness_metadata,
+    choose_rag_model_route,
+    classify_query,
+    graph_route_evidence,
+    mmr_select,
+    normalize_table_evidence,
+    sanitize_evidence_text,
+)
 
 from .query import compact_quote
 from .retrieval_cache import build_retrieval_cache_key, retrieval_result_cache
@@ -77,12 +88,15 @@ class RetrievalGraphState(TypedDict, total=False):
     user_department: str
     is_admin: bool
     metadata_filter: dict[str, Any]
+    model_stages: dict[str, dict[str, Any]]
     rewrite: Any
     doc_ids: list[str]
     signal_documents: dict[str, list[Document]]
     grep_documents: list[Document]
     degraded_signals: list[str]
     warnings: list[str]
+    query_variants: list[dict[str, Any]]
+    query_route: str
     result: RetrievalResult
 
 
@@ -119,7 +133,10 @@ class StructureRetriever(BaseRetriever):
                         d.is_current_version,
                         d.effective_from,
                         d.effective_to,
+                        d.source_updated_at,
+                        d.updated_at AS indexed_at,
                         s.title AS section_title,
+                        LEFT(s.search_text, 2400) AS parent_context,
                         COALESCE(vr.region_label, '') AS region_label,
                         c.source_kind,
                         c.page_number,
@@ -212,7 +229,10 @@ class FTSRetriever(BaseRetriever):
                         d.is_current_version,
                         d.effective_from,
                         d.effective_to,
+                        d.source_updated_at,
+                        d.updated_at AS indexed_at,
                         s.title AS section_title,
+                        LEFT(s.search_text, 2400) AS parent_context,
                         COALESCE(vr.region_label, '') AS region_label,
                         c.source_kind,
                         c.page_number,
@@ -287,7 +307,10 @@ class GrepRetriever(BaseRetriever):
                         d.is_current_version,
                         d.effective_from,
                         d.effective_to,
+                        d.source_updated_at,
+                        d.updated_at AS indexed_at,
                         s.title AS section_title,
+                        LEFT(s.search_text, 2400) AS parent_context,
                         '' AS region_label,
                         c.source_kind,
                         c.page_number,
@@ -335,6 +358,7 @@ def retrieve_kb_evidence(
     is_admin: bool = False,
     use_cache: bool = False,
     metadata_filter: dict[str, Any] | None = None,
+    model_stages: dict[str, dict[str, Any]] | None = None,
 ) -> list[EvidenceBlock]:
     return retrieve_kb_result(
         base_id=base_id,
@@ -345,6 +369,7 @@ def retrieve_kb_evidence(
         is_admin=is_admin,
         use_cache=use_cache,
         metadata_filter=metadata_filter,
+        model_stages=model_stages,
     ).items
 
 
@@ -358,6 +383,7 @@ def retrieve_kb_result(
     is_admin: bool = False,
     use_cache: bool = False,
     metadata_filter: dict[str, Any] | None = None,
+    model_stages: dict[str, dict[str, Any]] | None = None,
 ) -> RetrievalResult:
     normalized_department = str(user_department or "").strip().lower()
     normalized_admin = bool(is_admin)
@@ -369,6 +395,7 @@ def retrieve_kb_result(
         "user_department": normalized_department,
         "is_admin": normalized_admin,
         "metadata_filter": _normalize_metadata_filter(metadata_filter),
+        "model_stages": dict(model_stages or {}),
     }
 
     def _compute() -> RetrievalResult:
@@ -385,6 +412,7 @@ def retrieve_kb_result(
         user_department=normalized_department,
         is_admin=normalized_admin,
         metadata_filter=payload["metadata_filter"],
+        model_stages=payload["model_stages"],
     )
     started = time.perf_counter()
     result, cache_hit = retrieval_result_cache.get_or_compute(cache_key, _compute)
@@ -426,12 +454,18 @@ def _prepare_request(payload: dict[str, Any]) -> dict[str, Any]:
     user_department = str(payload.get("user_department") or "").strip().lower()
     is_admin = bool(payload.get("is_admin"))
     metadata_filter = _normalize_metadata_filter(payload.get("metadata_filter"))
+    model_stages = dict(payload.get("model_stages") or {})
     doc_ids = _resolve_document_ids(
         base_id=base_id,
         document_ids=list(payload.get("document_ids") or []),
         user_department=user_department,
         is_admin=is_admin,
         metadata_filter=metadata_filter,
+    )
+    deterministic_route = classify_query(question).route
+    jev_intent = classify_query_intent(
+        question,
+        settings=load_jev_settings(model_stages.get("jev_intent")),
     )
     return {
         "started": started,
@@ -441,8 +475,11 @@ def _prepare_request(payload: dict[str, Any]) -> dict[str, Any]:
         "user_department": user_department,
         "is_admin": is_admin,
         "metadata_filter": metadata_filter,
+        "model_stages": model_stages,
         "rewrite": rewrite,
         "doc_ids": doc_ids,
+        "query_variants": list(rewrite.query_variants or []),
+        "query_route": str((jev_intent or {}).get("route") or rewrite.route or deterministic_route),
     }
 
 
@@ -456,31 +493,63 @@ def _run_signal_retrievers(state: dict[str, Any]) -> dict[str, Any]:
         state["warnings"] = []
         return state
 
-    tsquery = build_simple_tsquery(rewrite.retrieval_query)
+    variants = list(state.get("query_variants") or [])[:5]
+    if not variants:
+        variants = [{"text": rewrite.retrieval_query, "kind": "original", "weight": 1.0}]
+    primary_query = str(variants[0].get("text") or rewrite.retrieval_query)
     exact_terms = _exact_query_terms(rewrite.retrieval_query)
 
     # 召回信号独立执行；跨请求复用有界线程池，避免高并发时每个请求重复创建线程。
+    def _merge_variant_documents(factory: Any) -> list[Document]:
+        merged: list[Document] = []
+        seen: set[str] = set()
+        for variant in variants:
+            query = str(variant.get("text") or primary_query).strip()
+            if not query:
+                continue
+            for document in factory(query):
+                unit_id = str((document.metadata or {}).get("unit_id") or "")
+                if unit_id and unit_id in seen:
+                    continue
+                if unit_id:
+                    seen.add(unit_id)
+                merged.append(document)
+        return merged
+
     def _run_structure() -> list[Document]:
-        return StructureRetriever(
-            base_id=state["base_id"],
-            document_ids=doc_ids,
-            focus_query=rewrite.focus_query or state["question"],
-        ).invoke(rewrite.focus_query or state["question"])
+        return _merge_variant_documents(
+            lambda query: StructureRetriever(
+                base_id=state["base_id"], document_ids=doc_ids, focus_query=query, limit=20
+            ).invoke(query),
+        )
 
     def _run_fts() -> list[Document]:
-        return FTSRetriever(
-            base_id=state["base_id"],
-            document_ids=doc_ids,
-            tsquery=tsquery,
-        ).invoke(rewrite.retrieval_query)
+        return _merge_variant_documents(
+            lambda query: FTSRetriever(
+                base_id=state["base_id"], document_ids=doc_ids, tsquery=build_simple_tsquery(query), limit=80
+            ).invoke(query),
+        )
 
     def _run_vector() -> tuple[list[Document], list[str], list[str]]:
-        return search_vector_documents(
-            base_id=state["base_id"],
-            question=rewrite.retrieval_query,
-            document_ids=doc_ids,
-            limit=40,
-        )
+        merged: list[Document] = []
+        degraded: list[str] = []
+        warnings: list[str] = []
+        seen: set[str] = set()
+        for variant in variants:
+            documents, variant_degraded, variant_warnings = search_vector_documents(
+                base_id=state["base_id"], question=str(variant.get("text") or primary_query),
+                document_ids=doc_ids, limit=40,
+            )
+            degraded.extend(variant_degraded)
+            warnings.extend(variant_warnings)
+            for document in documents:
+                unit_id = str((document.metadata or {}).get("unit_id") or "")
+                if unit_id and unit_id in seen:
+                    continue
+                if unit_id:
+                    seen.add(unit_id)
+                merged.append(document)
+        return merged, list(dict.fromkeys(degraded)), list(dict.fromkeys(warnings))
 
     def _run_grep() -> list[Document]:
         return GrepRetriever(
@@ -547,6 +616,8 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 focus_query=rewrite.focus_query,
                 rewrite_tags=list(rewrite.strategy_tags),
                 expansion_terms=list(rewrite.expansion_terms),
+                query_variants=list(state.get("query_variants") or []),
+                query_route=str(state.get("query_route") or "semantic"),
                 retrieval_ms=round((time.perf_counter() - float(state["started"])) * 1000.0, 3),
             ),
         )
@@ -559,7 +630,10 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         _merge_documents(results, signal_lists, signal_documents.get(signal_name, []), signal_name)
     _merge_documents(results, signal_lists, list(state.get("grep_documents") or []), "grep")
 
-    fused = weighted_rrf(signal_lists, weights=FUSION_WEIGHTS)
+    trace_spans: list[dict[str, Any]] = []
+    with trace_span("rag.retrieval.fusion", attributes={"query_route": str(state.get("query_route") or "semantic")}) as fusion_span:
+        fused = weighted_rrf(signal_lists, weights=FUSION_WEIGHTS)
+    trace_spans.append(fusion_span)
     ordered = sorted(fused.items(), key=lambda item: item[1], reverse=True)
 
     fused_blocks: list[EvidenceBlock] = []
@@ -611,25 +685,62 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
 
     fused_blocks = _dedupe_fused_blocks(fused_blocks)
 
-    rerank_pool = fused_blocks[: min(max(int(state["limit"]) * 3, 15), 30)]
-    reranked_blocks, rerank_debug = rerank_evidence_blocks(
-        rewrite.focus_query or state["question"],
-        rerank_pool,
-        limit=int(state["limit"]),
-    )
+    query_route = str(state.get("query_route") or classify_query(state["question"]).route)
+    candidate_limit = adaptive_top_k(state["question"], requested=int(state["limit"]), candidate_count=len(fused_blocks))
+    rerank_pool = fused_blocks[: min(max(candidate_limit * 4, 15), 40)]
+    with trace_span("rag.retrieval.rerank", attributes={"candidate_count": len(rerank_pool)}) as rerank_span:
+        reranked_blocks, rerank_debug = rerank_evidence_blocks(
+            rewrite.focus_query or state["question"],
+            rerank_pool,
+            limit=min(max(candidate_limit * 2, int(state["limit"])), 40),
+            model_config=dict(state.get("model_stages") or {}).get("rerank"),
+        )
+    trace_spans.append(rerank_span)
     debug_by_unit = {item.unit_id: item.score for item in rerank_debug}
     rerank_provider = rerank_debug[0].provider if rerank_debug else ("heuristic" if rerank_pool else "")
 
-    gated_blocks, gate_debug, gate_meta = gate_evidence_blocks(
-        rewrite.focus_query or state["question"],
+    if query_route == "graph_local":
+        reranked_blocks = graph_route_evidence(rewrite.focus_query or state["question"], reranked_blocks, mode="local")
+    elif query_route == "graph_global":
+        reranked_blocks = graph_route_evidence(rewrite.focus_query or state["question"], reranked_blocks, mode="global")
+
+    mmr_blocks = mmr_select(
         reranked_blocks,
+        score_fn=lambda item: float(item.signal_scores.get("rerank", item.evidence_path.final_score) or 0.0),
+        text_fn=lambda item: f"{item.document_id} {item.section_title} {item.raw_text}",
+        limit=max(candidate_limit, int(state["limit"])),
+        diversity=0.24,
     )
+    pre_gate_safety_events = 0
+    safe_mmr_blocks: list[EvidenceBlock] = []
+    for block in mmr_blocks:
+        safe_quote, quote_events = sanitize_evidence_text(block.quote)
+        safe_raw_text, raw_events = sanitize_evidence_text(block.raw_text)
+        pre_gate_safety_events += len(quote_events) + len(raw_events)
+        if quote_events or raw_events:
+            safe_mmr_blocks.append(replace(block, quote=safe_quote, raw_text=safe_raw_text))
+        else:
+            safe_mmr_blocks.append(block)
+    with trace_span("rag.retrieval.gate", attributes={"candidate_count": len(mmr_blocks)}) as gate_span:
+        gated_blocks, gate_debug, gate_meta = gate_evidence_blocks(
+            rewrite.focus_query or state["question"],
+            safe_mmr_blocks,
+            settings=load_jev_settings(
+                dict(state.get("model_stages") or {}).get("jev_rerank")
+                or dict(state.get("model_stages") or {}).get("jev_intent")
+            ),
+        )
+    trace_spans.append(gate_span)
+    gated_blocks = gated_blocks[: max(int(state["limit"]), 1)]
     gate_by_unit = {item.unit_id: item for item in gate_debug}
     warnings = list(state.get("warnings") or [])
     if gate_meta.warning:
         warnings.append(gate_meta.warning)
 
     evidence: list[EvidenceBlock] = []
+    safety_events = pre_gate_safety_events
+    freshness_refresh_count = 0
+    table_evidence_count = 0
     for final_rank, block in enumerate(gated_blocks, start=1):
         signal_scores = dict(block.signal_scores)
         if block.unit_id in debug_by_unit:
@@ -637,6 +748,30 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         gate_item = gate_by_unit.get(block.unit_id)
         if gate_item is not None and gate_item.probability is not None:
             signal_scores["jev"] = gate_item.probability
+        safe_quote, quote_events = sanitize_evidence_text(block.quote)
+        safe_raw_text, raw_events = sanitize_evidence_text(block.raw_text)
+        safety_events += len(quote_events) + len(raw_events)
+        freshness = build_freshness_metadata(
+            source_updated_at=block.kb_metadata.get("source_updated_at") if isinstance(block.kb_metadata, dict) else None,
+            indexed_at=block.kb_metadata.get("indexed_at") if isinstance(block.kb_metadata, dict) else None,
+            expires_at=block.effective_to,
+        )
+        if freshness.stale:
+            freshness_refresh_count += 1
+        metadata = dict(block.kb_metadata)
+        parent_context = str(metadata.get("parent_context") or "").strip()
+        parent_context, parent_events = sanitize_evidence_text(parent_context)
+        safety_events += len(parent_events)
+        if parent_context and parent_context not in safe_raw_text:
+            safe_raw_text = f"{parent_context}\n{safe_raw_text}"[:5200]
+        metadata["freshness"] = freshness.as_dict()
+        table = normalize_table_evidence(safe_raw_text)
+        if table is not None:
+            table_evidence_count += 1
+            metadata["table_evidence"] = table.as_dict()
+        if quote_events or raw_events:
+            metadata["safety_events"] = sorted(set(quote_events + raw_events))
+        signal_scores["freshness"] = freshness.freshness_score
         evidence.append(
             EvidenceBlock(
                 unit_id=block.unit_id,
@@ -653,8 +788,8 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 chapter_title=block.chapter_title,
                 scene_index=block.scene_index,
                 char_range=block.char_range,
-                quote=block.quote,
-                raw_text=block.raw_text,
+                quote=safe_quote,
+                raw_text=safe_raw_text,
                 corpus_id=block.corpus_id,
                 corpus_type=block.corpus_type,
                 service_type=block.service_type,
@@ -664,7 +799,7 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
                 question_type=block.question_type,
                 difficulty=block.difficulty,
                 tags=list(block.tags),
-                kb_metadata=dict(block.kb_metadata),
+                kb_metadata=metadata,
             page_number=block.page_number,
             asset_id=block.asset_id,
             thumbnail_url=block.thumbnail_url,
@@ -684,12 +819,17 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
             )
         )
 
+    model_route = choose_rag_model_route(
+        state["question"], candidate_count=len(evidence), context_tokens=sum(len(item.raw_text) for item in evidence) // 2
+    )
     stats = RetrievalStats(
         original_query=rewrite.original_query,
         rewritten_query=rewrite.retrieval_query,
         focus_query=rewrite.focus_query,
         rewrite_tags=list(rewrite.strategy_tags),
         expansion_terms=list(rewrite.expansion_terms),
+        query_variants=list(state.get("query_variants") or []),
+        query_route=query_route,
         degraded_signals=list(state.get("degraded_signals") or []),
         warnings=warnings,
         structure_candidates=len(dict.fromkeys(signal_lists.get("structure", []))),
@@ -708,6 +848,15 @@ def _fuse_and_rerank(state: dict[str, Any]) -> RetrievalResult:
         gate_kept_candidates=gate_meta.kept_candidates,
         gate_dropped_candidates=gate_meta.dropped_candidates,
         gate_remote_calls=gate_meta.remote_calls,
+        mmr_applied=bool(mmr_blocks),
+        parent_context_expanded=any(bool(item.kb_metadata.get("parent_context")) for item in evidence),
+        table_evidence_count=table_evidence_count,
+        graph_route=query_route if query_route.startswith("graph") else "",
+        evidence_safety_events=safety_events,
+        freshness_refresh_count=freshness_refresh_count,
+        model_route=model_route.route_key,
+        estimated_cost=model_route.estimated_cost,
+        trace_spans=trace_spans,
     )
     return RetrievalResult(items=evidence, stats=stats)
 
@@ -819,6 +968,7 @@ def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -
             "effective_from": _serialize_timestamp(row.get("effective_from")),
             "effective_to": _serialize_timestamp(row.get("effective_to")),
             "section_title": str(row.get("section_title") or ""),
+            "parent_context": str(row.get("parent_context") or ""),
             "chapter_title": "",
             "scene_index": 0,
             "char_range": f"{row.get('char_start', 0)}-{row.get('char_end', 0)}",
@@ -830,7 +980,12 @@ def _row_to_document(row: dict[str, Any], *, signal_name: str, score_key: str) -
             "question_type": str(row.get("question_type") or ""),
             "difficulty": str(row.get("difficulty") or ""),
             "tags": list(row.get("tags_json") or []),
-            "kb_metadata": dict(row.get("metadata_json") or {}),
+            "kb_metadata": {
+                **dict(row.get("metadata_json") or {}),
+                "source_updated_at": _serialize_timestamp(row.get("source_updated_at")),
+                "indexed_at": _serialize_timestamp(row.get("indexed_at")),
+                "parent_context": str(row.get("parent_context") or ""),
+            },
             "page_number": int(row["page_number"]) if row.get("page_number") is not None else None,
             "asset_id": asset_id,
             "thumbnail_url": _thumbnail_url_from_asset_id(asset_id),

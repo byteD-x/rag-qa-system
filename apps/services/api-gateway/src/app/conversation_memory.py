@@ -1,7 +1,7 @@
 """多轮对话状态与长期记忆服务。
 
 记忆与知识库证据分开管理：记忆描述用户、任务和历史决定，知识库证据仍然是回答事实的主依据。
-本模块使用 PostgreSQL 做可解释的混合检索，后续可在不改变调用契约的情况下替换为向量索引。
+本模块使用 PostgreSQL 做可解释的混合检索：词项候选负责可解释过滤，记忆 embedding 负责语义相似度补充。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from .db import to_json
 from .gateway_runtime import gateway_db, logger
+from shared.embeddings import cosine_similarity, embed_query_text, load_embedding_settings
 
 
 _TEMPORAL_RE = re.compile(r"(当前|现在|目前|最新|之前|以后|上周|本周|今天|昨天|明天|\d{4}[-年/]\d{1,2})")
@@ -111,8 +112,12 @@ def _tokenize(text: str) -> set[str]:
 
 def search_memories(*, user_id: str, query: str, session_id: str = "", limit: int = 6) -> list[dict[str, Any]]:
     query_terms = _tokenize(query)
-    patterns = [f"%{term}%" for term in sorted(query_terms)[:8]] or ["%"]
     now = datetime.now(timezone.utc)
+    query_vector: list[float] = []
+    try:
+        query_vector = embed_query_text(query)
+    except Exception:
+        logger.warning("memory semantic query embedding failed", exc_info=True)
     with gateway_db.connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -125,11 +130,10 @@ def search_memories(*, user_id: str, query: str, session_id: str = "", limit: in
                   AND (valid_from IS NULL OR valid_from <= NOW())
                   AND (valid_to IS NULL OR valid_to >= NOW())
                   AND (scope_type <> 'session' OR scope_id = %s)
-                  AND (subject ILIKE ANY(%s) OR predicate ILIKE ANY(%s) OR object ILIKE ANY(%s) OR summary ILIKE ANY(%s))
                 ORDER BY updated_at DESC
                 LIMIT %s
                 """,
-                (user_id, session_id, patterns, patterns, patterns, patterns, max(limit * 4, 12)),
+                (user_id, session_id, max(limit * 12, 48)),
             )
             rows = cur.fetchall()
     ranked: list[tuple[float, dict[str, Any]]] = []
@@ -139,7 +143,20 @@ def search_memories(*, user_id: str, query: str, session_id: str = "", limit: in
         exact = 0.25 if query.strip() and query.strip().lower() in text.lower() else 0.0
         recency = 0.1 if str(row.get("updated_at") or "")[:10] == now.date().isoformat() else 0.0
         temporal = 0.1 if _TEMPORAL_RE.search(query) and row.get("valid_to") else 0.0
-        score = overlap * 0.55 + float(row.get("confidence") or 0.0) * 0.2 + float(row.get("importance") or 0.5) * 0.15 + exact + recency + temporal
+        semantic = 0.0
+        raw_embedding = row.get("embedding_json")
+        if query_vector and isinstance(raw_embedding, list) and raw_embedding:
+            try:
+                semantic = max(0.0, cosine_similarity(query_vector, [float(item) for item in raw_embedding]))
+            except (TypeError, ValueError):
+                semantic = 0.0
+        score = (
+            overlap * 0.35
+            + semantic * 0.35
+            + float(row.get("confidence") or 0.0) * 0.15
+            + float(row.get("importance") or 0.5) * 0.1
+            + exact + recency + temporal
+        )
         ranked.append((score, row))
     ranked.sort(key=lambda item: item[0], reverse=True)
     if ranked:
@@ -236,6 +253,11 @@ def extract_and_store_memories(*, user_id: str, session_id: str, question: str, 
         candidate["summary"] = str(candidate.get("summary") or "").strip()[:320]
         entity_keys = _candidate_entity_keys(candidate)
         temporal = _candidate_temporal_fields(candidate, question)
+        memory_text = " ".join(str(candidate.get(key) or "") for key in ("memory_type", "subject", "predicate", "object", "summary"))
+        try:
+            embedding = embed_query_text(memory_text, settings=load_embedding_settings())
+        except Exception:
+            embedding = []
         with gateway_db.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -266,6 +288,8 @@ def extract_and_store_memories(*, user_id: str, session_id: str, question: str, 
                             evidence_quote = %s,
                             source_message_ids_json = %s::jsonb,
                             entity_keys_json = %s::jsonb,
+                            embedding_json = %s::jsonb,
+                            embedding_model = %s,
                             valid_from = COALESCE(%s, valid_from),
                             valid_to = COALESCE(%s, valid_to),
                             expires_at = COALESCE(%s, expires_at),
@@ -273,18 +297,18 @@ def extract_and_store_memories(*, user_id: str, session_id: str, question: str, 
                         WHERE id = %s
                         RETURNING *
                         """,
-                        (candidate["summary"], question[:500], to_json(message_ids or []), to_json(entity_keys), temporal["valid_from"], temporal["valid_to"], temporal["expires_at"], existing["id"]),
+                        (candidate["summary"], question[:500], to_json(message_ids or []), to_json(entity_keys), to_json(embedding), load_embedding_settings().model if embedding else "", temporal["valid_from"], temporal["valid_to"], temporal["expires_at"], existing["id"]),
                     )
                     row = cur.fetchone()
                 else:
                     memory_id = str(uuid4())
                     cur.execute(
                         """
-                        INSERT INTO agent_memory_entries (id, user_id, memory_type, subject, predicate, object, summary, confidence, importance, source_session_id, source_message_ids_json, entity_keys_json, scope_type, scope_id, evidence_quote, valid_from, valid_to, expires_at, supersedes_id)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, 'user', %s, %s, %s, %s, %s, NULLIF(%s, '')::uuid)
+                        INSERT INTO agent_memory_entries (id, user_id, memory_type, subject, predicate, object, summary, confidence, importance, source_session_id, source_message_ids_json, entity_keys_json, embedding_json, embedding_model, scope_type, scope_id, evidence_quote, valid_from, valid_to, expires_at, supersedes_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, 'user', %s, %s, %s, %s, %s, NULLIF(%s, '')::uuid)
                         RETURNING *
                         """,
-                        (memory_id, user_id, candidate["memory_type"], candidate["subject"], candidate["predicate"], candidate["object"], candidate["summary"], 0.72, 0.5, session_id, to_json(message_ids or []), to_json(entity_keys), user_id, question[:500], temporal["valid_from"], temporal["valid_to"], temporal["expires_at"], supersedes_id),
+                        (memory_id, user_id, candidate["memory_type"], candidate["subject"], candidate["predicate"], candidate["object"], candidate["summary"], 0.72, 0.5, session_id, to_json(message_ids or []), to_json(entity_keys), to_json(embedding), load_embedding_settings().model if embedding else "", user_id, question[:500], temporal["valid_from"], temporal["valid_to"], temporal["expires_at"], supersedes_id),
                     )
                     row = cur.fetchone()
             conn.commit()

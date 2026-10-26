@@ -62,6 +62,7 @@ export interface LlmConfigSummary {
   api_key_configured: boolean;
   current_model: string;
   common_knowledge_model: string;
+  request_format?: LlmRequestFormat;
   model_routing: Record<string, LlmRouteSummary>;
 }
 
@@ -76,16 +77,20 @@ export interface LlmModelDiscoveryResult {
   provider: string;
   base_url: string;
   models_url: string;
+  request_format: LlmRequestFormat;
   api_key_configured: boolean;
   current_model: string;
   models: LlmModelItem[];
   count: number;
 }
 
+export type LlmRequestFormat = 'chat_completions' | 'responses';
+
 export interface LlmModelDiscoveryPayload {
   provider?: string;
   base_url?: string;
   api_key?: string;
+  request_format?: LlmRequestFormat;
   max_models?: number;
 }
 
@@ -112,6 +117,25 @@ export interface ModelProviderConfig {
   default_purposes: string[];
   api_key_configured: boolean;
   api_key_hint: string;
+  available_models: LlmModelItem[];
+  extra?: Record<string, unknown>;
+}
+
+export interface ModelStageDefinition {
+  key: string;
+  name: string;
+  description: string;
+  order: number;
+  builtin: boolean;
+  allowed_provider_types: string[];
+  config_id: string;
+  model_name: string;
+  config: ModelProviderConfig | null;
+}
+
+export interface ModelStagesPayload {
+  stages: ModelStageDefinition[];
+  available_configs: ModelProviderConfig[];
 }
 
 export function listModelProviderConfigs() {
@@ -132,6 +156,14 @@ export function disableModelProviderConfig(configId: string) {
 
 export function testModelProviderConfig(configId: string) {
   return request.post(`/platform/model-configs/${configId}/test`);
+}
+
+export function getModelStages() {
+  return request.get<ModelStagesPayload>('/platform/model-stages');
+}
+
+export function updateModelStages(bindings: Record<string, string | { config_id: string; model_name: string } | null>) {
+  return request.put<ModelStagesPayload>('/platform/model-stages', { bindings });
 }
 
 // ---- Tool Registry ----

@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import Request
 
 from shared.auth import CurrentUser
+from shared.advanced_rag import compile_knowledge_document, normalize_table_evidence
 
 from .db import to_json
 from .kb_api_support import audit_event
@@ -156,6 +157,9 @@ def ingest_inline_knowledge_document(
         "section_count": len(parsed.sections),
         "chunk_count": len(parsed.chunks),
         "chunking": chunking_summary,
+        "semantic_chunking": True,
+        "table_evidence_count": sum(1 for chunk in parsed.chunks if normalize_table_evidence(chunk.text) is not None),
+        "knowledge_compilation": compile_knowledge_document(content, title=file_name).as_dict(),
     }
     with db.connect() as conn:
         with conn.cursor() as cur:

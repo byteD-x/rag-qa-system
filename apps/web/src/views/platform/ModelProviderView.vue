@@ -33,13 +33,18 @@
 
       <section class="panel model-config-panel">
         <div class="panel-header">
-          <h2>已保存模型配置</h2>
-          <el-button type="primary" size="small" @click="showModelConfig = true">新增配置</el-button>
+          <div>
+            <h2>已配置服务商</h2>
+            <p class="panel-subtitle">每个服务商只需配置一次，阶段卡片会复用它发现的模型。</p>
+          </div>
+          <el-button type="primary" size="small" @click="openProviderDialog">新增服务商</el-button>
         </div>
         <el-table :data="modelConfigs" size="small">
           <el-table-column prop="name" label="名称" width="150" />
           <el-table-column prop="provider_type" label="提供商" width="150" />
-          <el-table-column prop="model_name" label="模型" min-width="160" show-overflow-tooltip />
+          <el-table-column label="可用模型" min-width="160">
+            <template #default="{ row }">{{ row.available_models?.length || (row.model_name ? 1 : 0) }} 个</template>
+          </el-table-column>
           <el-table-column label="默认用途" min-width="150">
             <template #default="{ row }">{{ row.default_purposes?.join('、') || '-' }}</template>
           </el-table-column>
@@ -55,33 +60,97 @@
         </el-table>
       </section>
 
-      <el-dialog v-model="showModelConfig" title="新增模型配置" width="560px">
+      <section class="panel stage-panel">
+        <div class="panel-header">
+          <div>
+            <h2>RAG 阶段模型</h2>
+            <p class="panel-subtitle">按检索到生成的顺序绑定已启用服务方；卡片内只能选择已保存配置。</p>
+          </div>
+          <el-tag effect="plain" type="info">{{ providerModelCount }} 个服务商 · {{ availableStageModelCount }} 个模型</el-tag>
+        </div>
+
+        <EnhancedEmpty
+          v-if="!enabledModelConfigs.length"
+          variant="document"
+          title="先配置一个可用服务方"
+          description="完成上方连接设置并保存后，阶段模型会出现在这里。"
+        />
+        <div v-else class="stage-grid">
+          <article v-for="stage in modelStages" :key="stage.key" class="stage-card">
+            <div class="stage-card__header">
+              <div>
+                <span class="stage-index">{{ String(stage.order / 10).padStart(2, '0') }}</span>
+                <h3>{{ stage.name }}</h3>
+              </div>
+              <el-tag v-if="stage.builtin" size="small" effect="plain" type="info">系统内置</el-tag>
+              <el-tag v-else-if="stage.config" size="small" effect="plain" type="success">已绑定</el-tag>
+              <el-tag v-else size="small" effect="plain" type="warning">未配置</el-tag>
+            </div>
+            <p class="stage-card__description">{{ stage.description }}</p>
+            <template v-if="stage.builtin">
+              <div class="stage-built-in">由系统自动执行，无需绑定外部模型</div>
+            </template>
+            <template v-else>
+              <el-select v-model="stageSelections[stage.key]" filterable clearable style="width: 100%" placeholder="搜索服务商或模型">
+                <el-option-group v-for="provider in stageProviders(stage)" :key="provider.id" :label="provider.name">
+                  <el-option v-for="model in provider.models" :key="`${provider.id}:${model.id}`" :label="model.id" :value="`${provider.id}:${model.id}`" />
+                </el-option-group>
+              </el-select>
+              <div v-if="!stageProviders(stage).length" class="stage-empty">没有符合该阶段要求的已配置模型</div>
+              <div class="stage-card__footer">
+                <span class="muted">{{ selectedStageLabel(stage) }}</span>
+                <el-button size="small" type="primary" :loading="stageSaving === stage.key" @click="saveStage(stage.key)">
+                  绑定
+                </el-button>
+              </div>
+            </template>
+          </article>
+        </div>
+      </section>
+
+      <el-dialog v-model="showModelConfig" title="保存服务商" width="560px">
         <el-form label-position="top">
-          <el-form-item label="名称"><el-input v-model="modelForm.name" placeholder="例如：面试评分模型" /></el-form-item>
+          <el-form-item label="服务商名称"><el-input v-model="modelForm.name" placeholder="例如：团队 OpenAI 中转" /></el-form-item>
           <div class="form-row">
-            <el-form-item label="提供商"><el-input v-model="modelForm.provider_type" placeholder="openai-compatible / ollama" /></el-form-item>
-            <el-form-item label="模型名"><el-input v-model="modelForm.model_name" /></el-form-item>
+            <el-form-item label="提供商">
+              <el-select v-model="modelForm.provider_type" filterable allow-create style="width: 100%">
+                <el-option v-for="item in providerOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="请求格式">
+              <el-select v-model="modelForm.request_format" style="width: 100%">
+                <el-option v-for="item in requestFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
           </div>
           <el-form-item label="Base URL"><el-input v-model="modelForm.base_url" placeholder="https://api.example.com/v1" /></el-form-item>
-          <el-form-item label="API Key"><el-input v-model="modelForm.api_key" show-password placeholder="只在提交时发送，后端加密保存" /></el-form-item>
+          <el-form-item label="API Key"><el-input v-model="modelForm.api_key" show-password placeholder="保存后由服务端加密存储" /></el-form-item>
           <el-form-item label="默认用途"><el-checkbox-group v-model="modelForm.default_purposes"><el-checkbox label="chat">对话</el-checkbox><el-checkbox label="embedding">嵌入</el-checkbox><el-checkbox label="interview">面试</el-checkbox><el-checkbox label="scoring">评分</el-checkbox></el-checkbox-group></el-form-item>
+          <div class="provider-catalog-note">将保存当前已发现的 {{ models.length }} 个模型，之后可在各阶段卡片中分别选择。</div>
         </el-form>
-        <template #footer><el-button @click="showModelConfig = false">取消</el-button><el-button type="primary" :loading="modelSaving" @click="saveModelConfig">保存</el-button></template>
+        <template #footer><el-button @click="showModelConfig = false">取消</el-button><el-button type="primary" :loading="modelSaving" @click="saveModelConfig">保存服务商</el-button></template>
       </el-dialog>
 
       <div class="provider-layout">
         <section class="panel">
           <div class="panel-header">
-            <h2>中转站探测</h2>
-            <el-tag effect="plain" type="info">不保存密钥</el-tag>
+            <div>
+              <h2>连接设置</h2>
+              <p class="panel-subtitle">填写 Base URL 与 API Key，自动读取可用模型</p>
+            </div>
+            <el-tag effect="plain" type="info">兼容 OpenAI 格式</el-tag>
           </div>
 
           <el-form label-position="top" class="provider-form" @submit.prevent>
-            <el-form-item label="Provider 标识">
+            <el-form-item label="提供商">
               <el-select v-model="form.provider" filterable allow-create default-first-option style="width: 100%">
-                <el-option label="openai-compatible" value="openai-compatible" />
-                <el-option label="newapi" value="newapi" />
-                <el-option label="sub2api" value="sub2api" />
+                <el-option v-for="item in providerOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="请求格式">
+              <el-select v-model="form.request_format" style="width: 100%">
+                <el-option v-for="item in requestFormatOptions" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
 
@@ -118,18 +187,22 @@
               <el-icon><Search /></el-icon>
               获取模型列表
             </el-button>
+            <el-button v-if="models.length" @click="openSaveDialog">保存服务商</el-button>
           </el-form>
 
           <div class="security-note">
             <strong>安全边界</strong>
-            <p>这里不会持久化 API Key。生产环境建议通过环境变量或密钥管理系统配置，并对可访问的中转站域名做白名单约束。</p>
+            <p>API Key 仅用于当前页面的发现请求；保存配置时会在服务端加密存储。支持 OpenAI Chat Completions、Responses，以及 Ollama 的 OpenAI 兼容端点。</p>
           </div>
         </section>
 
         <section class="panel panel--results">
           <div class="panel-header">
             <h2>模型列表</h2>
-            <span class="muted">{{ discoveryResult?.count || 0 }} 个模型</span>
+            <div class="results-tools">
+              <el-input v-model="modelSearch" clearable size="small" placeholder="搜索模型 ID" class="model-search" />
+              <span class="muted">{{ filteredModels.length }} / {{ discoveryResult?.count || 0 }} 个模型</span>
+            </div>
           </div>
 
           <Transition name="loading-fade">
@@ -144,7 +217,7 @@
               description="填写 Base URL 与 API Key 后获取模型列表"
             />
 
-            <el-table v-else :data="models" height="280" size="small" @row-click="selectModel">
+            <el-table v-else :data="filteredModels" height="280" size="small" @row-click="selectModel">
               <el-table-column label="模型 ID" min-width="220" show-overflow-tooltip>
                 <template #default="{ row }">
                   <button
@@ -229,10 +302,14 @@ import {
   createModelProviderConfig,
   disableModelProviderConfig,
   testModelProviderConfig,
+  getModelStages,
+  updateModelStages,
   type LlmConfigSummary,
   type LlmModelDiscoveryResult,
   type LlmModelItem,
-  type ModelProviderConfig
+  type ModelProviderConfig,
+  type ModelStageDefinition,
+  type LlmRequestFormat
 } from '@/api/platform';
 
 const config = ref<LlmConfigSummary | null>(null);
@@ -243,18 +320,72 @@ const fallbackRouteKey = ref('grounded_backup');
 const configLoading = ref(false);
 const discovering = ref(false);
 const modelConfigs = ref<ModelProviderConfig[]>([]);
+const modelStages = ref<ModelStageDefinition[]>([]);
+const stageSelections = reactive<Record<string, string | null>>({});
+const stageSaving = ref('');
 const showModelConfig = ref(false);
 const modelSaving = ref(false);
-const modelForm = reactive({ name: '', provider_type: 'openai-compatible', api_key: '', base_url: '', model_name: '', default_purposes: ['chat'] });
+const modelSearch = ref('');
+const lastCredential = ref('');
+const modelForm = reactive({ name: '', provider_type: 'openai-compatible', request_format: 'chat_completions' as LlmRequestFormat, api_key: '', base_url: '', model_name: '', default_purposes: ['chat'] });
+
+const providerOptions = [
+  { label: 'OpenAI 兼容', value: 'openai-compatible' },
+  { label: 'New API', value: 'newapi' },
+  { label: 'Sub2API', value: 'sub2api' },
+  { label: 'Ollama', value: 'ollama' },
+  { label: 'LM Studio', value: 'lmstudio' },
+  { label: 'vLLM', value: 'vllm' },
+  { label: 'JEV', value: 'jev' },
+  { label: 'Cross-Encoder', value: 'cross-encoder' },
+  { label: 'External Cross-Encoder', value: 'external-cross-encoder' },
+];
+const requestFormatOptions = [
+  { label: 'Chat Completions（通用）', value: 'chat_completions' as LlmRequestFormat },
+  { label: 'Responses API（OpenAI 新接口）', value: 'responses' as LlmRequestFormat },
+];
 
 const form = reactive({
   provider: 'openai-compatible',
   base_url: '',
   credential: '',
-  max_models: 200
+  max_models: 200,
+  request_format: 'chat_completions' as LlmRequestFormat
 });
 
 const models = computed<LlmModelItem[]>(() => discoveryResult.value?.models || []);
+const filteredModels = computed(() => {
+  const query = modelSearch.value.trim().toLowerCase();
+  if (!query) return models.value;
+  return models.value.filter(item => `${item.id} ${item.owned_by}`.toLowerCase().includes(query));
+});
+
+const enabledModelConfigs = computed(() => modelConfigs.value.filter(item => item.enabled));
+const providerModelCount = computed(() => enabledModelConfigs.value.length);
+const availableStageModelCount = computed(() => enabledModelConfigs.value.reduce((count, item) => count + modelCatalog(item).length, 0));
+
+function modelCatalog(config: ModelProviderConfig) {
+  const models = Array.isArray(config.available_models) ? config.available_models : [];
+  if (models.length) return models;
+  return config.model_name ? [{ id: config.model_name, object: 'model', owned_by: '', created: null }] : [];
+}
+
+function stageProviders(stage: ModelStageDefinition) {
+  const allowed = stage.allowed_provider_types || [];
+  const providers = enabledModelConfigs.value.filter(item => {
+    if (allowed.length) return allowed.includes(item.provider_type);
+    return !['jev', 'cross-encoder', 'external-cross-encoder'].includes(item.provider_type);
+  });
+  return providers.map(item => ({ ...item, models: modelCatalog(item) })).filter(item => item.models.length);
+}
+
+function selectedStageLabel(stage: ModelStageDefinition) {
+  const value = stageSelections[stage.key] || '';
+  const [configId, ...modelParts] = value.split(':');
+  const modelName = modelParts.join(':');
+  const selected = enabledModelConfigs.value.find(item => item.id === configId);
+  return selected && modelName ? `${selected.name} · ${modelName}` : '未绑定';
+}
 
 const routeEntries = computed(() =>
   Object.entries(config.value?.model_routing || {}).map(([route_key, item]) => ({
@@ -280,6 +411,7 @@ const configSnippet = computed(() => {
   const model = selectedModel.value || '<select-a-model>';
   const baseUrl = effectiveBaseUrl.value || '<relay-base-url>';
   const provider = effectiveProvider.value || 'openai-compatible';
+  const requestFormat = discoveryResult.value?.request_format || form.request_format;
   const route = (routeKey.value || 'grounded').trim();
   const fallbackRoute = (fallbackRouteKey.value || '').trim();
   const effectiveFallbackRoute = fallbackRoute && fallbackRoute !== route ? fallbackRoute : '';
@@ -289,6 +421,7 @@ const configSnippet = computed(() => {
   const primaryRouteConfig: Record<string, string> = {
     provider,
     base_url: baseUrl,
+    request_format: requestFormat,
     [credentialField]: credentialPlaceholder,
     model
   };
@@ -300,6 +433,7 @@ const configSnippet = computed(() => {
     routeConfig[effectiveFallbackRoute] = {
       provider,
       base_url: baseUrl,
+      request_format: requestFormat,
       [credentialField]: credentialPlaceholder,
       model
     };
@@ -311,6 +445,7 @@ const configSnippet = computed(() => {
     `LLM_BASE_URL=${baseUrl}`,
     `${credentialEnv}=${credentialPlaceholder}`,
     `LLM_MODEL=${model}`,
+    `LLM_REQUEST_FORMAT=${requestFormat}`,
     `LLM_MODEL_ROUTING_JSON='${routeJson}'`
   ].join('\n');
 });
@@ -320,6 +455,8 @@ function applyConfigDefaults(payload: LlmConfigSummary | null) {
   form.provider = payload.provider || 'openai-compatible';
   form.base_url = payload.base_url || '';
   selectedModel.value = payload.current_model || '';
+  modelForm.base_url = payload.base_url || '';
+  modelForm.provider_type = payload.provider || 'openai-compatible';
 }
 
 async function loadConfig() {
@@ -330,6 +467,13 @@ async function loadConfig() {
     applyConfigDefaults(payload);
     const stored: any = await listModelProviderConfigs().catch(() => ({ items: [] }));
     modelConfigs.value = stored.items || [];
+    if (typeof getModelStages === 'function') {
+      const stagePayload: any = await getModelStages().catch(() => ({ stages: [] }));
+      modelStages.value = (stagePayload.stages || []).sort((left: ModelStageDefinition, right: ModelStageDefinition) => left.order - right.order);
+      for (const stage of modelStages.value) {
+        stageSelections[stage.key] = stage.config_id && stage.model_name ? `${stage.config_id}:${stage.model_name}` : null;
+      }
+    }
     if (form.base_url) {
       await discoverModels(true);
     }
@@ -338,18 +482,58 @@ async function loadConfig() {
   }
 }
 
+async function saveStage(stageKey: string) {
+  stageSaving.value = stageKey;
+  try {
+    const payload: Record<string, { config_id: string; model_name: string } | null> = {};
+    for (const stage of modelStages.value) {
+      if (!stage.builtin) {
+        const value = stageSelections[stage.key] || '';
+        const separator = value.indexOf(':');
+        payload[stage.key] = separator > 0 ? { config_id: value.slice(0, separator), model_name: value.slice(separator + 1) } : null;
+      }
+    }
+    const result: any = await updateModelStages(payload);
+    modelStages.value = (result.stages || modelStages.value).sort((left: ModelStageDefinition, right: ModelStageDefinition) => left.order - right.order);
+    for (const stage of modelStages.value) stageSelections[stage.key] = stage.config_id && stage.model_name ? `${stage.config_id}:${stage.model_name}` : null;
+    ElMessage.success('阶段模型绑定已保存');
+  } finally {
+    stageSaving.value = '';
+  }
+}
+
+function openProviderDialog() {
+  modelForm.provider_type = effectiveProvider.value;
+  modelForm.request_format = discoveryResult.value?.request_format || form.request_format;
+  modelForm.base_url = effectiveBaseUrl.value;
+  modelForm.model_name = '';
+  modelForm.api_key = lastCredential.value;
+  modelForm.name = modelForm.provider_type;
+  showModelConfig.value = true;
+}
+
+function openSaveDialog() {
+  openProviderDialog();
+}
+
 async function saveModelConfig() {
-  if (!modelForm.name.trim() || !modelForm.base_url.trim() || !modelForm.model_name.trim()) {
-    ElMessage.warning('请填写名称、Base URL 和模型名');
+  if (!modelForm.name.trim() || !modelForm.base_url.trim() || !models.value.length) {
+    ElMessage.warning('请先发现模型，并填写服务商名称和 Base URL');
     return;
   }
   modelSaving.value = true;
   try {
-    const result: any = await createModelProviderConfig({ ...modelForm });
+    const result: any = await createModelProviderConfig({
+      ...modelForm,
+      model_name: '',
+      extra: { request_format: modelForm.request_format, available_models: models.value },
+    });
     modelConfigs.value.unshift(result);
     showModelConfig.value = false;
     modelForm.api_key = '';
-    ElMessage.success('模型配置已保存');
+    lastCredential.value = '';
+    await loadConfig();
+    ElMessage.success(`服务商已保存，共发现 ${models.value.length} 个模型`);
   } finally {
     modelSaving.value = false;
   }
@@ -388,18 +572,27 @@ async function discoverModels(silent = false) {
   discovering.value = true;
   try {
     const credentialValue = form.credential.trim();
+    lastCredential.value = credentialValue;
     const payloadBody = {
       provider: form.provider,
       base_url: form.base_url,
       max_models: form.max_models,
+      ...(form.request_format !== 'chat_completions' ? { request_format: form.request_format } : {}),
       ...(credentialValue ? { ['api_' + 'key']: credentialValue } : {})
     };
     const payload: any = await discoverLlmModels({
       ...payloadBody
     });
     discoveryResult.value = payload;
+    form.request_format = payload.request_format || form.request_format;
     selectedModel.value = payload.models?.[0]?.id || selectedModel.value;
     if (payload.provider && form.provider === 'openai-compatible') form.provider = payload.provider;
+    if (selectedModel.value) {
+      modelForm.provider_type = payload.provider || form.provider;
+      modelForm.request_format = payload.request_format || form.request_format;
+      modelForm.base_url = payload.base_url || form.base_url;
+      modelForm.model_name = selectedModel.value;
+    }
     if (!silent) ElMessage.success(`已获取 ${payload.count || 0} 个模型`);
   } finally {
     form.credential = '';
@@ -474,6 +667,92 @@ onMounted(() => {
   margin-top: 16px;
 }
 
+.stage-panel {
+  margin-top: 16px;
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stage-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel);
+}
+
+.stage-card__header,
+.stage-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stage-card__header > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-card h3 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-index {
+  color: var(--blue-600);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.stage-card__description {
+  min-height: 38px;
+  margin: 10px 0 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
+.stage-card__footer {
+  margin-top: 10px;
+}
+
+.stage-built-in {
+  padding: 9px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel-muted);
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+.stage-empty {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
+.provider-catalog-note {
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  background: var(--bg-panel-muted);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  line-height: 1.5;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
@@ -487,6 +766,22 @@ onMounted(() => {
   color: var(--text-primary);
   font-size: var(--text-body);
   font-weight: 600;
+}
+
+.panel-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-caption);
+}
+
+.results-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.model-search {
+  width: 190px;
 }
 
 .provider-form :deep(.el-form-item) {
@@ -571,8 +866,16 @@ onMounted(() => {
 
 @media (max-width: 1100px) {
   .summary-grid,
-  .provider-layout {
+  .provider-layout,
+  .stage-grid {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 640px) {
+  .platform-content { padding: 14px; }
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+  .results-tools { align-items: flex-end; flex-direction: column; gap: 4px; }
+  .model-search { width: 150px; }
 }
 </style>

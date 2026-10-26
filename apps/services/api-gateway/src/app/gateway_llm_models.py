@@ -11,6 +11,8 @@ from .ai_client import LLMSettings, load_llm_settings
 
 
 DEFAULT_MAX_MODELS = 200
+REQUEST_FORMATS = {"chat_completions", "responses"}
+NO_KEY_PROVIDERS = {"ollama", "localai", "vllm", "local", "openai-compatible-local"}
 
 
 def infer_provider_from_base_url(base_url: str, provider: str = "") -> str:
@@ -49,6 +51,7 @@ def llm_config_summary(settings: LLMSettings | None = None) -> dict[str, Any]:
         "base_url": effective.base_url,
         "api_key_configured": bool(effective.api_key),
         "current_model": effective.model,
+        "request_format": str(getattr(effective, "request_format", "chat_completions") or "chat_completions"),
         "common_knowledge_model": effective.common_knowledge_model,
         "model_routing": _summarize_model_routing(effective.model_routing),
     }
@@ -60,7 +63,7 @@ def _summarize_model_routing(routes: dict[str, dict[str, Any]]) -> dict[str, dic
         if not isinstance(route, dict):
             continue
         cleaned: dict[str, Any] = {}
-        for key in ("provider", "base_url", "model", "fallback_route_key", "temperature", "max_tokens", "timeout_seconds"):
+        for key in ("provider", "base_url", "model", "fallback_route_key", "request_format", "temperature", "max_tokens", "timeout_seconds"):
             if route.get(key) not in ("", None):
                 cleaned[key] = route[key]
         cleaned["api_key_configured"] = bool(route.get("api_key"))
@@ -78,7 +81,7 @@ def _normalize_base_url(raw_base_url: str) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM base_url must be an http(s) URL")
 
     path = parsed.path.rstrip("/")
-    for suffix in ("/chat/completions", "/models"):
+    for suffix in ("/chat/completions", "/responses", "/models", "/api/tags"):
         if path.endswith(suffix):
             path = path[: -len(suffix)].rstrip("/")
             break
@@ -88,6 +91,21 @@ def _normalize_base_url(raw_base_url: str) -> str:
 
 def _models_url(base_url: str) -> str:
     return f"{_normalize_base_url(base_url)}/models"
+
+
+def _request_format(_provider: str, value: str = "") -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in REQUEST_FORMATS:
+        return normalized
+    return "chat_completions"
+
+
+def _discovery_url(base_url: str, provider: str, request_format: str) -> str:
+    normalized = _normalize_base_url(base_url)
+    if provider.lower() == "ollama":
+        parsed = urlsplit(normalized)
+        return urlunsplit((parsed.scheme, parsed.netloc, "/api/tags", "", ""))
+    return f"{normalized}/models"
 
 
 def _allowed_model_discovery_hosts() -> set[str]:
@@ -170,6 +188,7 @@ async def discover_openai_compatible_models(
     base_url: str = "",
     credential: str = "",
     max_models: int = DEFAULT_MAX_MODELS,
+    request_format: str = "",
     settings: LLMSettings | None = None,
     client_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
@@ -180,13 +199,13 @@ async def discover_openai_compatible_models(
     )
     resolved_base_url = (base_url or effective.base_url).strip()
     resolved_credential = (credential or effective.api_key).strip()
-    no_key_providers = {"ollama", "localai", "vllm", "local", "openai-compatible-local"}
-    if not resolved_credential and resolved_provider.lower() not in no_key_providers:
+    resolved_format = _request_format(resolved_provider, request_format)
+    if not resolved_credential and resolved_provider.lower() not in NO_KEY_PROVIDERS:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LLM credential is required for model discovery")
 
     normalized_base_url = _normalize_base_url(resolved_base_url)
     _ensure_model_discovery_host_allowed(normalized_base_url)
-    url = _models_url(normalized_base_url)
+    url = _discovery_url(normalized_base_url, resolved_provider, resolved_format)
     headers = {"Accept": "application/json"}
     if resolved_credential:
         headers["Authorization"] = "Bearer " + resolved_credential
@@ -213,6 +232,7 @@ async def discover_openai_compatible_models(
         "provider": resolved_provider,
         "base_url": normalized_base_url,
         "models_url": url,
+        "request_format": resolved_format,
         "api_key_configured": bool(resolved_credential),
         "current_model": effective.model,
         "models": models,

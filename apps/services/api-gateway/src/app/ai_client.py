@@ -86,7 +86,7 @@ def _parse_model_routing(raw: str) -> dict[str, dict[str, Any]]:
         if not isinstance(route_key, str) or not isinstance(raw_definition, dict):
             continue
         cleaned: dict[str, Any] = {}
-        for key in ("provider", "base_url", "api_key", "model", "fallback_route_key"):
+        for key in ("provider", "base_url", "api_key", "model", "fallback_route_key", "request_format"):
             value = raw_definition.get(key)
             if isinstance(value, str) and value.strip():
                 cleaned[key] = value.strip()
@@ -171,6 +171,7 @@ class LLMSettings:
     system_prompt: str
     extra_body: dict[str, Any]
     model_routing: dict[str, dict[str, Any]] = field(default_factory=dict)
+    request_format: str = "chat_completions"
 
     @property
     def configured(self) -> bool:
@@ -180,6 +181,10 @@ class LLMSettings:
     @property
     def chat_url(self) -> str:
         return f"{self.base_url.rstrip('/')}/chat/completions"
+
+    @property
+    def responses_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}/responses"
 
 
 def load_llm_settings(*, purpose: str = "chat") -> LLMSettings:
@@ -205,6 +210,7 @@ def load_llm_settings(*, purpose: str = "chat") -> LLMSettings:
         system_prompt=_read_env("LLM_SYSTEM_PROMPT", "AI_SYSTEM_PROMPT"),
         extra_body=_parse_extra_body(_read_env("LLM_EXTRA_BODY_JSON", "AI_EXTRA_BODY_JSON", default="{}")),
         model_routing=_parse_model_routing(_read_env("LLM_MODEL_ROUTING_JSON", "AI_MODEL_ROUTING_JSON", default="{}")),
+        request_format=_read_env("LLM_REQUEST_FORMAT", "AI_REQUEST_FORMAT", default="chat_completions"),
     )
     # Database-backed provider settings are optional. If the migration has not
     # been applied or no enabled provider exists, preserve the legacy env path.
@@ -226,7 +232,40 @@ def load_llm_settings(*, purpose: str = "chat") -> LLMSettings:
         default_temperature=float(configured.get("temperature") or settings.default_temperature),
         default_max_tokens=max(int(configured.get("max_tokens") or settings.default_max_tokens), 128),
         timeout_seconds=max(float(configured.get("timeout_seconds") or settings.timeout_seconds), 1.0),
+        request_format=str((configured.get("extra_json") or {}).get("request_format") or settings.request_format),
     )
+
+
+def _response_api_body(*, model: str, messages: list[dict[str, str]], temperature: float, max_tokens: int, extra_body: dict[str, Any]) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": model,
+        "input": messages,
+        "temperature": temperature,
+        "max_output_tokens": max_tokens,
+    }
+    if extra_body:
+        body.update(extra_body)
+    return body
+
+
+def _extract_response_api_text(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    parts: list[str] = []
+    output = payload.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            if isinstance(content, list):
+                for content_item in content:
+                    if isinstance(content_item, dict) and isinstance(content_item.get("text"), str):
+                        parts.append(content_item["text"])
+    return "".join(parts).strip()
 
 
 async def create_llm_completion(
@@ -248,14 +287,21 @@ async def create_llm_completion(
             detail="LLM 回答生成未配置",
         )
 
-    request_body: dict[str, Any] = {
-        "model": (model or settings.model).strip(),
-        "messages": messages,
-        "temperature": settings.default_temperature if temperature is None else temperature,
-        "max_tokens": settings.default_max_tokens if max_tokens is None else max_tokens,
-    }
-    if settings.extra_body:
-        request_body.update(settings.extra_body)
+    resolved_model = (model or settings.model).strip()
+    resolved_temperature = settings.default_temperature if temperature is None else temperature
+    resolved_max_tokens = settings.default_max_tokens if max_tokens is None else max_tokens
+    use_responses = str(settings.request_format).lower() == "responses"
+    request_body = (
+        _response_api_body(model=resolved_model, messages=messages, temperature=resolved_temperature, max_tokens=resolved_max_tokens, extra_body=settings.extra_body)
+        if use_responses
+        else {
+            "model": resolved_model,
+            "messages": messages,
+            "temperature": resolved_temperature,
+            "max_tokens": resolved_max_tokens,
+            **(settings.extra_body or {}),
+        }
+    )
 
     headers = {"Content-Type": "application/json"}
     if settings.api_key:
@@ -264,7 +310,7 @@ async def create_llm_completion(
     timeout = httpx.Timeout(settings.timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            response = await client.post(settings.chat_url, headers=headers, json=request_body)
+            response = await client.post(settings.responses_url if use_responses else settings.chat_url, headers=headers, json=request_body)
         except httpx.HTTPError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -286,6 +332,19 @@ async def create_llm_completion(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
 
     payload = response.json()
+    if use_responses:
+        answer = _extract_response_api_text(payload)
+        if not answer:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="上游 LLM 服务返回了空回答")
+        return {
+            "answer": answer,
+            "reasoning": "",
+            "model": str(payload.get("model") or resolved_model),
+            "provider": settings.provider,
+            "finish_reason": str(payload.get("status") or ""),
+            "usage": payload.get("usage") if isinstance(payload, dict) else {},
+        }
+
     choices = payload.get("choices") if isinstance(payload, dict) else None
     if not isinstance(choices, list) or not choices:
         raise HTTPException(
@@ -340,15 +399,23 @@ async def create_llm_completion_stream(
             detail="LLM 回答生成未配置",
         )
 
-    request_body: dict[str, Any] = {
-        "model": (model or settings.model).strip(),
-        "messages": messages,
-        "temperature": settings.default_temperature if temperature is None else temperature,
-        "max_tokens": settings.default_max_tokens if max_tokens is None else max_tokens,
-        "stream": True,
-    }
-    if settings.extra_body:
-        request_body.update(settings.extra_body)
+    resolved_model = (model or settings.model).strip()
+    resolved_temperature = settings.default_temperature if temperature is None else temperature
+    resolved_max_tokens = settings.default_max_tokens if max_tokens is None else max_tokens
+    use_responses = str(settings.request_format).lower() == "responses"
+    request_body = (
+        _response_api_body(model=resolved_model, messages=messages, temperature=resolved_temperature, max_tokens=resolved_max_tokens, extra_body=settings.extra_body)
+        if use_responses
+        else {
+            "model": resolved_model,
+            "messages": messages,
+            "temperature": resolved_temperature,
+            "max_tokens": resolved_max_tokens,
+            "stream": True,
+            **(settings.extra_body or {}),
+        }
+    )
+    if use_responses:
         request_body["stream"] = True
 
     headers = {"Content-Type": "application/json"}
@@ -359,12 +426,11 @@ async def create_llm_completion_stream(
     answer_parts: list[str] = []
     reasoning_parts: list[str] = []
     usage: dict[str, Any] = {}
-    resolved_model = (model or settings.model).strip()
     finish_reason = ""
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            async with client.stream("POST", settings.chat_url, headers=headers, json=request_body) as response:
+            async with client.stream("POST", settings.responses_url if use_responses else settings.chat_url, headers=headers, json=request_body) as response:
                 if response.status_code >= 400:
                     provider_error = ""
                     try:
@@ -383,6 +449,22 @@ async def create_llm_completion_stream(
                 content_type = (response.headers.get("content-type") or "").lower()
                 if not content_type.startswith("text/event-stream"):
                     payload = json.loads((await response.aread()).decode("utf-8"))
+                    if use_responses:
+                        answer = _extract_response_api_text(payload)
+                        if not answer:
+                            raise HTTPException(
+                                status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail="上游 LLM 服务未返回有效结果",
+                            )
+                        await _maybe_await(on_text_delta(answer, answer))
+                        return {
+                            "answer": answer,
+                            "reasoning": "",
+                            "model": str(payload.get("model") or resolved_model),
+                            "provider": settings.provider,
+                            "finish_reason": str(payload.get("status") or ""),
+                            "usage": payload.get("usage") if isinstance(payload, dict) else {},
+                        }
                     choices = payload.get("choices") if isinstance(payload, dict) else None
                     if not isinstance(choices, list) or not choices:
                         raise HTTPException(
@@ -428,6 +510,16 @@ async def create_llm_completion_stream(
                     if isinstance(payload.get("usage"), dict):
                         usage = dict(payload["usage"])
                     resolved_model = str(payload.get("model") or resolved_model)
+                    if use_responses:
+                        response_delta = payload.get("delta") if isinstance(payload.get("delta"), str) else ""
+                        if response_delta:
+                            answer_parts.append(response_delta)
+                            await _maybe_await(on_text_delta(response_delta, "".join(answer_parts)))
+                        resolved_model = str(payload.get("response", {}).get("model") or payload.get("model") or resolved_model) if isinstance(payload.get("response"), dict) else str(payload.get("model") or resolved_model)
+                        if isinstance(payload.get("response"), dict) and isinstance(payload["response"].get("usage"), dict):
+                            usage = dict(payload["response"]["usage"])
+                        continue
+
                     choices = payload.get("choices")
                     if not isinstance(choices, list) or not choices:
                         continue

@@ -75,21 +75,84 @@ def _read_int(name: str, *, default: int) -> int:
         return default
 
 
-def load_jev_settings() -> JEVSettings:
+def load_jev_settings(model_config: dict[str, Any] | None = None) -> JEVSettings:
+    configured = model_config if isinstance(model_config, dict) else {}
+    extra = configured.get("extra") if isinstance(configured.get("extra"), dict) else {}
     low_threshold = min(max(_read_float("JEV_LOW_THRESHOLD", default=0.35), 0.0), 1.0)
     high_threshold = min(max(_read_float("JEV_HIGH_THRESHOLD", default=0.75), 0.0), 1.0)
     if high_threshold < low_threshold:
         high_threshold = low_threshold
     return JEVSettings(
-        enabled=_read_bool("JEV_ENABLED", default=False),
-        api_url=_read_env("JEV_API_URL", "JEV_API_BASE_URL"),
-        api_key=_read_env("JEV_API_KEY"),
-        model=_read_env("JEV_MODEL", default="system-one"),
-        timeout_seconds=max(_read_float("JEV_TIMEOUT_SECONDS", default=2.0), 0.1),
-        batch_size=max(_read_int("JEV_BATCH_SIZE", default=30), 1),
+        enabled=bool(configured) or _read_bool("JEV_ENABLED", default=False),
+        api_url=str(configured.get("base_url") or _read_env("JEV_API_URL", "JEV_API_BASE_URL")),
+        api_key=str(configured.get("api_key") or _read_env("JEV_API_KEY")),
+        model=str(configured.get("model_name") or _read_env("JEV_MODEL", default="system-one")),
+        timeout_seconds=max(float(configured.get("timeout_seconds") or _read_float("JEV_TIMEOUT_SECONDS", default=2.0)), 0.1),
+        batch_size=max(int(extra.get("batch_size") or _read_int("JEV_BATCH_SIZE", default=30)), 1),
         high_threshold=high_threshold,
         low_threshold=low_threshold,
     )
+
+
+KNOWN_QUERY_ROUTES = {"semantic", "exact", "table", "graph_local", "graph_global", "multimodal"}
+
+
+def classify_query_intent(
+    question: str,
+    *,
+    settings: JEVSettings | None = None,
+) -> dict[str, Any] | None:
+    """Ask JEV for a retrieval route and return None on any provider failure."""
+    resolved_settings = settings or load_jev_settings()
+    if not resolved_settings.configured:
+        return None
+    body: dict[str, Any] = {
+        "model": resolved_settings.model,
+        "state": {"query": question, "task": "intent"},
+        "questions": [
+            {
+                "id": "intent",
+                "question": "识别用户问题属于 semantic、exact、table、graph_local、graph_global、multimodal 中哪一类，只返回类别。",
+                "candidate": {"text": question},
+            }
+        ],
+    }
+    try:
+        with httpx.Client(timeout=httpx.Timeout(resolved_settings.timeout_seconds)) as client:
+            response = client.post(
+                resolved_settings.api_url,
+                headers={"Authorization": f"Bearer {resolved_settings.api_key}", "Content-Type": "application/json"},
+                json=body,
+            )
+        if response.status_code >= 400:
+            return None
+        route = _parse_intent_route(response.json())
+        return {"route": route, "provider": "jev"} if route else None
+    except Exception:
+        return None
+
+
+def _parse_intent_route(payload: Any) -> str:
+    candidates: list[Any] = []
+    if isinstance(payload, dict):
+        for key in ("intent", "route", "label", "answer", "judgment"):
+            if key in payload:
+                candidates.append(payload[key])
+        raw_results = payload.get("results") or payload.get("questions")
+        if isinstance(raw_results, list):
+            candidates.extend(raw_results[:2])
+        elif raw_results is not None:
+            candidates.append(raw_results)
+    elif isinstance(payload, list):
+        candidates.extend(payload[:2])
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            route = _parse_intent_route(candidate)
+        else:
+            route = str(candidate or "").strip().lower().strip("`'\"")
+        if route in KNOWN_QUERY_ROUTES:
+            return route
+    return ""
 
 
 def gate_evidence_blocks(
